@@ -1046,6 +1046,7 @@
   <div class="modal" style="max-width:680px">
     <div class="modal-title" id="mEntityEditTitle">Add Entity</div>
     <input type="hidden" id="ee-id">
+    <div id="ee-inherit-note" style="display:none;font-size:.8rem;color:var(--muted);background:#f8f9fa;padding:6px 10px;border-radius:6px;margin-bottom:12px;border-left:3px solid var(--accent)"></div>
 
     <div class="form-row">
       <div class="form-group">
@@ -1652,6 +1653,79 @@
   </div>
 </div>
 
+<!-- Correct Classification Modal -->
+<div class="modal-overlay" id="mDocOverride">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">&#9998; Correct Classification</div>
+    <div style="font-size:.8rem;color:#888;margin-bottom:12px" id="mOverride-doc-title"></div>
+    <input type="hidden" id="mOverride-doc-id">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:4px">Doc Type</label>
+        <select id="mOverride-doc-type" class="form-control" style="font-size:.83rem">
+          <option value="invoice">invoice</option>
+          <option value="receipt">receipt</option>
+          <option value="capital_improvement">capital_improvement</option>
+          <option value="utility_bill">utility_bill</option>
+          <option value="bank_statement">bank_statement</option>
+          <option value="credit_card_statement">credit_card_statement</option>
+          <option value="mortgage_statement">mortgage_statement</option>
+          <option value="property_tax">property_tax</option>
+          <option value="W-2">W-2</option>
+          <option value="1099-NEC">1099-NEC</option>
+          <option value="1099-K">1099-K</option>
+          <option value="1099-INT">1099-INT</option>
+          <option value="1099-MISC">1099-MISC</option>
+          <option value="subscription">subscription</option>
+          <option value="insurance">insurance</option>
+          <option value="medical">medical</option>
+          <option value="charitable_donation">charitable_donation</option>
+          <option value="vehicle">vehicle</option>
+          <option value="equipment">equipment</option>
+          <option value="farm_expense">farm_expense</option>
+          <option value="paypal_transaction">paypal_transaction</option>
+          <option value="venmo_transaction">venmo_transaction</option>
+          <option value="other">other</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:4px">Category</label>
+        <select id="mOverride-category" class="form-control" style="font-size:.83rem">
+          <option value="expense">expense</option>
+          <option value="income">income</option>
+          <option value="deduction">deduction</option>
+          <option value="asset">asset</option>
+          <option value="other">other</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:4px">Vendor</label>
+        <input type="text" id="mOverride-vendor" class="form-control" style="font-size:.83rem" placeholder="Vendor name">
+      </div>
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:4px">Amount</label>
+        <input type="number" step="0.01" id="mOverride-amount" class="form-control" style="font-size:.83rem" placeholder="0.00">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:4px">Date</label>
+        <input type="date" id="mOverride-date" class="form-control" style="font-size:.83rem">
+      </div>
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:4px">Tax Year</label>
+        <input type="text" id="mOverride-year" class="form-control" style="font-size:.83rem" placeholder="2021">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeM('mDocOverride')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDocOverride()">Save Correction</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const P = '{{ url_prefix }}';
 let curSess = null;
@@ -2084,6 +2158,41 @@ async function backfillTitles() {
 
 async function recat(id) { toast('Re-analyzing…'); await post('/api/documents/'+id+'/recategorize',{}); }
 
+function openDocOverride(docJson) {
+  let doc;
+  try { doc = typeof docJson === 'string' ? JSON.parse(docJson) : docJson; } catch(e) { toast('Error parsing doc','error'); return; }
+  const id = doc.paperless_doc_id || doc.doc_id;
+  document.getElementById('mOverride-doc-id').value = id;
+  document.getElementById('mOverride-doc-title').textContent = doc.title || 'Document ' + id;
+  document.getElementById('mOverride-doc-type').value = doc.doc_type || 'other';
+  document.getElementById('mOverride-category').value = doc.category || 'other';
+  document.getElementById('mOverride-vendor').value = doc.vendor || '';
+  document.getElementById('mOverride-amount').value = doc.amount || '';
+  document.getElementById('mOverride-date').value = doc.date || '';
+  document.getElementById('mOverride-year').value = doc.tax_year || '';
+  openM('mDocOverride');
+}
+
+async function saveDocOverride() {
+  const id = document.getElementById('mOverride-doc-id').value;
+  const amtRaw = document.getElementById('mOverride-amount').value;
+  const payload = {
+    doc_type: document.getElementById('mOverride-doc-type').value,
+    category: document.getElementById('mOverride-category').value,
+    vendor: document.getElementById('mOverride-vendor').value,
+    amount: amtRaw !== '' ? parseFloat(amtRaw) : null,
+    date: document.getElementById('mOverride-date').value || null,
+    tax_year: document.getElementById('mOverride-year').value || null,
+  };
+  // Remove null fields except amount (allow null amount to clear it)
+  Object.keys(payload).forEach(k => { if (payload[k] === null && k !== 'amount') delete payload[k]; });
+  const r = await post('/api/documents/' + id + '/override', payload);
+  if (!r || r.error) { toast((r && r.error) || 'Save failed', 'error'); return; }
+  closeM('mDocOverride');
+  toast('Classification corrected');
+  setTimeout(() => { loadDocs && loadDocs(); loadSummary && loadSummary(); }, 500);
+}
+
 /* File Browser */
 async function loadFb() {
   const tree = document.getElementById('doc-fb-tree');
@@ -2133,13 +2242,17 @@ function fbBuildHtml(docs) {
           const previewUrl = PAPERLESS_WEB_URL + '/documents/' + docId + '/preview/';
           const amt = doc.amount ? '$'+fmt(doc.amount) : '';
           const amtClass = doc.category==='income' ? 'pos' : (doc.amount ? 'neg' : '');
-          return `<a class="fb-doc-row" href="${previewUrl}" target="_blank">
-            <span class="fb-doc-icon">&#128196;</span>
-            <span class="fb-doc-title" title="${esc(doc.title||'')}">${esc(doc.title||'Untitled')}</span>
-            <span class="fb-doc-vendor">${esc(doc.vendor||'')}</span>
-            <span class="fb-doc-amt ${amtClass}">${amt}</span>
-            <span class="fb-doc-link">Open &#8599;</span>
-          </a>`;
+          const docJson = JSON.stringify(doc).replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$');
+          return `<div class="fb-doc-row" style="display:flex;align-items:center;">
+            <a style="flex:1;display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;overflow:hidden;" href="${previewUrl}" target="_blank">
+              <span class="fb-doc-icon">&#128196;</span>
+              <span class="fb-doc-title" title="${esc(doc.title||'')}">${esc(doc.title||'Untitled')}</span>
+              <span class="fb-doc-vendor">${esc(doc.vendor||'')}</span>
+              <span class="fb-doc-amt ${amtClass}">${amt}</span>
+              <span class="fb-doc-link">Open &#8599;</span>
+            </a>
+            <button class="btn" onclick="event.stopPropagation();openDocOverride(\`${docJson}\`)" title="Correct classification" style="font-size:.7rem;padding:2px 6px;margin-left:4px;flex-shrink:0;color:#888;border:1px solid #ddd;background:none;">&#9998;</button>
+          </div>`;
         }).join('');
         return `<div class="fb-type-block">
           <div class="fb-type-hdr" onclick="fbToggle('${tid}')">
@@ -3610,10 +3723,23 @@ function openEditEntity(id) {
   document.getElementById('ee-desc').value=e.description||'';
   // Populate parent select
   _populateParentSelect(e.parent_entity_id, e.id);
-  // Metadata fields
+  // Metadata: merge parent's metadata as fallback placeholders
+  var parentMd = {};
+  if (e.parent_entity_id) {
+    var parent = flat.find(x=>x.id==e.parent_entity_id);
+    if (parent) { try { parentMd = JSON.parse(parent.metadata_json||'{}'); } catch(_){} }
+  }
   try {
     var md = JSON.parse(e.metadata_json||'{}');
-    var setVal = (id,k)=>{ var el=document.getElementById(id); if(el) el.value=md[k]||''; };
+    // setVal: use own value; if blank, show inherited value as placeholder
+    var setVal = (elId, k) => {
+      var el = document.getElementById(elId);
+      if (!el) return;
+      el.value = md[k] || '';
+      var inherited = parentMd[k] || '';
+      el.placeholder = inherited ? ('Inherited: '+inherited) : (el.dataset.defaultPlaceholder||'');
+      if (!el.dataset.defaultPlaceholder) el.dataset.defaultPlaceholder = el.placeholder;
+    };
     setVal('ee-ssn','ssn'); setVal('ee-dob','dob'); setVal('ee-addr','address');
     setVal('ee-state-tax-id','state_tax_id'); setVal('ee-filing-state','filing_state');
     setVal('ee-ein','ein'); setVal('ee-employer-id','employer_id');
@@ -3625,6 +3751,15 @@ function openEditEntity(id) {
     setVal('ee-email','email'); setVal('ee-website','website');
     document.getElementById('ee-tax-id')?document.getElementById('ee-tax-id').value=e.tax_id||'':null;
   } catch(_){}
+  // Show inherited-from-parent note
+  var noteEl = document.getElementById('ee-inherit-note');
+  if (noteEl) {
+    if (e.parent_entity_id) {
+      var pname = flat.find(x=>x.id==e.parent_entity_id);
+      noteEl.textContent = pname ? ('Fields shown as "Inherited: ..." come from parent: '+( pname.display_name||pname.name)) : '';
+      noteEl.style.display = '';
+    } else { noteEl.style.display = 'none'; }
+  }
   updateEntityTypeFields();
   document.getElementById('mEntityEdit').classList.add('open');
 }
@@ -3686,9 +3821,9 @@ async function saveEntity() {
     metadata,
   };
 
-  var url = id ? P+'/api/entities/'+id : P+'/api/entities';
+  var url = id ? '/api/entities/'+id : '/api/entities';
   var r = await post(url, payload);
-  if (r.error) { toast(r.error,'error'); return; }
+  if (!r || r.error) { toast((r&&r.error)||'Save failed','error'); return; }
   toast(id?'Entity saved':'Entity created');
   document.getElementById('mEntityEdit').classList.remove('open');
   loadEntityTree();
@@ -3698,8 +3833,8 @@ async function saveEntity() {
 
 async function archiveEntity(id, name) {
   if (!confirm(`Archive entity "${name}"? It will be hidden from all dropdowns but records are preserved.`)) return;
-  var r = await post(P+'/api/entities/'+id+'/archive', {});
-  if (r.error) { toast(r.error,'error'); return; }
+  var r = await post('/api/entities/'+id+'/archive', {});
+  if (!r || r.error) { toast((r&&r.error)||'Failed','error'); return; }
   toast('Entity archived');
   loadEntityTree();
 }
@@ -3721,8 +3856,8 @@ async function doMergeEntity() {
   var src = document.getElementById('merge-source').value;
   var tgt = document.getElementById('merge-target').value;
   if (src==tgt) { toast('Source and target must be different','error'); return; }
-  var r = await post(P+'/api/entities/'+src+'/merge', {target_entity_id:parseInt(tgt)});
-  if (r.error) { toast(r.error,'error'); return; }
+  var r = await post('/api/entities/'+src+'/merge', {target_entity_id:parseInt(tgt)});
+  if (!r || r.error) { toast((r&&r.error)||'Merge failed','error'); return; }
   toast('Entities merged successfully');
   document.getElementById('mEntityMerge').classList.remove('open');
   loadEntityTree();
@@ -3766,8 +3901,8 @@ async function saveProfile() {
     notify_email: document.getElementById('prof-notify-email').checked,
     notify_import_complete: document.getElementById('prof-notify-import').checked,
   };
-  var r = await post(P+'/api/user/profile', body);
-  if (r.error) { toast(r.error,'error'); return; }
+  var r = await post('/api/user/profile', body);
+  if (!r || r.error) { toast((r&&r.error)||'Save failed','error'); return; }
   toast('Profile saved');
   document.getElementById('mUserProfile').classList.remove('open');
 }

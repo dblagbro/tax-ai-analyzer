@@ -36,6 +36,59 @@ def get_analysis_status() -> dict:
     return _analysis_status.copy()
 
 
+def _apply_business_rules(result: dict, content: str, title: str) -> dict:
+    """Deterministic post-processing applied after AI classification.
+
+    This is the only place where content, title, AND the AI result are all
+    available simultaneously. Rules here are non-negotiable overrides that
+    fix systematic AI misclassification patterns.
+    """
+    combined = ((title or "") + " " + (content or "")[:1000]).lower()
+
+    # Rule 1: Proposals / quotes / bids / estimates are NOT expenses.
+    # They describe work to be done, not work invoiced or paid.
+    proposal_signals = [
+        "proposal", "we are pleased to submit", "scope of work",
+        "work to be performed", "price quote", "cost estimate",
+        "request for proposal", " bid ", "quotation",
+    ]
+    if any(sig in combined for sig in proposal_signals):
+        if result.get("doc_type") in ("invoice", "receipt", "other"):
+            result["doc_type"] = "other"
+            result["category"] = "other"
+            result["amount"] = None
+            tags = result.setdefault("tags", [])
+            if "proposal" not in tags:
+                tags.append("proposal")
+        return result  # no further rules needed for proposals
+
+    # Rule 2: Capital improvements must be capitalized, not expensed (IRS §263).
+    capital_signals = [
+        "abatement", "asbestos", "demolition", "remediation", "renovation",
+        "remodel", "construction", "build-out", "buildout", "structural",
+        "foundation", "roofing", "hvac replacement", "lead removal",
+        "mold removal", "elevator", "major repair",
+    ]
+    amount = result.get("amount") or 0
+    if result.get("doc_type") in ("invoice", "receipt", "capital_improvement") and (
+        any(sig in combined for sig in capital_signals) or amount > 2500
+        and any(sig in combined for sig in capital_signals)
+    ):
+        result["doc_type"] = "capital_improvement"
+        result["category"] = "asset"
+        tags = result.setdefault("tags", [])
+        if "capital_improvement" not in tags:
+            tags.append("capital_improvement")
+
+    # Rule 3: Statements are never income or expense — they show balances.
+    if result.get("doc_type") in (
+        "bank_statement", "credit_card_statement", "mortgage_statement"
+    ) and result.get("category") in ("income", "expense"):
+        result["category"] = "other"
+
+    return result
+
+
 def analysis_daemon():
     """Background thread: continuously analyze new Paperless documents."""
     from app import db, config
@@ -100,6 +153,7 @@ def analysis_daemon():
 
                     _log(f"Analyzing doc {doc_id}: {title[:50]}")
                     result = llm.analyze_document(content, title, entity_hint, year_hint)
+                    result = _apply_business_rules(result, content, title)
 
                     # Look up entity ID
                     entity = db.get_entity(slug=result.get("entity", entity_hint))

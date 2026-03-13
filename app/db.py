@@ -640,7 +640,16 @@ def get_analyzed_documents(
 
 
 def get_financial_summary(entity_id: int = None, tax_year: str = None) -> dict:
-    """Return income/expense/deduction totals."""
+    """Return income/expense/deduction totals.
+
+    Dedup logic applied to avoid inflated totals from email imports:
+    1. Exclude statement doc_types (credit_card_statement, bank_statement,
+       mortgage_statement) — their amounts represent balances/totals, not
+       individual transactions; the actual charges are captured as receipts.
+    2. Deduplicate by (vendor, amount, year-month) so that multiple email
+       notifications about the same payment (scheduled/confirmed/reminder)
+       only count once per calendar month.
+    """
     conn = get_connection()
     try:
         where, params = [], []
@@ -650,11 +659,27 @@ def get_financial_summary(entity_id: int = None, tax_year: str = None) -> dict:
         if tax_year:
             where.append("tax_year=?")
             params.append(tax_year)
+        # Exclude statement types — they show balances, not individual transactions
+        where.append(
+            "doc_type NOT IN ('credit_card_statement','bank_statement','mortgage_statement')"
+        )
         w = f"WHERE {' AND '.join(where)}" if where else ""
         rows = conn.execute(
             f"""
             SELECT category, COUNT(*) as count, COALESCE(SUM(amount),0) as total
-            FROM analyzed_documents {w}
+            FROM (
+                -- Deduplicate: same vendor+amount within the same calendar month
+                -- counts as one transaction (handles payment scheduled/confirmed/reminder)
+                SELECT category,
+                       MAX(amount) as amount
+                FROM analyzed_documents {w}
+                  AND amount IS NOT NULL AND amount > 0
+                GROUP BY
+                    COALESCE(vendor,''),
+                    amount,
+                    strftime('%Y-%m', COALESCE(date,'2000-01')),
+                    category
+            ) deduped
             GROUP BY category
             """,
             params,

@@ -68,6 +68,18 @@ with app.app_context():
     try:
         db.init_db()
         db.ensure_default_data()
+        # Clean up any jobs that were "running" when the container last stopped.
+        # These will never complete — mark them as interrupted so the UI is accurate.
+        _stuck = db.get_connection()
+        try:
+            _stuck.execute(
+                "UPDATE import_jobs SET status='interrupted', completed_at=? "
+                "WHERE status='running'",
+                (datetime.utcnow().isoformat(),)
+            )
+            _stuck.commit()
+        finally:
+            _stuck.close()
     except Exception as _boot_err:
         logger.warning(f"DB bootstrap deferred: {_boot_err}")
 
@@ -344,7 +356,11 @@ def api_entities_create():
 @login_required
 @admin_required
 def api_entities_update(entity_id):
+    import json as _json
     data = request.get_json() or {}
+    # Convert nested metadata dict → metadata_json string
+    if "metadata" in data:
+        data["metadata_json"] = _json.dumps(data.pop("metadata"))
     db.update_entity(entity_id, **data)
     row = db.get_entity(entity_id=entity_id)
     db.log_activity("entity_updated", f"ID: {entity_id}", user_id=current_user.id)
@@ -686,6 +702,42 @@ def api_document_recategorize(doc_id):
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"status": "recategorizing", "doc_id": doc_id})
+
+
+@app.route(URL_PREFIX + "/api/documents/<int:doc_id>/override", methods=["POST"])
+@login_required
+def api_document_override(doc_id):
+    """Manual classification override — directly corrects stored fields without re-running AI.
+    Accepts: doc_type, category, vendor, amount, date, tax_year, title.
+    Sets confidence=1.0 to mark as human-verified so the AI daemon won't overwrite it.
+    """
+    from app.llm_client import VALID_DOC_TYPES, VALID_CATEGORIES
+    data = request.get_json() or {}
+    allowed = {"doc_type", "category", "vendor", "amount", "date", "tax_year", "title"}
+    if "doc_type" in data and data["doc_type"] not in VALID_DOC_TYPES:
+        return jsonify({"error": f"Invalid doc_type: {data['doc_type']}"}), 400
+    if "category" in data and data["category"] not in VALID_CATEGORIES:
+        return jsonify({"error": f"Invalid category: {data['category']}"}), 400
+    fields = {k: v for k, v in data.items() if k in allowed}
+    if not fields:
+        return jsonify({"error": "No valid fields provided"}), 400
+    conn = db.get_connection()
+    try:
+        sets = [f"{k}=?" for k in fields] + ["confidence=1.0"]
+        params = list(fields.values()) + [doc_id]
+        conn.execute(
+            f"UPDATE analyzed_documents SET {', '.join(sets)} WHERE paperless_doc_id=?",
+            params,
+        )
+        conn.commit()
+        db.log_activity("doc_override",
+                        f"Doc {doc_id} manually overridden: {fields}",
+                        user_id=current_user.id)
+        return jsonify({"status": "ok", "doc_id": doc_id, "updated": fields})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1458,7 +1510,9 @@ def api_import_local_run():
     job_id = db.create_import_job("local_fs", entity_id=entity_id,
                                   config_json=json.dumps({"path": path, "year": year}))
 
-    def _run(jid, fpath, eid, yr, cpath):
+    entities_list = [dict(e) for e in db.list_entities()]
+
+    def _run(jid, fpath, eid, yr, cpath, ents):
         def log(msg):
             _append_job_log(jid, msg)
         db.update_import_job(jid, status="running",
@@ -1471,11 +1525,13 @@ def api_import_local_run():
             log(f"Found {len(all_files)} files ({sum(1 for f in all_files if f['ext']=='.pdf')} PDFs, "
                 f"{sum(1 for f in all_files if f['ext']=='.csv')} CSVs, "
                 f"{sum(1 for f in all_files if f['ext'] in {'.ofx','.qfx','.qbo'})} OFX)")
+            log(f"Per-file entity detection enabled ({len(ents)} entities)")
             import os
             if not cpath or not os.path.isdir(cpath):
                 log(f"ERROR: consume path not accessible: {cpath}")
             result = import_directory(fpath, entity_id=eid, default_year=yr,
-                                       consume_path=cpath, recursive=True)
+                                       consume_path=cpath, recursive=True,
+                                       entities=ents)
             total_txns = 0
             for t in result.get("transactions", []):
                 try:
@@ -1485,12 +1541,16 @@ def api_import_local_run():
                     pass
             pdfs = result.get("pdfs_queued", 0)
             errors = result.get("errors", [])
+            entity_counts = result.get("entity_counts", {})
+            if entity_counts:
+                log(f"Entity breakdown: " + ", ".join(
+                    f"{slug}: {cnt}" for slug, cnt in sorted(entity_counts.items())))
             for err in errors[:20]:  # log up to 20 errors
                 log(f"  ERROR: {err}")
             if len(errors) > 20:
                 log(f"  ... and {len(errors)-20} more errors")
             log(f"Done: {pdfs} PDFs queued to Paperless, {total_txns} transactions imported"
-                + (f" | {len(errors)} copy errors" if errors else ""))
+                + (f" | {len(errors)} errors" if errors else ""))
             db.update_import_job(jid, status="completed",
                                  count_imported=total_txns + pdfs,
                                  completed_at=datetime.utcnow().isoformat())
@@ -1502,7 +1562,7 @@ def api_import_local_run():
                                  completed_at=datetime.utcnow().isoformat())
             logger.error(f"Local FS import error: {e}")
 
-    threading.Thread(target=_run, args=(job_id, path, entity_id, year, consume_path),
+    threading.Thread(target=_run, args=(job_id, path, entity_id, year, consume_path, entities_list),
                      daemon=True).start()
     return jsonify({"status": "started", "job_id": job_id})
 
@@ -2310,6 +2370,8 @@ def api_analyze_trigger():
                         **{k: v for k, v in ext.items()
                            if v is not None and k not in cat},
                     }
+                    from app.main import _apply_business_rules
+                    result = _apply_business_rules(result, content, title)
                     entity_tag = cat.get("entity") or "personal"
                     year_tag = str(cat.get("tax_year") or "unknown")
                     tags = [t for t in cat.get("tags", []) if t] + [

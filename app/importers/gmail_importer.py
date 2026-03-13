@@ -420,10 +420,41 @@ def _ai_review_email(subject: str, sender: str, body_snippet: str,
 
 
 def upsert_transaction(txn: dict) -> dict:
-    """Insert transaction, skipping if source_id already exists (uses indexed DB lookup)."""
+    """Insert transaction, skipping if source_id already exists OR if a
+    near-duplicate (same vendor + amount within 7 days) is already present.
+    This prevents multiple payment-notification emails about the same payment
+    from each creating a separate transaction record.
+    """
     from app import db
+    from email.utils import parsedate_to_datetime
+
+    vendor = txn.get("vendor", "")
+    amount = txn.get("amount")
+    date_str = txn.get("date", "")
+
+    # Near-duplicate check: same vendor + amount within 7 days
+    if vendor and amount is not None:
+        try:
+            new_dt = parsedate_to_datetime(date_str)
+            conn = db.get_connection()
+            try:
+                existing = conn.execute(
+                    "SELECT id, date FROM transactions WHERE source='gmail' AND vendor=? AND amount=?",
+                    (vendor, float(amount)),
+                ).fetchall()
+                for row in existing:
+                    try:
+                        existing_dt = parsedate_to_datetime(row["date"])
+                        if abs((new_dt - existing_dt).days) <= 7:
+                            return {"id": row["id"], "skipped": "near_duplicate"}
+                    except Exception:
+                        pass
+            finally:
+                conn.close()
+        except Exception:
+            pass  # date parse failed — fall through to normal insert
+
     try:
-        # Use the indexed upsert_transaction in db.py if available
         txn_id = db.upsert_transaction(
             source=txn.get("source", "gmail"),
             source_id=txn.get("source_id", ""),
@@ -549,7 +580,8 @@ def _process_month(
 
             # ── PDF attachments ───────────────────────────────────────────────
             for fname, data_or_id in get_pdf_attachments(payload):
-                if isinstance(data_or_id, str) and len(data_or_id) < 100:
+                # get_pdf_attachments returns bytes for inline data, str for attachment IDs
+                if isinstance(data_or_id, str):
                     try:
                         att = service.users().messages().attachments().get(
                             userId="me", messageId=msg_id, id=data_or_id
@@ -559,7 +591,9 @@ def _process_month(
                         log(f"    [attachment fetch error: {e}]")
                         continue
                 else:
-                    raw = data_or_id
+                    raw = data_or_id  # already bytes
+                if not isinstance(raw, bytes):
+                    raw = raw.encode("latin-1") if isinstance(raw, str) else bytes(raw)
                 pdf_files.append((_safe_filename(date_str, ai_desc, ai_vendor, ai_amount), raw))
 
             # ── Body → PDF ────────────────────────────────────────────────────

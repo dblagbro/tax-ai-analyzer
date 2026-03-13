@@ -20,7 +20,7 @@ VALID_DOC_TYPES = {
     "invoice", "receipt", "utility_bill", "bank_statement", "mortgage_statement",
     "property_tax", "vehicle", "equipment", "subscription", "charitable_donation",
     "medical", "farm_expense", "paypal_transaction", "venmo_transaction",
-    "credit_card_statement", "insurance", "other",
+    "credit_card_statement", "insurance", "capital_improvement", "other",
 }
 
 VALID_CATEGORIES = {"income", "expense", "deduction", "asset", "other"}
@@ -72,7 +72,8 @@ The response must be a single JSON object matching this schema exactly:
 Valid doc_type values: W-2, 1099-NEC, 1099-K, 1099-INT, 1099-DIV, 1099-MISC,
 invoice, receipt, utility_bill, bank_statement, mortgage_statement, property_tax,
 vehicle, equipment, subscription, charitable_donation, medical, farm_expense,
-paypal_transaction, venmo_transaction, credit_card_statement, insurance, other
+paypal_transaction, venmo_transaction, credit_card_statement, insurance,
+capital_improvement, other
 
 Entity assignment rules:
 - personal: personal income/expenses, W-2 wages, personal medical, personal mortgage
@@ -81,6 +82,32 @@ Entity assignment rules:
 
 If entity cannot be determined from context, use the provided entity_hint.
 Set confidence based on how certain you are (1.0 = tax form with clear data, 0.5 = ambiguous).
+
+CRITICAL CLASSIFICATION RULES — apply before returning:
+
+1. PROPOSALS / QUOTES / ESTIMATES / BIDS: If the document is a proposal, bid,
+   estimate, scope-of-work document, or quote — meaning it describes work
+   proposed or priced but NOT yet invoiced or paid — set doc_type="other",
+   category="other", amount=null. Signals: "proposal", "quote", "estimate",
+   "bid", "scope of work", "we are pleased to submit", "work to be performed",
+   addressed to a third party not the account owner.
+
+2. CAPITAL IMPROVEMENTS (IRS §263 — not immediately deductible): Construction,
+   renovation, remodeling, demolition, asbestos/lead/mold abatement, structural
+   work, roofing, HVAC replacement, major electrical/plumbing, and any single
+   project > $2,500 must use doc_type="capital_improvement", category="asset".
+   These are NOT current-year expenses.
+
+3. BANK / CREDIT CARD / MORTGAGE STATEMENTS: Use category="other" (never
+   "expense" or "income"). The statement balance or total-due is NOT an expense;
+   individual charges captured elsewhere are. Extract minimum payment due as
+   amount if available, otherwise null.
+
+4. INVOICES for ordinary services (repairs < $2,500, professional fees, software,
+   utilities, supplies): doc_type="invoice" or appropriate type, category="expense".
+
+5. AMOUNT = actual charged/billed/paid amount only. Do NOT extract account
+   balances, remaining loan principal, or proposal totals as the amount.
 """
 
 _EXTRACTION_SYSTEM = """You are a financial data extraction AI.
