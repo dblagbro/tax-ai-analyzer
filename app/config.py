@@ -44,6 +44,7 @@ GMAIL_SEARCH_TERMS = os.environ.get(
     "GMAIL_SEARCH_TERMS",
     "receipt invoice statement payment billing 1099 W-2 tax order",
 ).split()
+ACCOUNTANT_EMAIL_DOMAIN = os.environ.get("ACCOUNTANT_EMAIL_DOMAIN", "iactaxes.com")
 
 # ── Default entities ──────────────────────────────────────────────────────────
 # Root entity first — DBAs reference it by slug via parent_slug key (resolved at boot)
@@ -84,7 +85,7 @@ DEFAULT_ENTITIES = [
         "sort_order": 30,
     },
 ]
-DEFAULT_TAX_YEARS = ["2021", "2022", "2023", "2024", "2025"]
+DEFAULT_TAX_YEARS = [str(y) for y in range(2015, 2027)]
 
 # ── Polling ───────────────────────────────────────────────────────────────────
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))

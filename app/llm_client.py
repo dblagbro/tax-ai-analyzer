@@ -450,6 +450,44 @@ class LLMClient:
             logger.error(f"analyze_document failed for doc {doc_id}: {e}")
             return _empty_analysis(error=str(e))
 
+    def stream_text(self, prompt: str):
+        """Stream a text response from the LLM, yielding text chunks."""
+        cfg = self._resolve_config()
+        provider = cfg["provider"].lower()
+        api_key = cfg["api_key"]
+        model = cfg["model"]
+        messages = [{"role": "user", "content": prompt}]
+        if provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            with client.messages.stream(
+                model=model,
+                max_tokens=4096,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    yield text
+        elif provider == "openai":
+            import openai
+            client = openai.OpenAI(api_key=cfg.get("openai_key") or api_key)
+            response = client.chat.completions.create(
+                model=cfg.get("openai_model") or model,
+                messages=messages,
+                stream=True,
+                max_tokens=4096,
+            )
+            for chunk in response:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    yield delta
+        else:
+            # Fallback: single response
+            try:
+                result = self.chat(messages)
+                yield result if isinstance(result, str) else str(result)
+            except Exception as e:
+                yield f"(streaming not available: {e})"
+
     def extract_financial_data(
         self,
         content: str,

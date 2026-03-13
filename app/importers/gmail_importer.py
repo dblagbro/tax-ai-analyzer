@@ -718,7 +718,13 @@ def run_import(
     settings = db.get_settings()
     default_terms = " ".join(_cfg.GMAIL_SEARCH_TERMS)
     raw_terms = settings.get("gmail_search_terms", default_terms)
-    search_terms = raw_terms.split() if raw_terms else _cfg.GMAIL_SEARCH_TERMS
+    search_terms = raw_terms.split() if raw_terms else list(_cfg.GMAIL_SEARCH_TERMS)
+    # Always include accountant email domain if configured
+    acct_domain = getattr(_cfg, "ACCOUNTANT_EMAIL_DOMAIN", "")
+    if acct_domain:
+        acct_term = f"from:{acct_domain}"
+        if acct_term not in search_terms:
+            search_terms.append(acct_term)
     log(f"Search terms ({len(search_terms)}): {' | '.join(search_terms[:8])}{'…' if len(search_terms)>8 else ''}")
 
     # Show existing dedup stats

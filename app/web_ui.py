@@ -262,6 +262,203 @@ def docs_page():
 # API — Stats / Activity
 # ---------------------------------------------------------------------------
 
+@app.route(URL_PREFIX + "/api/stats/years")
+@login_required
+def api_years_with_docs():
+    """Return years that have analyzed documents, with counts."""
+    rows = db.get_years_with_docs()
+    # Also include any years from filed returns
+    conn = db.get_connection()
+    try:
+        filed_years = [r[0] for r in conn.execute(
+            "SELECT DISTINCT tax_year FROM filed_tax_returns ORDER BY tax_year DESC"
+        ).fetchall()]
+    finally:
+        conn.close()
+    all_years = sorted(
+        set([r["tax_year"] for r in rows] + filed_years),
+        reverse=True
+    )
+    year_map = {r["tax_year"]: r for r in rows}
+    return jsonify({
+        "years": [
+            {
+                "year": y,
+                "doc_count": year_map[y]["doc_count"] if y in year_map else 0,
+                "has_filed_return": y in filed_years,
+            }
+            for y in all_years
+        ]
+    })
+
+
+@app.route(URL_PREFIX + "/api/filed-returns", methods=["GET"])
+@login_required
+def api_list_filed_returns():
+    entity_id = request.args.get("entity_id", type=int)
+    returns = db.list_filed_returns(entity_id=entity_id)
+    return jsonify({"returns": returns})
+
+
+@app.route(URL_PREFIX + "/api/filed-returns", methods=["POST"])
+@login_required
+def api_upsert_filed_return():
+    data = request.get_json(force=True) or {}
+    entity_id = data.get("entity_id")
+    tax_year = data.get("tax_year")
+    if not entity_id or not tax_year:
+        return jsonify({"error": "entity_id and tax_year required"}), 400
+    result = db.upsert_filed_return(int(entity_id), str(tax_year), **{
+        k: data.get(k) for k in [
+            "filing_status", "agi", "wages_income", "business_income", "other_income",
+            "total_income", "total_deductions", "taxable_income", "total_tax",
+            "refund_amount", "amount_owed", "preparer_name", "preparer_firm",
+            "filed_date", "notes"
+        ] if k in data
+    })
+    return jsonify({"status": "ok", "return": result})
+
+
+@app.route(URL_PREFIX + "/api/tax-review")
+@login_required
+def api_tax_review():
+    """Stream AI-generated tax review questions for a year."""
+    import json as _json
+    year = request.args.get("year")
+    entity_id = request.args.get("entity_id", type=int)
+
+    # Gather all documents for the year
+    docs = _row_list(db.get_analyzed_documents(entity_id=entity_id, tax_year=year, limit=500))
+    filed = db.list_filed_returns(entity_id=entity_id)
+    filed_this_year = next((r for r in filed if r["tax_year"] == year), None)
+
+    # Build summary for AI
+    summary_lines = [f"Tax Year: {year}"]
+    if entity_id:
+        conn = db.get_connection()
+        try:
+            ent = conn.execute("SELECT name FROM entities WHERE id=?", (entity_id,)).fetchone()
+            if ent:
+                summary_lines.append(f"Entity: {ent['name']}")
+        finally:
+            conn.close()
+
+    summary_lines.append(f"Total documents analyzed: {len(docs)}")
+
+    income_docs = [d for d in docs if d.get("category") == "income"]
+    expense_docs = [d for d in docs if d.get("category") == "expense"]
+    deduction_docs = [d for d in docs if d.get("category") == "deduction"]
+    asset_docs = [d for d in docs if d.get("category") == "asset"]
+    low_conf_docs = [d for d in docs if (d.get("confidence") or 1.0) < 0.6]
+    capital_docs = [d for d in docs if d.get("doc_type") == "capital_improvement"]
+
+    total_income = sum(d.get("amount") or 0 for d in income_docs)
+    total_expense = sum(d.get("amount") or 0 for d in expense_docs)
+    total_deductions = sum(d.get("amount") or 0 for d in deduction_docs)
+
+    summary_lines += [
+        f"\nINCOME ({len(income_docs)} docs, ${total_income:,.2f} total):",
+    ]
+    for d in sorted(income_docs, key=lambda x: -(x.get("amount") or 0))[:15]:
+        summary_lines.append(f"  - [{d.get('doc_type')}] {d.get('vendor','')} ${d.get('amount') or 0:,.2f} ({d.get('date','?')})")
+
+    summary_lines += [f"\nEXPENSES ({len(expense_docs)} docs, ${total_expense:,.2f} total):"]
+    for d in sorted(expense_docs, key=lambda x: -(x.get("amount") or 0))[:20]:
+        summary_lines.append(f"  - [{d.get('doc_type')}] {d.get('vendor','')} ${d.get('amount') or 0:,.2f} ({d.get('date','?')}) doc#{d.get('paperless_doc_id')}")
+
+    if deduction_docs:
+        summary_lines.append(f"\nDEDUCTIONS ({len(deduction_docs)} docs, ${total_deductions:,.2f}):")
+        for d in deduction_docs[:10]:
+            summary_lines.append(f"  - [{d.get('doc_type')}] {d.get('vendor','')} ${d.get('amount') or 0:,.2f}")
+
+    if capital_docs:
+        summary_lines.append(f"\nCAPITAL IMPROVEMENTS ({len(capital_docs)} items):")
+        for d in capital_docs:
+            summary_lines.append(f"  - {d.get('vendor','')} ${d.get('amount') or 0:,.2f} ({d.get('date','?')}) — needs depreciation schedule")
+
+    if low_conf_docs:
+        summary_lines.append(f"\nLOW CONFIDENCE ITEMS ({len(low_conf_docs)} docs with <60% confidence):")
+        for d in low_conf_docs[:10]:
+            summary_lines.append(f"  - doc#{d.get('paperless_doc_id')} [{d.get('doc_type')}] {d.get('vendor','')} ${d.get('amount') or 0:,.2f} (conf:{int((d.get('confidence') or 0)*100)}%)")
+
+    if filed_this_year:
+        summary_lines.append(f"\nFILED RETURN DATA for {year}:")
+        summary_lines.append(f"  AGI: ${filed_this_year.get('agi') or '?':,}")
+        summary_lines.append(f"  Total income: ${filed_this_year.get('total_income') or '?':,}")
+        summary_lines.append(f"  Total deductions: ${filed_this_year.get('total_deductions') or '?':,}")
+        summary_lines.append(f"  Tax owed: ${filed_this_year.get('total_tax') or '?':,}")
+        refund = filed_this_year.get("refund_amount")
+        owed = filed_this_year.get("amount_owed")
+        if refund:
+            summary_lines.append(f"  Refund: ${refund:,}")
+        if owed:
+            summary_lines.append(f"  Amount owed: ${owed:,}")
+    else:
+        summary_lines.append(f"\nNO FILED RETURN DATA for {year} — not yet entered or not filed.")
+
+    doc_summary = "\n".join(summary_lines)
+
+    prompt = f"""You are an expert US tax accountant reviewing financial documents for a client's tax year {year}.
+
+Here is a summary of all documents analyzed for this year:
+
+{doc_summary}
+
+Please act as the client's tax accountant and:
+1. Identify items that need clarification or additional documentation
+2. Flag potential issues, missing documents, or inconsistencies
+3. Note any capital improvements that need depreciation schedules
+4. Ask specific questions about unclear items
+5. Compare analyzed amounts to filed return amounts if available and flag discrepancies
+6. Note any income sources that might be missing (e.g., if W-2 shows wages but no 1099s found)
+7. Flag any deductions that seem high or unusual
+8. Note which expenses may be deductible vs. non-deductible
+
+Format your response as a structured report with numbered questions and flagged items.
+Use markdown formatting. Be specific — reference vendor names, amounts, and document IDs where relevant.
+Focus on what the client needs to gather or clarify before filing (or for amended returns)."""
+
+    from app.llm_client import LLMClient
+    from app import config as _cfg
+
+    llm_provider = db.get_setting("llm_provider") or _cfg.LLM_PROVIDER
+    llm_api_key = db.get_setting("llm_api_key") or _cfg.LLM_API_KEY
+    llm_model = db.get_setting("llm_model") or _cfg.LLM_MODEL
+
+    def generate():
+        try:
+            client = LLMClient(provider=llm_provider, api_key=llm_api_key, model=llm_model)
+            # Use streaming if available, otherwise regular
+            for chunk in client.stream_text(prompt):
+                yield f"data: {_json.dumps({'chunk': chunk})}\n\n"
+        except AttributeError:
+            # Fallback: non-streaming
+            try:
+                result = client.chat([{"role": "user", "content": prompt}])
+                text = result if isinstance(result, str) else str(result)
+                yield f"data: {_json.dumps({'chunk': text})}\n\n"
+            except Exception as e:
+                yield f"data: {_json.dumps({'error': str(e)})}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'error': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@app.route(URL_PREFIX + "/tax-review")
+@login_required
+def tax_review_page():
+    return render_template("dashboard.html", active_tab="tax_review")
+
+
 @app.route(URL_PREFIX + "/api/stats")
 @login_required
 def api_stats():
@@ -1336,6 +1533,57 @@ def api_usalliance_status():
     })
 
 
+@app.route(URL_PREFIX + "/api/import/usalliance/test", methods=["POST"])
+@login_required
+def api_usalliance_test():
+    """Test US Alliance credentials by attempting a login (no download)."""
+    username = db.get_setting("usalliance_username")
+    password = db.get_setting("usalliance_password")
+    if not username or not password:
+        return jsonify({"error": "Credentials not saved — enter username and password first"}), 400
+    try:
+        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    except ImportError:
+        return jsonify({"error": "Playwright not installed in this container"}), 500
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            page = browser.new_page()
+            page.goto("https://www.usalliance.org/", timeout=20000)
+            page.wait_for_selector("input[type='text'],input[type='email'],input[name*='user'],input[id*='user']", timeout=10000)
+            # Try to find and fill login fields
+            for sel in ["input[name*='username' i]", "input[id*='username' i]", "input[type='text']"]:
+                try:
+                    page.fill(sel, username, timeout=3000)
+                    break
+                except Exception:
+                    continue
+            for sel in ["input[name*='password' i]", "input[id*='password' i]", "input[type='password']"]:
+                try:
+                    page.fill(sel, password, timeout=3000)
+                    break
+                except Exception:
+                    continue
+            # Submit
+            try:
+                page.press("input[type='password']", "Enter")
+            except Exception:
+                pass
+            import time as _time
+            _time.sleep(3)
+            # Check for obvious login failure indicators
+            content = page.content().lower()
+            browser.close()
+            if any(w in content for w in ["invalid", "incorrect", "failed", "wrong password", "error"]):
+                return jsonify({"error": "Login failed — invalid credentials"})
+            elif any(w in content for w in ["logout", "sign out", "my account", "dashboard", "accounts"]):
+                return jsonify({"status": "ok", "message": "Login successful"})
+            else:
+                return jsonify({"status": "ok", "message": "Login attempted — check if MFA was triggered"})
+    except Exception as e:
+        return jsonify({"error": f"Test failed: {str(e)[:200]}"})
+
+
 @app.route(URL_PREFIX + "/api/import/usalliance/mfa", methods=["POST"])
 @login_required
 def api_usalliance_mfa():
@@ -1368,7 +1616,7 @@ def api_import_usalliance_start():
     # Resolve entity slug
     entity_slug = "personal"
     if entity_id:
-        ent = db.get_entity(id=entity_id)
+        ent = db.get_entity(entity_id=entity_id)
         if ent:
             entity_slug = ent.get("slug", "personal")
 
@@ -2662,6 +2910,15 @@ def gmail_status_api():
         "search_terms": GMAIL_SEARCH_TERMS,
         "callback_url": callback_url,
     })
+
+
+@app.route(URL_PREFIX + "/api/import/gmail/search-terms", methods=["POST"])
+@login_required
+def api_save_gmail_search_terms():
+    data = request.get_json(force=True) or {}
+    terms = data.get("terms", "")
+    db.set_setting("gmail_search_terms", terms.strip())
+    return jsonify({"status": "ok", "terms": terms.strip()})
 
 
 @app.route(URL_PREFIX + "/api/import/gmail/setup-chat", methods=["POST"])

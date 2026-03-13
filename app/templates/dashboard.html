@@ -475,6 +475,10 @@
       <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
       Reports
     </a>
+    <a class="nav-item {% if active_tab == 'tax_review' %}active{% endif %}" onclick="sw('tax_review')" href="#">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      Tax Review
+    </a>
   </div>
   <div class="nav-section">
     <div class="nav-label">Tools</div>
@@ -544,6 +548,16 @@
   </div>
   <br>
   <div class="card"><div class="card-title">Recent Import Jobs</div><div id="recentJobs"><div class="empty"><div class="spinner"></div></div></div></div>
+  <br>
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">Filed Tax Returns</div>
+      <button class="btn btn-sm btn-outline" onclick="openFiledReturnModal()">&#43; Add / Update</button>
+    </div>
+    <div id="filed-returns-table">
+      <div class="empty" style="padding:16px;font-size:.85rem">No filed return data. <a href="#" onclick="openFiledReturnModal();return false">Add filed return numbers</a> to compare against analyzed data.</div>
+    </div>
+  </div>
 </div>
 
 <!-- TRANSACTIONS -->
@@ -677,15 +691,24 @@
             {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
           </select>
         </div>
-        <div class="form-group"><label>Years <span style="font-size:.75rem;color:var(--muted)">(ctrl+click for multi)</span></label>
-          <select id="gm-years" class="form-control" multiple style="height:80px">
-            {% for y in tax_years %}<option value="{{ y }}"{% if y == '2022' %} selected{% endif %}>{{ y }}</option>{% endfor %}
-          </select>
+        <div class="form-group">
+          <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated, any year)</span></label>
+          <input id="gm-years-input" class="form-control" type="text" placeholder="e.g. 2020,2021,2022,2023" value="2021,2022,2023,2024">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Enter any years you want to import. Year is auto-detected from email date.</div>
         </div>
       </div>
-      <div style="margin-bottom:12px">
-        <div style="font-size:.78rem;font-weight:600;color:#555;margin-bottom:4px">Searching Gmail for:</div>
+      <div style="margin-bottom:12px;background:#f8f9fb;border:1px solid #e0e4ea;border-radius:7px;padding:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:.78rem;font-weight:600;color:#555">Gmail Search Terms</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm btn-outline" onclick="editSearchTerms()" id="gm-terms-edit-btn" style="padding:2px 8px;font-size:.75rem">&#9998; Edit</button>
+            <button class="btn btn-sm btn-primary" onclick="saveSearchTerms()" id="gm-terms-save-btn" style="padding:2px 8px;font-size:.75rem;display:none">&#10003; Save</button>
+            <button class="btn btn-sm btn-outline" onclick="cancelSearchTerms()" id="gm-terms-cancel-btn" style="padding:2px 8px;font-size:.75rem;display:none">&#10005;</button>
+          </div>
+        </div>
         <div id="gm-search-terms" style="font-size:.78rem;color:var(--muted);line-height:1.8">Loading…</div>
+        <textarea id="gm-terms-editor" class="form-control" rows="3" style="display:none;font-family:monospace;font-size:.78rem;margin-top:6px" placeholder="Space-separated search terms, e.g: receipt invoice statement 1099 W-2 from:iactaxes.com"></textarea>
+        <div id="gm-terms-hint" style="display:none;font-size:.72rem;color:var(--muted);margin-top:4px">Space-separated. Use <code>from:domain.com</code> to include all emails from a sender. Accountant emails (iactaxes.com) are always included automatically.</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-primary" id="gm-start-btn" onclick="startGmail()">▶ Start Import</button>
@@ -743,7 +766,7 @@
       <!-- Credentials card -->
       <div class="card">
         <div class="card-title" style="color:#1a3d7c">&#127968; US Alliance FCU</div>
-        <div id="usa-status-badge" style="margin-bottom:10px;font-size:.82rem"></div>
+        <div id="usa-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
         <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
           Enter your US Alliance online banking login. Credentials are stored
           locally and never leave your server. A headless browser will log in and
@@ -755,9 +778,16 @@
         </div>
         <div class="form-group">
           <label>Password</label>
-          <input id="usa-password" class="form-control" type="password" autocomplete="new-password" placeholder="Your password">
+          <div class="pw-wrap">
+            <input id="usa-password" class="form-control" type="password" autocomplete="new-password" placeholder="Your password">
+            <span class="pw-eye" onclick="togglePw('usa-password',this)" title="Show/hide">&#128065;</span>
+          </div>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="saveUsaCreds()">Save Credentials</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveUsaCreds()">Save Credentials</button>
+          <button class="btn btn-outline btn-sm" id="usa-test-btn" onclick="testUsaCreds()">&#9654; Test Login</button>
+        </div>
+        <div id="usa-test-result" style="margin-top:8px;font-size:.8rem"></div>
       </div>
 
       <!-- Run import card -->
@@ -771,10 +801,9 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Years <span style="font-size:.75rem;color:var(--muted)">(ctrl+click)</span></label>
-            <select id="usa-years" class="form-control" multiple style="height:80px">
-              {% for y in tax_years %}<option value="{{ y }}"{% if y == '2022' %} selected{% endif %}>{{ y }}</option>{% endfor %}
-            </select>
+            <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated)</span></label>
+            <input id="usa-years-input" class="form-control" type="text" placeholder="e.g. 2020,2021,2022" value="2021,2022,2023">
+            <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Any years — not limited to a preset list</div>
           </div>
         </div>
         <button class="btn btn-primary" id="usa-start-btn" onclick="startUsaImport()">&#9654; Download Statements</button>
@@ -987,6 +1016,63 @@
       </div>
       <button class="btn btn-primary btn-sm" onclick="doShareChat()">Share</button>
       <div id="shareMsg" style="margin-top:8px;font-size:.82rem"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAX REVIEW -->
+<div id="tab-tax_review" class="tab-panel {% if active_tab == 'tax_review' %}active{% endif %}">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Tax Review &amp; Planner</div>
+      <div class="page-sub">AI acts as your accountant — reviews all documents and generates questions to clarify</div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">Select Year to Review</div>
+    <div class="form-row" style="align-items:flex-end">
+      <div class="form-group" style="max-width:180px">
+        <label>Tax Year</label>
+        <select id="tr-year" class="form-control">
+          <option value="">— select —</option>
+        </select>
+      </div>
+      <div class="form-group" style="max-width:220px">
+        <label>Entity</label>
+        <select id="tr-entity" class="form-control">
+          <option value="">All Entities</option>
+          {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <button class="btn btn-primary" onclick="runTaxReview()" id="tr-run-btn">
+          <svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          Run AI Review
+        </button>
+      </div>
+    </div>
+    <p style="font-size:.8rem;color:var(--muted);margin-top:8px">The AI will review all documents for the selected year, identify unclear items, missing documents, capital improvement depreciation needs, and generate specific questions for your accountant.</p>
+  </div>
+
+  <!-- Filed Return Entry -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">Filed Tax Return Data</div>
+      <button class="btn btn-sm btn-outline" onclick="openFiledReturnModal()">&#43; Enter / Update Return Data</button>
+    </div>
+    <div id="tr-filed-returns-list">
+      <div class="empty" style="padding:20px">No filed return data entered yet. Click "Enter / Update Return Data" to add actual filed return numbers for comparison.</div>
+    </div>
+  </div>
+
+  <!-- AI Review Output -->
+  <div id="tr-review-output" style="display:none">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:0">AI Tax Review — <span id="tr-review-year"></span></div>
+        <div id="tr-review-status" style="font-size:.8rem;color:var(--muted)"></div>
+      </div>
+      <div id="tr-review-content" style="font-size:.875rem;line-height:1.65;white-space:pre-wrap;max-height:70vh;overflow-y:auto;background:#f8f9fb;border-radius:8px;padding:16px;font-family:inherit"></div>
     </div>
   </div>
 </div>
@@ -1726,6 +1812,61 @@
   </div>
 </div>
 
+<!-- Filed Return Modal -->
+<div class="modal-overlay" id="mFiledReturn">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-title">&#128203; Filed Tax Return Data</div>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:16px">Enter figures from the actual filed 1040 / tax return for comparison against AI-analyzed data.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Entity</label>
+        <select id="fr-entity" class="form-control">
+          {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tax Year</label>
+        <input id="fr-year" class="form-control" type="text" placeholder="e.g. 2021">
+      </div>
+      <div class="form-group">
+        <label>Filing Status</label>
+        <select id="fr-filing-status" class="form-control">
+          <option value="single">Single</option>
+          <option value="married_joint">Married Filing Jointly</option>
+          <option value="married_separate">Married Filing Separately</option>
+          <option value="head_of_household">Head of Household</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Wages / W-2 Income ($)</label><input id="fr-wages" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Business / 1099 Income ($)</label><input id="fr-biz-income" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Total Income ($)</label><input id="fr-total-income" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>AGI ($)</label><input id="fr-agi" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Total Deductions ($)</label><input id="fr-deductions" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Taxable Income ($)</label><input id="fr-taxable" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Total Tax Owed ($)</label><input id="fr-tax" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Refund Received ($)</label><input id="fr-refund" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Amount Paid ($)</label><input id="fr-owed" class="form-control" type="number" step="0.01" placeholder="0.00"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Preparer Name</label><input id="fr-preparer" class="form-control" type="text" placeholder="e.g. IAC Taxes"></div>
+      <div class="form-group"><label>Filed Date</label><input id="fr-filed-date" class="form-control" type="date"></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="fr-notes" class="form-control" rows="2" placeholder="Any notes about this return…"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeM('mFiledReturn')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveFiledReturn()">Save Return Data</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const P = '{{ url_prefix }}';
 let curSess = null;
@@ -1864,8 +2005,9 @@ function sw(t) {
 }
 
 function loadTab(t) {
-  const m = {dashboard:()=>{loadStats();loadAct();loadRecentJobs();},transactions:loadTxns,documents:docReload,
-    import:()=>{loadJobs();loadGmailImportStatus();startJobRefresh();},
+  const m = {dashboard:()=>{loadStats();loadAct();loadRecentJobs();loadFiledReturns();},transactions:loadTxns,documents:docReload,
+    import:()=>{loadJobs();loadGmailImportStatus();loadUsaStatus();startJobRefresh();},
+    tax_review:()=>{loadTaxReviewYears();},
     chat:loadSessions,reports:loadExports,settings:loadSettings,users:loadUsers};
   if(t!=='import') stopJobRefresh();
   m[t]?.();
@@ -2122,7 +2264,7 @@ async function loadDocs() {
       <td>${esc(doc.vendor||'')}</td>
       <td style="text-align:right;font-weight:600">$${fmt(Math.abs(doc.amount||0))}</td>
       <td>${doc.confidence?Math.round(doc.confidence*100)+'%':'—'}</td>
-      <td style="font-size:.78rem;color:var(--muted)">${(doc.analyzed_at||'').slice(0,10)}</td>
+      <td style="font-size:.78rem;color:var(--muted)">${(doc.analyzed_at||'').slice(0,16).replace('T',' ')}</td>
       <td style="display:flex;gap:4px;flex-wrap:nowrap">
         <a href="${previewUrl}" target="_blank" class="btn btn-sm btn-outline" title="Open in Paperless">&#128196;</a>
         <button class="btn btn-sm btn-outline" onclick="recat(${docId})">Re-analyze</button>
@@ -2318,8 +2460,9 @@ var _gmLogJobId = null;
 
 async function startGmail() {
   const eid = document.getElementById('gm-entity').value;
-  const yrs = Array.from(document.getElementById('gm-years').selectedOptions).map(o=>o.value);
-  if(!yrs.length){toast('Select at least one year.','error');return;}
+  const yrsRaw = (document.getElementById('gm-years-input')?.value || '').trim();
+  const yrs = yrsRaw.split(/[\s,]+/).filter(Boolean);
+  if(!yrs.length){toast('Enter at least one year (e.g. 2020,2021,2022).','error');return;}
   const r = await post('/api/import/gmail/start',{entity_id:eid||null,years:yrs});
   if(r?.error){toast('Error: '+r.error,'error');return;}
   if(r?.job_id){
@@ -2577,8 +2720,43 @@ async function loadGmailImportStatus() {
   }
   if(termsEl && s.search_terms) {
     termsEl.innerHTML = s.search_terms.map(t=>`<span style="display:inline-block;background:#f0f4ff;border:1px solid #c8d4f0;border-radius:4px;padding:1px 7px;margin:2px 3px 2px 0;font-family:monospace">${esc(t)}</span>`).join('');
+    // Store for editing
+    termsEl.dataset.raw = s.search_terms.join(' ');
   }
 }
+
+window._gmTermsRaw = '';
+window.editSearchTerms = function() {
+  const termsEl = document.getElementById('gm-search-terms');
+  const editor = document.getElementById('gm-terms-editor');
+  const hint = document.getElementById('gm-terms-hint');
+  editor.value = termsEl.dataset.raw || '';
+  termsEl.style.display = 'none';
+  editor.style.display = '';
+  hint.style.display = '';
+  document.getElementById('gm-terms-edit-btn').style.display = 'none';
+  document.getElementById('gm-terms-save-btn').style.display = '';
+  document.getElementById('gm-terms-cancel-btn').style.display = '';
+};
+window.cancelSearchTerms = function() {
+  document.getElementById('gm-search-terms').style.display = '';
+  document.getElementById('gm-terms-editor').style.display = 'none';
+  document.getElementById('gm-terms-hint').style.display = 'none';
+  document.getElementById('gm-terms-edit-btn').style.display = '';
+  document.getElementById('gm-terms-save-btn').style.display = 'none';
+  document.getElementById('gm-terms-cancel-btn').style.display = 'none';
+};
+window.saveSearchTerms = async function() {
+  const terms = document.getElementById('gm-terms-editor').value.trim();
+  const r = await post('/api/import/gmail/search-terms', {terms});
+  if(r?.status === 'ok') {
+    toast('Search terms saved.', 'success');
+    cancelSearchTerms();
+    loadGmailImportStatus();
+  } else {
+    toast('Save failed: ' + (r?.error||'?'), 'error');
+  }
+};
 
 /* Chat */
 var _chatAbortCtrl = null;
@@ -2880,6 +3058,155 @@ async function doShareChat() {
   if(r.status==='shared'){msg.style.color='green';msg.textContent='Shared with '+r.shared_with+'.';}
   else{msg.style.color='red';msg.textContent=r.error||'Failed.';}
   openShareModal();
+}
+
+/* Filed Tax Returns */
+async function loadFiledReturns(entityId) {
+  const eid = entityId || document.getElementById('g-entity')?.value || '';
+  const p = eid ? '?entity_id='+eid : '';
+  const data = await fetch(P+'/api/filed-returns'+p).then(r=>r.json()).catch(()=>({returns:[]}));
+  const returns = data.returns || [];
+  // Render in dashboard tab
+  const el = document.getElementById('filed-returns-table');
+  const el2 = document.getElementById('tr-filed-returns-list');
+  const html = returns.length ? `<div class="tbl-wrap"><table>
+    <thead><tr><th>Year</th><th>Entity</th><th>Filing Status</th><th>Total Income</th><th>AGI</th><th>Deductions</th><th>Total Tax</th><th>Refund</th><th>Filed</th><th></th></tr></thead>
+    <tbody>${returns.map(r=>`<tr>
+      <td><strong>${r.tax_year}</strong></td>
+      <td>${esc(r.entity_name||'')}</td>
+      <td style="font-size:.8rem">${(r.filing_status||'').replace('_',' ')}</td>
+      <td class="pos">${r.total_income ? '$'+fmt(r.total_income) : '—'}</td>
+      <td>${r.agi ? '$'+fmt(r.agi) : '—'}</td>
+      <td class="neg">${r.total_deductions ? '$'+fmt(r.total_deductions) : '—'}</td>
+      <td>${r.total_tax ? '$'+fmt(r.total_tax) : '—'}</td>
+      <td class="${r.refund_amount ? 'pos' : ''}">${r.refund_amount ? '$'+fmt(r.refund_amount) : (r.amount_owed ? '<span class="neg">owed $'+fmt(r.amount_owed)+'</span>' : '—')}</td>
+      <td style="font-size:.78rem">${r.filed_date ? r.filed_date.slice(0,10) : (r.preparer_name ? esc(r.preparer_name) : '—')}</td>
+      <td><button class="btn btn-sm btn-outline" onclick='editFiledReturn(${JSON.stringify(r)})' style="padding:2px 8px;font-size:.72rem">&#9998;</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>` : '<div class="empty" style="padding:16px;font-size:.85rem">No filed return data. <a href="#" onclick="openFiledReturnModal();return false">Add filed return numbers</a> to compare against analyzed data.</div>';
+  if (el) el.innerHTML = html;
+  if (el2) el2.innerHTML = html;
+}
+
+function openFiledReturnModal(prefillYear) {
+  // Clear fields
+  ['fr-wages','fr-biz-income','fr-total-income','fr-agi','fr-deductions','fr-taxable','fr-tax','fr-refund','fr-owed','fr-preparer','fr-notes'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('fr-year').value = prefillYear || document.getElementById('g-year')?.value || document.getElementById('tr-year')?.value || '';
+  document.getElementById('fr-filing-status').value = 'single';
+  document.getElementById('fr-filed-date').value = '';
+  // Pre-select entity
+  const gEnt = document.getElementById('g-entity')?.value || document.getElementById('tr-entity')?.value || '';
+  if (gEnt) document.getElementById('fr-entity').value = gEnt;
+  openM('mFiledReturn');
+}
+
+function editFiledReturn(r) {
+  document.getElementById('fr-entity').value = r.entity_id || '';
+  document.getElementById('fr-year').value = r.tax_year || '';
+  document.getElementById('fr-filing-status').value = r.filing_status || 'single';
+  document.getElementById('fr-wages').value = r.wages_income || '';
+  document.getElementById('fr-biz-income').value = r.business_income || '';
+  document.getElementById('fr-total-income').value = r.total_income || '';
+  document.getElementById('fr-agi').value = r.agi || '';
+  document.getElementById('fr-deductions').value = r.total_deductions || '';
+  document.getElementById('fr-taxable').value = r.taxable_income || '';
+  document.getElementById('fr-tax').value = r.total_tax || '';
+  document.getElementById('fr-refund').value = r.refund_amount || '';
+  document.getElementById('fr-owed').value = r.amount_owed || '';
+  document.getElementById('fr-preparer').value = r.preparer_name || '';
+  document.getElementById('fr-filed-date').value = r.filed_date ? r.filed_date.slice(0,10) : '';
+  document.getElementById('fr-notes').value = r.notes || '';
+  openM('mFiledReturn');
+}
+
+async function saveFiledReturn() {
+  const payload = {
+    entity_id: parseInt(document.getElementById('fr-entity').value)||null,
+    tax_year: document.getElementById('fr-year').value.trim(),
+    filing_status: document.getElementById('fr-filing-status').value,
+    wages_income: parseFloat(document.getElementById('fr-wages').value)||null,
+    business_income: parseFloat(document.getElementById('fr-biz-income').value)||null,
+    total_income: parseFloat(document.getElementById('fr-total-income').value)||null,
+    agi: parseFloat(document.getElementById('fr-agi').value)||null,
+    total_deductions: parseFloat(document.getElementById('fr-deductions').value)||null,
+    taxable_income: parseFloat(document.getElementById('fr-taxable').value)||null,
+    total_tax: parseFloat(document.getElementById('fr-tax').value)||null,
+    refund_amount: parseFloat(document.getElementById('fr-refund').value)||null,
+    amount_owed: parseFloat(document.getElementById('fr-owed').value)||null,
+    preparer_name: document.getElementById('fr-preparer').value.trim()||null,
+    filed_date: document.getElementById('fr-filed-date').value||null,
+    notes: document.getElementById('fr-notes').value.trim()||null,
+  };
+  if (!payload.entity_id || !payload.tax_year) { toast('Entity and year are required.','error'); return; }
+  const r = await post('/api/filed-returns', payload);
+  if (r?.status === 'ok') {
+    toast('Filed return saved.','success');
+    closeM('mFiledReturn');
+    loadFiledReturns();
+  } else {
+    toast('Error: '+(r?.error||'Save failed'),'error');
+  }
+}
+
+/* Tax Review */
+async function loadTaxReviewYears() {
+  const data = await fetch(P+'/api/stats/years').then(r=>r.json()).catch(()=>({years:[]}));
+  const sel = document.getElementById('tr-year');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select year —</option>';
+  (data.years||[]).forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = y.year;
+    opt.textContent = y.year + (y.doc_count ? ' ('+y.doc_count+' docs)' : '') + (y.has_filed_return ? ' ✓ filed' : '');
+    sel.appendChild(opt);
+  });
+  if (prev) sel.value = prev;
+  // Also load filed returns for review tab
+  loadFiledReturns();
+}
+
+var _trReviewAbort = null;
+async function runTaxReview() {
+  const year = document.getElementById('tr-year').value;
+  const eid = document.getElementById('tr-entity').value;
+  if (!year) { toast('Select a year to review.','error'); return; }
+  const btn = document.getElementById('tr-run-btn');
+  const output = document.getElementById('tr-review-output');
+  const content = document.getElementById('tr-review-content');
+  const status = document.getElementById('tr-review-status');
+  document.getElementById('tr-review-year').textContent = year;
+  output.style.display = '';
+  content.textContent = '';
+  btn.disabled = true;
+  status.textContent = 'Reviewing…';
+  const params = new URLSearchParams({year});
+  if (eid) params.set('entity_id', eid);
+  const resp = await fetch(P+'/api/tax-review?'+params, {headers:{'Accept':'text/event-stream'}});
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, {stream:true});
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') { status.textContent = 'Complete'; btn.disabled = false; break; }
+      try {
+        const d = JSON.parse(raw);
+        if (d.chunk) { content.textContent += d.chunk; content.scrollTop = content.scrollHeight; }
+        if (d.error) { content.textContent += '\n\nError: '+d.error; status.textContent = 'Error'; btn.disabled = false; break; }
+      } catch(e) {}
+    }
+  }
+  btn.disabled = false;
+  if (status.textContent === 'Reviewing…') status.textContent = 'Complete';
 }
 
 /* Reports */
@@ -3519,7 +3846,7 @@ class TableManager {
     }
   };
 
-  async function loadUsaStatus() {
+  window.loadUsaStatus = async function() {
     var r = await fetch(P + '/api/import/usalliance/status').then(r => r.json()).catch(() => ({}));
     var badge = document.getElementById('usa-status-badge');
     if (!badge) return;
@@ -3528,12 +3855,31 @@ class TableManager {
     } else {
       badge.innerHTML = '<span style="color:#f57c00">&#9888; No credentials saved — enter them below</span>';
     }
-  }
+  };
+
+  window.testUsaCreds = async function() {
+    var u = document.getElementById('usa-username').value.trim();
+    var p = document.getElementById('usa-password').value.trim();
+    var btn = document.getElementById('usa-test-btn');
+    var res = document.getElementById('usa-test-result');
+    // Save first if fields are filled
+    if (u && p) { await post('/api/import/usalliance/credentials', {username: u, password: p}); }
+    btn.disabled = true; btn.textContent = 'Testing…';
+    res.innerHTML = '<span style="color:var(--muted)">Attempting login…</span>';
+    var r = await post('/api/import/usalliance/test', {}).catch(() => ({error: 'Request failed'}));
+    btn.disabled = false; btn.innerHTML = '&#9654; Test Login';
+    if (r && r.status === 'ok') {
+      res.innerHTML = '<span style="color:var(--green)">&#10003; ' + (r.message || 'Login successful') + '</span>';
+    } else {
+      res.innerHTML = '<span style="color:var(--red)">&#10007; ' + esc(r && r.error || 'Login failed — check credentials') + '</span>';
+    }
+  };
 
   window.startUsaImport = async function() {
-    var years = Array.from(document.getElementById('usa-years').selectedOptions).map(o => o.value);
+    var yearsRaw = document.getElementById('usa-years-input').value.trim();
+    var years = yearsRaw.split(/[\s,]+/).filter(Boolean);
     var eid = document.getElementById('usa-entity').value;
-    if (!years.length) { alert('Select at least one year.'); return; }
+    if (!years.length) { alert('Enter at least one year (e.g. 2021,2022).'); return; }
     var r = await post('/api/import/usalliance/start', {entity_id: eid||null, years: years});
     if (r.error) { alert(r.error); return; }
     _usaJobId = r.job_id;

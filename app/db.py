@@ -226,6 +226,35 @@ def _migrate(conn):
     """)
     conn.commit()
 
+    # Filed tax returns (from actual filed 1040s)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS filed_tax_returns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_id INTEGER REFERENCES entities(id),
+            tax_year TEXT NOT NULL,
+            filing_status TEXT DEFAULT 'single',
+            agi REAL,
+            wages_income REAL,
+            business_income REAL,
+            other_income REAL,
+            total_income REAL,
+            total_deductions REAL,
+            taxable_income REAL,
+            total_tax REAL,
+            refund_amount REAL,
+            amount_owed REAL,
+            preparer_name TEXT,
+            preparer_firm TEXT,
+            filed_date TEXT,
+            notes TEXT,
+            form_data_json TEXT DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(entity_id, tax_year)
+        );
+    """)
+    conn.commit()
+
     # Persistent import job logs (survive container restarts)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS import_job_logs (
@@ -698,6 +727,84 @@ def get_financial_summary(entity_id: int = None, tax_year: str = None) -> dict:
             result["counts"][cat] = r["count"]
         result["net"] = result["income"] - result["expense"] - result["deduction"]
         return result
+    finally:
+        conn.close()
+
+
+def get_years_with_docs() -> list:
+    """Return years that have analyzed documents, with counts."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT tax_year, COUNT(*) as doc_count,
+                   COALESCE(SUM(CASE WHEN category='income' THEN amount ELSE 0 END), 0) as income,
+                   COALESCE(SUM(CASE WHEN category='expense' THEN amount ELSE 0 END), 0) as expense
+            FROM analyzed_documents
+            WHERE tax_year IS NOT NULL AND tax_year != ''
+            GROUP BY tax_year
+            ORDER BY tax_year DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def upsert_filed_return(entity_id: int, tax_year: str, **kwargs) -> dict:
+    """Create or update a filed tax return record."""
+    conn = get_connection()
+    try:
+        fields = ["filing_status", "agi", "wages_income", "business_income", "other_income",
+                  "total_income", "total_deductions", "taxable_income", "total_tax",
+                  "refund_amount", "amount_owed", "preparer_name", "preparer_firm",
+                  "filed_date", "notes", "form_data_json"]
+        updates = {k: kwargs[k] for k in fields if k in kwargs}
+        existing = conn.execute(
+            "SELECT id FROM filed_tax_returns WHERE entity_id=? AND tax_year=?",
+            (entity_id, tax_year)
+        ).fetchone()
+        if existing:
+            set_clause = ", ".join(f"{k}=?" for k in updates)
+            set_clause += ", updated_at=datetime('now')"
+            conn.execute(
+                f"UPDATE filed_tax_returns SET {set_clause} WHERE entity_id=? AND tax_year=?",
+                list(updates.values()) + [entity_id, tax_year]
+            )
+        else:
+            cols = ["entity_id", "tax_year"] + list(updates.keys())
+            vals = [entity_id, tax_year] + list(updates.values())
+            placeholders = ",".join(["?"] * len(cols))
+            conn.execute(
+                f"INSERT INTO filed_tax_returns ({','.join(cols)}) VALUES ({placeholders})",
+                vals
+            )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM filed_tax_returns WHERE entity_id=? AND tax_year=?",
+            (entity_id, tax_year)
+        ).fetchone()
+        return dict(row) if row else {}
+    finally:
+        conn.close()
+
+
+def list_filed_returns(entity_id: int = None) -> list:
+    """List all filed tax returns, optionally filtered by entity."""
+    conn = get_connection()
+    try:
+        if entity_id:
+            rows = conn.execute(
+                "SELECT f.*, e.name as entity_name FROM filed_tax_returns f "
+                "LEFT JOIN entities e ON e.id=f.entity_id "
+                "WHERE f.entity_id=? ORDER BY f.tax_year DESC",
+                (entity_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT f.*, e.name as entity_name FROM filed_tax_returns f "
+                "LEFT JOIN entities e ON e.id=f.entity_id "
+                "ORDER BY f.tax_year DESC, e.name"
+            ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 
