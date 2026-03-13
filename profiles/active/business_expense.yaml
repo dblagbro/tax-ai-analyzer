@@ -1,0 +1,14 @@
+profile_id: business_expense
+display_name: "Business Expense (VoIPGuru)"
+version: "1.0"
+match:
+  keywords:
+    any: ["invoice", "hosting", "subscription", "software", "cloud", "server",
+          "domain", "SSL", "VoIP", "SIP", "PBX", "telecom", "microsoft",
+          "cloudflare", "digitalocean", "AWS", "twilio"]
+  min_score: 0.2
+financial:
+  category: expense
+  doc_type: invoice
+  entity_hint: voipguru
+tags: ["business", "expense", "voipguru"]

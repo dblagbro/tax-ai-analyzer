@@ -1,0 +1,1 @@
+"""Financial rule checks package."""

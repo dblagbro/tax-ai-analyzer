@@ -1,0 +1,20 @@
+{
+  "entity": "personal",
+  "display_name": "Devin — Personal",
+  "income_types": ["W-2", "1099-K", "1099-INT", "1099-DIV", "1099-MISC"],
+  "deduction_categories": [
+    "Home Office",
+    "Mortgage Interest",
+    "Property Tax",
+    "Medical & Dental",
+    "Charitable Donations",
+    "Student Loan Interest",
+    "Vehicle",
+    "Utilities (home office portion)"
+  ],
+  "vendor_hints": [
+    "Wells Fargo", "US Alliance", "Spectrum", "Central Hudson",
+    "Verizon", "Paraco", "Net10", "Amazon", "eBay", "IRS"
+  ],
+  "tax_forms": ["1040", "Schedule A", "Schedule B", "Schedule D"]
+}

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Tax Documents</title>
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fa; }
+  .header { background: #1a3c5e; color: white; padding: 15px 30px; }
+  .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+  .filters { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .filters select { padding: 6px 10px; border: 1px solid #ced4da; border-radius: 4px; }
+  .btn { padding: 6px 16px; background: #1a3c5e; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; font-size: 0.9rem; }
+  table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+  th { background: #1a3c5e; color: white; padding: 10px 12px; text-align: left; font-size: 0.85rem; }
+  td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 0.85rem; }
+  tr:hover { background: #f8f9fa; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; background: #e9ecef; }
+  .income { background: #d4edda; color: #155724; }
+  .expense, .deduction { background: #f8d7da; color: #721c24; }
+  .back-link { display: inline-block; margin-bottom: 15px; color: #1a3c5e; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="header"><h1 style="margin:0;font-size:1.3rem;">Tax Documents</h1></div>
+<div class="container">
+  <a href="{{ prefix }}/" class="back-link">&larr; Dashboard</a>
+  <form class="filters" method="get">
+    <label>Year: <select name="year">
+      <option value="">All</option>
+      {% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select></label>
+    <label>Entity: <select name="entity">
+      <option value="">All</option>
+      {% for e in entities %}<option value="{{ e }}" {% if e == entity %}selected{% endif %}>{{ e | replace('_',' ') | title }}</option>{% endfor %}
+    </select></label>
+    <button type="submit" class="btn">Filter</button>
+    <span style="margin-left:auto;color:#666;">{{ documents|length }} documents</span>
+  </form>
+  <table>
+    <tr>
+      <th>Date</th><th>Title</th><th>Type</th><th>Entity</th><th>Vendor</th><th>Amount</th><th>Category</th><th>Year</th>
+    </tr>
+    {% for doc in documents %}
+    <tr>
+      <td>{{ doc.get('date','') }}</td>
+      <td>{{ doc.get('title','')[:50] }}</td>
+      <td>{{ doc.get('doc_type','') }}</td>
+      <td>{{ (doc.get('entity','') or '') | replace('_',' ') | title }}</td>
+      <td>{{ doc.get('vendor','') or doc.get('payer_name','') }}</td>
+      <td>{% if doc.get('amount') %}${{ '{:,.2f}'.format(doc.amount) }}{% endif %}</td>
+      <td><span class="badge {{ doc.get('category','') }}">{{ doc.get('category','') }}</span></td>
+      <td>{{ doc.get('tax_year','') }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" style="text-align:center;padding:30px;color:#666;">No documents found</td></tr>
+    {% endfor %}
+  </table>
+</div>
+</body>
+</html>

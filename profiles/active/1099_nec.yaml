@@ -1,0 +1,13 @@
+profile_id: 1099_nec
+display_name: "1099-NEC Consulting Income"
+version: "1.0"
+description: "Non-employee compensation / consulting income"
+match:
+  keywords:
+    any: ["1099", "NEC", "nonemployee", "non-employee", "compensation", "Form 1099-NEC"]
+  min_score: 0.2
+financial:
+  category: income
+  doc_type: 1099-NEC
+  entity_hint: voipguru
+tags: ["income", "consulting", "self-employment"]

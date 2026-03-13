@@ -1,0 +1,20 @@
+{
+  "entity": "voipguru",
+  "display_name": "VoIPGuru (Consulting)",
+  "income_types": ["1099-NEC", "invoice", "consulting_payment"],
+  "deduction_categories": [
+    "Home Office",
+    "Equipment & Tech",
+    "Software Subscriptions",
+    "Internet & Phone",
+    "Professional Services",
+    "Business Travel",
+    "Marketing & Advertising",
+    "Hosting & Infrastructure"
+  ],
+  "vendor_hints": [
+    "Microsoft", "Amazon Web Services", "Google", "Hetzner",
+    "Cloudflare", "DigitalOcean", "Anthropic", "Twilio", "Vonage"
+  ],
+  "tax_forms": ["Schedule C", "1040-SE"]
+}

@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Gmail Setup — Financial AI Analyzer</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; background: #f5f7fa; color: #333; min-height: 100vh; }
+
+.page-header {
+  background: #1a3c5e; color: #fff; padding: 14px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.page-header h1 { font-size: 1rem; font-weight: 700; }
+.page-header a { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.85rem; }
+.page-header a:hover { color: #fff; }
+
+.page-body { max-width: 900px; margin: 0 auto; padding: 28px 20px; }
+
+.mode-tabs { display: flex; gap: 0; margin-bottom: 24px; border: 1px solid #ced4da; border-radius: 8px; overflow: hidden; }
+.mode-tab {
+  flex: 1; padding: 12px 20px; background: #fff; border: none; cursor: pointer;
+  font-size: 0.9rem; font-weight: 600; color: #888; transition: all 0.15s;
+  border-right: 1px solid #ced4da;
+}
+.mode-tab:last-child { border-right: none; }
+.mode-tab.active { background: #1a3c5e; color: #fff; }
+.mode-tab:hover:not(.active) { background: #f5f7fa; color: #555; }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+.status-banner { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.status-item {
+  background: #fff; border-radius: 8px; padding: 12px 16px;
+  border: 1px solid #e0e4ea; display: flex; align-items: center; gap: 10px;
+  font-size: 0.85rem;
+}
+.status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.green { background: #28a745; }
+.status-dot.red { background: #dc3545; }
+.status-dot.yellow { background: #ffc107; }
+.status-label { font-weight: 600; color: #555; }
+.status-value { color: #888; }
+
+.chat-container {
+  background: #fff; border-radius: 12px; border: 1px solid #e0e4ea;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow: hidden;
+}
+.chat-header {
+  background: #f8f9fb; border-bottom: 1px solid #e0e4ea;
+  padding: 14px 18px; display: flex; align-items: center; gap: 12px;
+}
+.chat-header .ai-avatar {
+  width: 36px; height: 36px; border-radius: 50%; background: #1a3c5e;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 0.8rem; font-weight: 700; flex-shrink: 0;
+}
+.chat-header .ai-info h3 { font-size: 0.9rem; color: #1a3c5e; font-weight: 700; }
+.chat-header .ai-info p { font-size: 0.78rem; color: #888; margin-top: 1px; }
+
+.chat-messages {
+  height: 420px; overflow-y: auto; padding: 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.chat-msg { display: flex; gap: 10px; }
+.chat-msg.user { flex-direction: row-reverse; }
+.msg-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.72rem; font-weight: 700;
+}
+.chat-msg.assistant .msg-avatar { background: #e8f0fe; color: #1a3c5e; }
+.chat-msg.user .msg-avatar { background: #1a3c5e; color: #fff; }
+.msg-bubble {
+  max-width: 78%; padding: 10px 14px; border-radius: 10px;
+  font-size: 0.875rem; line-height: 1.55; word-break: break-word;
+}
+.chat-msg.assistant .msg-bubble { background: #f5f7fa; color: #333; border-radius: 10px 10px 10px 2px; }
+.chat-msg.user .msg-bubble { background: #1a3c5e; color: #fff; border-radius: 10px 10px 2px 10px; }
+
+.chat-input-area {
+  border-top: 1px solid #e0e4ea; padding: 14px 18px;
+  display: flex; gap: 10px; align-items: flex-end; background: #fff;
+}
+.chat-input-area textarea {
+  flex: 1; padding: 10px 14px; border: 1px solid #ced4da; border-radius: 8px;
+  font-size: 0.9rem; resize: none; min-height: 44px; max-height: 120px;
+  font-family: inherit; line-height: 1.4;
+}
+.chat-input-area textarea:focus { outline: none; border-color: #1a3c5e; box-shadow: 0 0 0 2px rgba(26,60,94,0.1); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px;
+  border-radius: 6px; font-size: 0.875rem; font-weight: 600; cursor: pointer;
+  border: none; text-decoration: none; transition: all 0.15s; white-space: nowrap;
+}
+.btn-primary { background: #1a3c5e; color: #fff; }
+.btn-primary:hover { background: #2a5c8e; }
+.btn-secondary { background: #f0f2f5; color: #444; }
+.btn-secondary:hover { background: #e0e4ea; }
+.btn-success { background: #28a745; color: #fff; }
+.btn-success:hover { background: #218838; }
+.btn-sm { padding: 6px 12px; font-size: 0.8rem; }
+.btn-outline { background: #fff; color: #1a3c5e; border: 1.5px solid #1a3c5e; }
+.btn-outline:hover { background: #1a3c5e; color: #fff; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.quick-actions {
+  padding: 12px 18px; background: #f8f9fb; border-top: 1px solid #f0f2f5;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+}
+.quick-actions span { font-size: 0.78rem; color: #888; margin-right: 4px; }
+
+.upload-card {
+  background: #fff; border-radius: 12px; border: 1px solid #e0e4ea;
+  padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.upload-card h2 { font-size: 1rem; color: #1a3c5e; margin-bottom: 6px; }
+.upload-card > p { font-size: 0.85rem; color: #888; margin-bottom: 20px; }
+
+.upload-zone {
+  border: 2px dashed #ced4da; border-radius: 10px; padding: 32px 20px;
+  text-align: center; cursor: pointer; transition: all 0.15s; margin-bottom: 20px;
+}
+.upload-zone:hover, .upload-zone.drag-over { border-color: #1a3c5e; background: #f0f5ff; }
+.upload-zone .upload-icon { font-size: 2rem; margin-bottom: 10px; }
+.upload-zone p { font-size: 0.88rem; color: #888; margin: 0; }
+.upload-zone strong { color: #1a3c5e; }
+.upload-zone input[type=file] { display: none; }
+
+.divider { text-align: center; color: #bbb; font-size: 0.8rem; margin: 16px 0; position: relative; }
+.divider::before, .divider::after { content: ''; position: absolute; top: 50%; width: 42%; height: 1px; background: #e8eaed; }
+.divider::before { left: 0; }
+.divider::after { right: 0; }
+
+.paste-area {
+  width: 100%; padding: 12px 14px; border: 1px solid #ced4da; border-radius: 8px;
+  font-size: 0.85rem; font-family: monospace; resize: vertical; min-height: 120px;
+  color: #333;
+}
+.paste-area:focus { outline: none; border-color: #1a3c5e; }
+
+.upload-actions { margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+.connect-area {
+  background: #e8f4ff; border: 1px solid #bee3f8; border-radius: 10px;
+  padding: 16px 20px; margin-top: 20px; display: flex; align-items: center;
+  justify-content: space-between; flex-wrap: wrap; gap: 12px;
+}
+.connect-area p { font-size: 0.875rem; color: #1a3c5e; margin: 0; }
+.connect-area strong { display: block; font-size: 0.95rem; }
+
+.alert { padding: 12px 16px; border-radius: 6px; font-size: 0.875rem; margin-bottom: 16px; }
+.alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+.alert-danger { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+.alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+
+.loader { display: inline-block; width: 16px; height: 16px; border: 2px solid #e0e4ea; border-top-color: #1a3c5e; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; }
+.loader.white { border-color: rgba(255,255,255,0.3); border-top-color: #fff; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.typing-dots { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
+.typing-dots span {
+  width: 7px; height: 7px; border-radius: 50%; background: #aaa;
+  animation: bounce 1.2s infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,80%,100% { transform: scale(0.7); opacity:0.5; } 40% { transform: scale(1); opacity:1; } }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Gmail Setup &mdash; Financial AI Analyzer</h1>
+  <a href="{{ url_prefix }}/">&larr; Back to Dashboard</a>
+</div>
+
+<div class="page-body">
+
+  <!-- Status Banner -->
+  <div class="status-banner">
+    <div class="status-item">
+      <div class="status-dot {{ 'green' if has_credentials else 'red' }}"></div>
+      <div>
+        <div class="status-label">credentials.json</div>
+        <div class="status-value">{{ 'Loaded' if has_credentials else 'Not configured' }}</div>
+      </div>
+    </div>
+    <div class="status-item">
+      <div class="status-dot {{ 'green' if has_token else 'yellow' }}"></div>
+      <div>
+        <div class="status-label">OAuth Token</div>
+        <div class="status-value">{{ 'Authorized' if has_token else 'Not authorized' }}</div>
+      </div>
+    </div>
+    {% if has_credentials and has_token %}
+    <div style="margin-left:auto;align-self:center">
+      <a href="{{ url_prefix }}/import/gmail/start" class="btn btn-success">&#9654; Run Gmail Import</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Mode Tabs -->
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tab-chat-btn" onclick="switchMode('chat')">&#128172; AI-Guided Setup</button>
+    <button class="mode-tab" id="tab-manual-btn" onclick="switchMode('manual')">&#128196; Manual Upload</button>
+  </div>
+
+  <div id="alert-area"></div>
+
+  <!-- AI Chat Panel -->
+  <div id="panel-chat" class="panel active">
+    <div class="chat-container">
+      <div class="chat-header">
+        <div class="ai-avatar">AI</div>
+        <div class="ai-info">
+          <h3>Gmail Setup Assistant</h3>
+          <p>Guides you through Google Cloud Console step by step</p>
+        </div>
+        <div style="margin-left:auto">
+          <button class="btn btn-secondary btn-sm" onclick="resetChat()">Start Over</button>
+        </div>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#bbb;font-size:0.9rem" id="chat-init-msg">
+          <span class="loader"></span>&nbsp; Connecting to setup assistant...
+        </div>
+      </div>
+      <div class="quick-actions">
+        <span>Quick replies:</span>
+        <button class="btn btn-secondary btn-sm" onclick="sendQuick('I already have credentials.json ready')">I have credentials.json</button>
+        <button class="btn btn-secondary btn-sm" onclick="sendQuick('I do not have a Google Cloud project yet')">No project yet</button>
+        <button class="btn btn-secondary btn-sm" onclick="sendQuick('I am stuck, can you help me?')">I am stuck</button>
+        <button class="btn btn-secondary btn-sm" onclick="switchMode('manual')" style="margin-left:auto">Skip to manual upload &rarr;</button>
+      </div>
+      <div class="chat-input-area">
+        <textarea id="chat-input" placeholder="Describe what you see or ask a question..." rows="1" onkeydown="inputKeydown(event)"></textarea>
+        <button class="btn btn-primary" id="send-btn" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+
+    {% if has_credentials %}
+    <div class="connect-area" style="margin-top:20px">
+      <div>
+        <strong>credentials.json is loaded!</strong>
+        <p>Click to authorize this app to access your Gmail account.</p>
+      </div>
+      <a href="{{ url_prefix }}/import/gmail/auth" class="btn btn-success">Connect Gmail Account &rarr;</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Manual Upload Panel -->
+  <div id="panel-manual" class="panel">
+    <div class="upload-card">
+      <h2>Upload credentials.json</h2>
+      <p>Download your OAuth 2.0 credentials from Google Cloud Console and upload them here. Make sure you selected "Desktop app" as the application type.</p>
+
+      <div id="upload-alert"></div>
+
+      <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <input type="file" id="file-input" accept=".json,application/json" onchange="handleFileSelect(this.files[0])">
+        <div class="upload-icon">&#128196;</div>
+        <p><strong>Drop credentials.json here</strong> or click to browse</p>
+        <p style="margin-top:6px;font-size:0.8rem">Only JSON files from Google Cloud Console are accepted</p>
+      </div>
+
+      <div class="divider">or paste JSON content directly</div>
+
+      <textarea class="paste-area" id="paste-json" placeholder='{"installed":{"client_id":"...","client_secret":"...",...}}'></textarea>
+
+      <div class="upload-actions">
+        <button class="btn btn-primary" onclick="submitCredentials()" id="upload-btn">Upload credentials.json</button>
+        <span style="font-size:0.8rem;color:#999">The file is stored locally on your server only.</span>
+      </div>
+    </div>
+
+    {% if has_credentials %}
+    <div class="connect-area">
+      <div>
+        <strong>credentials.json is loaded!</strong>
+        <p>Your credentials are configured. Click to authorize Gmail access.</p>
+      </div>
+      <a href="{{ url_prefix }}/import/gmail/auth" class="btn btn-success">Connect Gmail Account &rarr;</a>
+    </div>
+    {% endif %}
+
+    <div class="upload-card" style="margin-top:20px">
+      <h2>Where to get credentials.json</h2>
+      <p>Follow these steps in Google Cloud Console:</p>
+      <ol style="font-size:0.875rem;line-height:2.2;color:#555;padding-left:20px;margin-top:8px">
+        <li>Go to <strong>console.cloud.google.com</strong> and create or select a project</li>
+        <li>Enable the <strong>Gmail API</strong> in APIs &amp; Services &rarr; Library</li>
+        <li>Go to <strong>OAuth consent screen</strong> &rarr; select <strong>External</strong> user type (required for personal @gmail.com accounts)</li>
+        <li>Fill in app name and your email. Add your Gmail address as a test user</li>
+        <li>Go to <strong>Credentials</strong> &rarr; Create Credentials &rarr; <strong>OAuth client ID</strong></li>
+        <li>Select application type: <strong>Desktop app</strong> (not Web application)</li>
+        <li>Download the JSON file and upload it above</li>
+      </ol>
+      <p style="margin-top:14px;font-size:0.82rem;color:#888">Note: Your app will stay in "Testing" mode &mdash; that is completely fine. Just make sure to add yourself as a test user on the OAuth consent screen.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+var URL_PREFIX = "{{ url_prefix }}";
+var sessionId = null;
+var isStreaming = false;
+var selectedFile = null;
+var chatHistory = [];
+
+var SYSTEM_PROMPT = "You are a friendly, concise Gmail OAuth setup assistant for a self-hosted financial document analyzer app. " +
+  "You help users configure Gmail integration by walking them through Google Cloud Console step by step, interactively. " +
+  "Key facts to communicate clearly: " +
+  "(1) Gmail OAuth works with personal @gmail.com accounts, not just Google Workspace. " +
+  "(2) On the OAuth consent screen, the user MUST select 'External' user type — this is required for personal accounts. " +
+  "(3) The credential type MUST be 'Desktop app', NOT 'Web application'. " +
+  "(4) The app stays in 'Testing' mode permanently — that is fine, they just need to add themselves as a test user. " +
+  "(5) After uploading credentials.json, they click 'Connect Gmail Account' to authorize via their browser. " +
+  "(6) The OAuth callback is handled server-side automatically via /import/gmail/auth/callback. " +
+  "Gmail search terms used by this app: receipt, invoice, statement, 1099, W-2, tax, order, payment, billing. " +
+  "Communication style: keep responses short and actionable (2-5 sentences per step). " +
+  "Ask what the user currently sees on screen to give precise guidance. Number steps clearly. " +
+  "If they say they already have credentials.json, tell them to switch to the Manual Upload tab. " +
+  "When they finish uploading credentials.json, remind them to click the 'Connect Gmail Account' button.";
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function switchMode(mode) {
+  document.getElementById('panel-chat').classList.toggle('active', mode === 'chat');
+  document.getElementById('panel-manual').classList.toggle('active', mode === 'manual');
+  document.getElementById('tab-chat-btn').classList.toggle('active', mode === 'chat');
+  document.getElementById('tab-manual-btn').classList.toggle('active', mode === 'manual');
+}
+
+// ---- Chat session init ----
+function initChat() {
+  var initEl = document.getElementById('chat-init-msg');
+  if (initEl) initEl.remove();
+  appendMessage('assistant',
+    "Hi! I'm your Gmail setup assistant. I'll guide you through connecting your Gmail account to this app.\n\n" +
+    "To start: do you already have a Google Cloud project, or are you starting from scratch?"
+  );
+}
+
+function scrollBottom() {
+  var msgs = document.getElementById('chat-messages');
+  // Use rAF to ensure layout has been recalculated before scrolling
+  requestAnimationFrame(function() {
+    msgs.scrollTop = msgs.scrollHeight;
+  });
+}
+
+function appendMessage(role, content) {
+  var msgs = document.getElementById('chat-messages');
+  var div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  var initials = role === 'user' ? 'You' : 'AI';
+  var html = escHtml(content).replace(/\n/g, '<br>');
+  div.innerHTML = '<div class="msg-avatar">' + initials + '</div><div class="msg-bubble">' + html + '</div>';
+  msgs.appendChild(div);
+  scrollBottom();
+  return div;
+}
+
+function showTyping() {
+  var msgs = document.getElementById('chat-messages');
+  var div = document.createElement('div');
+  div.className = 'chat-msg assistant';
+  div.id = 'typing-indicator';
+  div.innerHTML = '<div class="msg-avatar">AI</div><div class="msg-bubble">' +
+    '<div class="typing-dots"><span></span><span></span><span></span></div></div>';
+  msgs.appendChild(div);
+  scrollBottom();
+}
+
+function removeTyping() {
+  var el = document.getElementById('typing-indicator');
+  if (el) {
+    el.remove();
+    // Scroll after removal so the layout shift doesn't leave us mid-view
+    scrollBottom();
+  }
+}
+
+function inputKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function sendQuick(text) {
+  document.getElementById('chat-input').value = text;
+  sendMessage();
+}
+
+async function sendMessage() {
+  if (isStreaming) return;
+  var input = document.getElementById('chat-input');
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+
+  // Detect "I have credentials" without "upload" — suggest manual tab
+  var lower = msg.toLowerCase();
+  if ((lower.indexOf('have credentials') !== -1 || lower.indexOf('credentials.json') !== -1)
+      && lower.indexOf('upload') === -1 && lower.indexOf('ready') !== -1) {
+    appendMessage('user', msg);
+    appendMessage('assistant',
+      "Great! Switch to the Manual Upload tab (button above) to upload your credentials.json file. " +
+      "Once uploaded, you'll see a 'Connect Gmail Account' button to authorize access."
+    );
+    switchMode('manual');
+    return;
+  }
+
+  appendMessage('user', msg);
+  chatHistory.push({role: 'user', content: msg});
+
+  isStreaming = true;
+  var sendBtn = document.getElementById('send-btn');
+  sendBtn.disabled = true;
+  sendBtn.innerHTML = '<span class="loader white"></span>';
+
+  showTyping();
+
+  var accumulated = '';
+  var streamBubble = null;
+
+  try {
+    var res = await fetch(URL_PREFIX + '/api/import/gmail/setup-chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg, history: chatHistory})
+    });
+
+    if (!res.ok) {
+      var errText = await res.text();
+      throw new Error(errText || res.statusText);
+    }
+
+    removeTyping();
+
+    var msgs = document.getElementById('chat-messages');
+    var wrapDiv = document.createElement('div');
+    wrapDiv.className = 'chat-msg assistant';
+    var avatarEl = document.createElement('div');
+    avatarEl.className = 'msg-avatar';
+    avatarEl.textContent = 'AI';
+    streamBubble = document.createElement('div');
+    streamBubble.className = 'msg-bubble';
+    wrapDiv.appendChild(avatarEl);
+    wrapDiv.appendChild(streamBubble);
+    msgs.appendChild(wrapDiv);
+    scrollBottom();
+
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, {stream: true});
+      var lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (line.startsWith('data: ')) {
+          var data = line.slice(6).trim();
+          if (data === '[DONE]') break;
+          try {
+            var parsed = JSON.parse(data);
+            var text = parsed.text || parsed.content || parsed.delta || '';
+            accumulated += text;
+            streamBubble.innerHTML = escHtml(accumulated).replace(/\n/g, '<br>');
+          } catch(pe) {}
+        }
+      }
+    }
+    // Final scroll after all content is rendered
+    scrollBottom();
+
+    if (!accumulated) {
+      if (streamBubble) streamBubble.innerHTML = '<em style="color:#aaa">No response received.</em>';
+    } else {
+      chatHistory.push({role: 'assistant', content: accumulated});
+      // If response mentions uploading credentials, add a shortcut button
+      var accLow = accumulated.toLowerCase();
+      if (accLow.indexOf('upload') !== -1 && accLow.indexOf('credentials') !== -1 && streamBubble) {
+        var hint = document.createElement('div');
+        hint.style.marginTop = '10px';
+        hint.innerHTML = '<button class="btn btn-outline btn-sm" onclick="switchMode(\'manual\')">&rarr; Go to Manual Upload</button>';
+        streamBubble.appendChild(hint);
+      }
+    }
+
+  } catch(e) {
+    removeTyping();
+    appendMessage('assistant',
+      'Could not reach the assistant (' + escHtml(e.message) + '). ' +
+      'You can use the Manual Upload tab to upload credentials.json directly.'
+    );
+  } finally {
+    isStreaming = false;
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send';
+  }
+}
+
+function resetChat() {
+  if (!confirm('Start a fresh setup conversation?')) return;
+  chatHistory = [];
+  var msgs = document.getElementById('chat-messages');
+  msgs.innerHTML = '';
+  initChat();
+}
+
+// ---- File upload ----
+function handleFileSelect(file) {
+  if (!file) return;
+  selectedFile = file;
+  var zone = document.getElementById('drop-zone');
+  zone.innerHTML = '<div class="upload-icon">&#9989;</div>' +
+    '<p><strong>' + escHtml(file.name) + '</strong></p>' +
+    '<p style="margin-top:4px;font-size:0.8rem">' + Math.round(file.size / 1024) + ' KB &mdash; click to change</p>';
+  // Re-attach click handler after innerHTML reset
+  zone.onclick = function() { document.getElementById('file-input').click(); };
+}
+
+(function() {
+  var zone = document.getElementById('drop-zone');
+  if (!zone) return;
+  zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', function() { zone.classList.remove('drag-over'); });
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    var file = e.dataTransfer.files[0];
+    if (file) handleFileSelect(file);
+  });
+})();
+
+async function submitCredentials() {
+  var alertEl = document.getElementById('upload-alert');
+  var pasteContent = document.getElementById('paste-json').value.trim();
+  var btn = document.getElementById('upload-btn');
+
+  if (!selectedFile && !pasteContent) {
+    alertEl.innerHTML = '<div class="alert alert-danger">Please upload a file or paste your credentials JSON.</div>';
+    return;
+  }
+
+  // Validate pasted JSON if no file
+  if (!selectedFile && pasteContent) {
+    try { JSON.parse(pasteContent); } catch(e) {
+      alertEl.innerHTML = '<div class="alert alert-danger">Invalid JSON. Please check the pasted content and try again.</div>';
+      return;
+    }
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loader white"></span> Uploading...';
+  alertEl.innerHTML = '';
+
+  var fd = new FormData();
+  if (selectedFile) {
+    fd.append('credentials_file', selectedFile);
+  } else {
+    var blob = new Blob([pasteContent], {type: 'application/json'});
+    fd.append('credentials_file', blob, 'credentials.json');
+  }
+
+  try {
+    var res = await fetch(URL_PREFIX + '/import/gmail/credentials', {method: 'POST', body: fd});
+    var data = {};
+    try { data = await res.json(); } catch(je) {}
+    if (res.ok) {
+      alertEl.innerHTML = '<div class="alert alert-success">credentials.json uploaded successfully! Redirecting to authorize Gmail access...</div>';
+      setTimeout(function() { window.location.reload(); }, 1800);
+    } else {
+      alertEl.innerHTML = '<div class="alert alert-danger">Error: ' + escHtml(data.message || data.error || 'Upload failed') + '</div>';
+    }
+  } catch(e) {
+    alertEl.innerHTML = '<div class="alert alert-danger">Upload failed: ' + escHtml(e.message) + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Upload credentials.json';
+  }
+}
+
+// ---- Init ----
+initChat();
+</script>
+</body>
+</html>

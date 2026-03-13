@@ -1,0 +1,13 @@
+profile_id: farm_expense
+display_name: "Farm / Agricultural Expense"
+version: "1.0"
+match:
+  keywords:
+    any: ["farm", "ranch", "tractor", "feed", "seed", "fertilizer", "livestock",
+          "agway", "agricultural", "equipment", "hay", "Martinfeld"]
+  min_score: 0.2
+financial:
+  category: expense
+  doc_type: farm_expense
+  entity_hint: martinfeld_ranch
+tags: ["farm", "agricultural", "expense"]

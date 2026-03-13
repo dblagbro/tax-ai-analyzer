@@ -1,0 +1,13 @@
+profile_id: utility_bill
+display_name: "Utility Bill"
+version: "1.0"
+match:
+  keywords:
+    any: ["electric", "gas", "water", "internet", "cable", "spectrum", "central hudson",
+          "verizon", "utility", "paraco", "propane", "account summary", "amount due"]
+  min_score: 0.2
+financial:
+  category: expense
+  doc_type: utility_bill
+  typical_amount_range: [20, 2000]
+tags: ["utilities", "expense"]

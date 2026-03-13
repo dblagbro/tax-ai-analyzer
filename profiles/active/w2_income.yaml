@@ -1,0 +1,15 @@
+profile_id: w2_income
+display_name: "W-2 Wages Income"
+version: "1.0"
+description: "Annual W-2 wage and tax statement from employer"
+match:
+  keywords:
+    any: ["W-2", "wage", "wages", "employer", "employee", "withholding", "Form W-2"]
+  min_score: 0.2
+extraction:
+  fields: [employer_name, employee_name, wages, federal_withheld, state_withheld, year]
+financial:
+  category: income
+  doc_type: W-2
+  typical_amount_range: [10000, 500000]
+tags: ["income", "employment"]

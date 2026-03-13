@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>User Manual — Financial AI Analyzer</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; background: #f5f7fa; color: #333; }
+
+.page-header {
+  background: #1a3c5e; color: #fff; padding: 14px 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.page-header h1 { font-size: 1.05rem; font-weight: 700; }
+.page-header a { color: rgba(255,255,255,0.75); text-decoration: none; font-size: 0.85rem; }
+.page-header a:hover { color: #fff; }
+.page-header .version { font-size: 0.75rem; color: rgba(255,255,255,0.5); margin-top: 2px; }
+
+.layout { display: flex; min-height: calc(100vh - 50px); }
+
+/* Sidebar TOC */
+.sidebar {
+  width: 260px; flex-shrink: 0; background: #fff; border-right: 1px solid #e0e4ea;
+  padding: 24px 0; position: sticky; top: 50px; height: calc(100vh - 50px);
+  overflow-y: auto;
+}
+.sidebar h2 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #aaa; padding: 0 20px; margin-bottom: 10px; }
+.toc-group { margin-bottom: 20px; }
+.toc-group .toc-section-title {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #aaa;
+  padding: 6px 20px 4px; font-weight: 700;
+}
+.toc-link {
+  display: block; padding: 7px 20px 7px 28px; font-size: 0.85rem; color: #555;
+  text-decoration: none; border-left: 3px solid transparent; transition: all 0.1s;
+}
+.toc-link:hover { background: #f5f7fa; color: #1a3c5e; }
+.toc-link.active { background: #f0f5ff; color: #1a3c5e; border-left-color: #1a3c5e; font-weight: 600; }
+.toc-link.top-level { padding-left: 20px; font-weight: 600; color: #333; }
+.toc-link.top-level:hover { color: #1a3c5e; }
+
+/* Main Content */
+.content {
+  flex: 1; padding: 40px 48px; max-width: 900px; line-height: 1.7;
+}
+
+h1.doc-title { font-size: 2rem; color: #1a3c5e; margin-bottom: 8px; }
+.doc-subtitle { font-size: 1.05rem; color: #666; margin-bottom: 40px; }
+
+.section { margin-bottom: 56px; scroll-margin-top: 70px; }
+h2.section-heading {
+  font-size: 1.45rem; color: #1a3c5e; margin-bottom: 16px;
+  padding-bottom: 10px; border-bottom: 2px solid #e0e4ea;
+}
+h3.sub-heading { font-size: 1.05rem; color: #1a3c5e; margin: 24px 0 10px; font-weight: 700; }
+h4.detail-heading { font-size: 0.95rem; color: #333; margin: 18px 0 8px; font-weight: 700; }
+
+p { margin-bottom: 12px; font-size: 0.9rem; }
+ul, ol { padding-left: 24px; margin-bottom: 14px; }
+li { font-size: 0.9rem; margin-bottom: 6px; }
+li strong { color: #1a3c5e; }
+
+.callout {
+  border-radius: 8px; padding: 14px 18px; margin: 16px 0; font-size: 0.875rem; line-height: 1.6;
+}
+.callout-tip { background: #e8f4fd; border-left: 4px solid #17a2b8; color: #0c5460; }
+.callout-note { background: #fff3cd; border-left: 4px solid #ffc107; color: #856404; }
+.callout-warn { background: #f8d7da; border-left: 4px solid #dc3545; color: #721c24; }
+.callout-success { background: #d4edda; border-left: 4px solid #28a745; color: #155724; }
+.callout strong { font-weight: 700; display: block; margin-bottom: 4px; }
+
+.step-list { list-style: none; padding-left: 0; counter-reset: steps; }
+.step-list li {
+  counter-increment: steps; display: flex; gap: 14px; align-items: flex-start;
+  margin-bottom: 14px; font-size: 0.9rem;
+}
+.step-list li::before {
+  content: counter(steps); flex-shrink: 0; width: 26px; height: 26px;
+  background: #1a3c5e; color: #fff; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.78rem; font-weight: 700; margin-top: 1px;
+}
+
+.kbd {
+  display: inline-block; background: #f0f2f5; border: 1px solid #ced4da;
+  border-radius: 4px; padding: 2px 6px; font-size: 0.8rem; font-family: monospace;
+  color: #333;
+}
+code {
+  background: #f0f2f5; border-radius: 3px; padding: 1px 5px;
+  font-family: monospace; font-size: 0.85em; color: #c7254e;
+}
+pre {
+  background: #1e2b3a; color: #c8daea; border-radius: 8px;
+  padding: 16px 20px; overflow-x: auto; margin: 14px 0; font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+.feature-card {
+  background: #fff; border: 1px solid #e0e4ea; border-radius: 8px; padding: 16px 18px;
+}
+.feature-card h4 { font-size: 0.9rem; color: #1a3c5e; margin-bottom: 6px; }
+.feature-card p { font-size: 0.82rem; color: #666; margin: 0; }
+
+.table-wrap { overflow-x: auto; margin: 14px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+th { background: #1a3c5e; color: #fff; padding: 9px 14px; text-align: left; font-weight: 600; }
+td { padding: 8px 14px; border-bottom: 1px solid #e0e4ea; }
+tr:nth-child(even) td { background: #f8f9fb; }
+tr:hover td { background: #f0f5ff; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;
+}
+.badge-blue { background: #d1ecf1; color: #0c5460; }
+.badge-green { background: #d4edda; color: #155724; }
+.badge-yellow { background: #fff3cd; color: #856404; }
+.badge-red { background: #f8d7da; color: #721c24; }
+
+.back-top {
+  position: fixed; bottom: 28px; right: 28px;
+  background: #1a3c5e; color: #fff; width: 40px; height: 40px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; text-decoration: none; font-size: 1.1rem; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  opacity: 0; transition: opacity 0.2s;
+}
+.back-top.visible { opacity: 1; }
+
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .content { padding: 24px 20px; }
+  .feature-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div>
+    <h1>Financial AI Analyzer — User Manual</h1>
+    <div class="version">Version 1.0 &nbsp;&middot;&nbsp; Last updated March 2026</div>
+  </div>
+  <a href="{{ url_prefix }}/">&larr; Back to Dashboard</a>
+</div>
+
+<div class="layout">
+  <!-- Sidebar TOC -->
+  <nav class="sidebar" id="sidebar">
+    <div class="toc-group">
+      <div class="toc-section-title">Getting Started</div>
+      <a href="#overview" class="toc-link top-level" data-section="overview">Overview</a>
+      <a href="#login" class="toc-link" data-section="login">Logging In</a>
+      <a href="#navigation" class="toc-link" data-section="navigation">Navigation</a>
+      <a href="#entities" class="toc-link" data-section="entities">Entities &amp; Tax Years</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-section-title">Importing Data</div>
+      <a href="#gmail" class="toc-link top-level" data-section="gmail">Connecting Gmail</a>
+      <a href="#gmail-setup" class="toc-link" data-section="gmail-setup">OAuth Setup</a>
+      <a href="#gmail-run" class="toc-link" data-section="gmail-run">Running an Import</a>
+      <a href="#paypal" class="toc-link top-level" data-section="paypal">PayPal &amp; Venmo</a>
+      <a href="#bank" class="toc-link top-level" data-section="bank">Bank CSV Import</a>
+      <a href="#url-import" class="toc-link top-level" data-section="url-import">URL Importer</a>
+      <a href="#cloud" class="toc-link top-level" data-section="cloud">Cloud Storage</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-section-title">Transactions &amp; Documents</div>
+      <a href="#transactions" class="toc-link top-level" data-section="transactions">Transactions</a>
+      <a href="#txn-add" class="toc-link" data-section="txn-add">Adding Manually</a>
+      <a href="#txn-filter" class="toc-link" data-section="txn-filter">Filtering &amp; Search</a>
+      <a href="#txn-categorize" class="toc-link" data-section="txn-categorize">Categorizing</a>
+      <a href="#documents" class="toc-link top-level" data-section="documents">Documents</a>
+      <a href="#ai-analysis" class="toc-link" data-section="ai-analysis">AI Analysis</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-section-title">Features</div>
+      <a href="#chat" class="toc-link top-level" data-section="chat">AI Chat Assistant</a>
+      <a href="#reports" class="toc-link top-level" data-section="reports">Reports &amp; Exports</a>
+      <a href="#settings" class="toc-link top-level" data-section="settings">Settings</a>
+      <a href="#users" class="toc-link top-level" data-section="users">User Management</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-section-title">Reference</div>
+      <a href="#csv-formats" class="toc-link top-level" data-section="csv-formats">CSV Column Reference</a>
+      <a href="#categories" class="toc-link top-level" data-section="categories">Category List</a>
+      <a href="#troubleshooting" class="toc-link top-level" data-section="troubleshooting">Troubleshooting</a>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="content">
+    <h1 class="doc-title">Financial AI Analyzer</h1>
+    <p class="doc-subtitle">Complete user manual for tax document management and bookkeeping</p>
+
+    <!-- =========================================================== -->
+    <section class="section" id="overview">
+      <h2 class="section-heading">Overview</h2>
+      <p>Financial AI Analyzer is a self-hosted bookkeeping assistant that combines document management with AI-powered analysis. It connects to your Paperless-ngx document library, imports transactions from Gmail receipts, PayPal, Venmo, and bank CSV files, and lets you query everything through a conversational AI interface.</p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h4>&#128196; Document Analysis</h4>
+          <p>Pull documents from Paperless-ngx and let AI extract amounts, vendors, dates, and tax categories automatically.</p>
+        </div>
+        <div class="feature-card">
+          <h4>&#128178; Transaction Import</h4>
+          <p>Import transactions from Gmail, PayPal, Venmo, and any bank's CSV export in a single click.</p>
+        </div>
+        <div class="feature-card">
+          <h4>&#129302; AI Chat</h4>
+          <p>Ask questions like "What did I spend on software in 2024?" and get instant answers from your data.</p>
+        </div>
+        <div class="feature-card">
+          <h4>&#128200; Reports &amp; Exports</h4>
+          <p>Generate profit &amp; loss summaries, export to CSV, JSON, IIF (QuickBooks), OFX, TXF, or PDF.</p>
+        </div>
+        <div class="feature-card">
+          <h4>&#127968; Multi-Entity</h4>
+          <p>Track multiple entities (personal, business, farm) in a single installation with per-entity filtering.</p>
+        </div>
+        <div class="feature-card">
+          <h4>&#128274; Self-Hosted</h4>
+          <p>All data stays on your server. No third-party cloud sync or SaaS subscriptions required.</p>
+        </div>
+      </div>
+
+      <h3 class="sub-heading">System Requirements</h3>
+      <ul>
+        <li>Docker / Docker Compose on the host server</li>
+        <li>Paperless-ngx instance (for document analysis features)</li>
+        <li>An Anthropic API key (Claude) or OpenAI API key for AI features</li>
+        <li>A modern web browser — Chrome, Firefox, Safari, or Edge</li>
+      </ul>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="login">
+      <h2 class="section-heading">Logging In</h2>
+      <p>Navigate to the app URL (e.g., <code>https://yourserver.example.com/tax-ai-analyzer</code>). You will be redirected to the login page if you are not already authenticated.</p>
+      <ol class="step-list">
+        <li>Enter your <strong>Username</strong> and <strong>Password</strong>.</li>
+        <li>Check <strong>Remember me</strong> if you want to stay logged in across browser sessions.</li>
+        <li>Click <strong>Sign In</strong>.</li>
+      </ol>
+      <div class="callout callout-tip">
+        <strong>Default credentials</strong>
+        The default admin account is username <code>admin</code> with password <code>admin123</code>. Change this immediately after first login via Settings &rarr; Users.
+      </div>
+      <div class="callout callout-note">
+        <strong>Session expiry</strong>
+        Sessions expire after 24 hours by default. With "Remember me" enabled, the session persists for 30 days via a secure cookie.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="navigation">
+      <h2 class="section-heading">Navigation</h2>
+      <p>The interface is a single-page application with a fixed left sidebar and a top bar.</p>
+
+      <h3 class="sub-heading">Top Bar</h3>
+      <ul>
+        <li><strong>Entity selector</strong> — filter all views to a specific entity (Personal, VoIPGuru, Martinfeld Ranch, etc.).</li>
+        <li><strong>Tax Year selector</strong> — filter all views to a specific tax year.</li>
+        <li><strong>User menu</strong> — access settings and log out.</li>
+      </ul>
+
+      <h3 class="sub-heading">Sidebar Tabs</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Icon</th><th>Tab</th><th>Purpose</th></tr>
+          <tr><td>&#9783;</td><td>Dashboard</td><td>Summary cards, entity grid, recent activity feed</td></tr>
+          <tr><td>&#128176;</td><td>Transactions</td><td>All transactions — filter, categorize, add manually</td></tr>
+          <tr><td>&#128196;</td><td>Documents</td><td>Paperless documents with AI analysis status</td></tr>
+          <tr><td>&#8645;</td><td>Import</td><td>Gmail, PayPal, Venmo, Bank CSV, URL, Cloud adapters</td></tr>
+          <tr><td>&#128172;</td><td>Chat</td><td>AI assistant chat sessions</td></tr>
+          <tr><td>&#128202;</td><td>Reports</td><td>P&amp;L summaries and export generation</td></tr>
+          <tr><td>&#9881;</td><td>Settings</td><td>API keys, Paperless URL, email settings</td></tr>
+          <tr><td>&#128100;</td><td>Users</td><td>User management (admin only)</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Keyboard Shortcuts</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Key</th><th>Action</th></tr>
+          <tr><td><span class="kbd">1</span> – <span class="kbd">8</span></td><td>Switch to tab 1–8 (when focus is not in an input)</td></tr>
+          <tr><td><span class="kbd">?</span></td><td>Open this documentation page</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="entities">
+      <h2 class="section-heading">Entities &amp; Tax Years</h2>
+      <p>An <strong>entity</strong> represents a person, business, or farm whose finances you are tracking. Each transaction and document is associated with one entity and one tax year.</p>
+
+      <h3 class="sub-heading">Default Entities</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Name</th><th>Slug</th><th>Type</th></tr>
+          <tr><td>Personal</td><td><code>personal</code></td><td>Personal</td></tr>
+          <tr><td>VoIPGuru</td><td><code>voipguru</code></td><td>Business</td></tr>
+          <tr><td>Martinfeld Ranch</td><td><code>martinfeld_ranch</code></td><td>Farm</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Adding or Editing Entities</h3>
+      <ol class="step-list">
+        <li>Go to <strong>Settings</strong> tab.</li>
+        <li>Click <strong>Manage Entities</strong> to expand the entity editor.</li>
+        <li>Click <strong>+ Add Entity</strong>, enter a name, slug (no spaces), and type.</li>
+        <li>Click <strong>Save</strong>. The new entity appears in the entity selector immediately.</li>
+      </ol>
+
+      <h3 class="sub-heading">Tax Years</h3>
+      <p>Default tax years are 2022–2025. You can add future years in Settings &rarr; Tax Years. All transaction filters and report generators respect the currently selected year.</p>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="gmail">
+      <h2 class="section-heading">Connecting Gmail</h2>
+      <p>The Gmail importer scans your inbox for receipts, invoices, 1099s, W-2s, and other financial documents. It downloads attachments and creates transactions from the extracted data.</p>
+    </section>
+
+    <section class="section" id="gmail-setup">
+      <h2 class="section-heading">Gmail OAuth Setup</h2>
+      <p>Gmail requires a one-time OAuth 2.0 setup via Google Cloud Console. Navigate to <strong>Import &rarr; Gmail</strong> and click <strong>Gmail Setup</strong> to launch the guided assistant.</p>
+
+      <ol class="step-list">
+        <li>Go to <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a> and create or select a project.</li>
+        <li>Enable the <strong>Gmail API</strong>: APIs &amp; Services &rarr; Library &rarr; search "Gmail API" &rarr; Enable.</li>
+        <li>Go to <strong>OAuth consent screen</strong>. Select <strong>External</strong> user type (required for personal @gmail.com accounts).</li>
+        <li>Fill in an app name and your email address. Add your Gmail address as a <strong>Test User</strong>.</li>
+        <li>Go to <strong>Credentials</strong> &rarr; Create Credentials &rarr; <strong>OAuth client ID</strong>.</li>
+        <li>Select application type: <strong>Desktop app</strong> (not "Web application").</li>
+        <li>Download the JSON file. Upload it via Import &rarr; Gmail &rarr; Gmail Setup &rarr; Manual Upload tab.</li>
+        <li>Click <strong>Connect Gmail Account</strong> to complete the OAuth flow in your browser.</li>
+      </ol>
+
+      <div class="callout callout-tip">
+        <strong>AI-guided setup</strong>
+        The Gmail Setup page has an AI-guided assistant mode. Type what you see on screen and the assistant will give step-by-step instructions tailored to your situation.
+      </div>
+      <div class="callout callout-note">
+        <strong>Testing mode is fine</strong>
+        Your Google app will stay in "Testing" mode permanently. This is completely normal and does not affect functionality as long as you are listed as a test user.
+      </div>
+      <div class="callout callout-warn">
+        <strong>Credential type must be "Desktop app"</strong>
+        A common mistake is choosing "Web application" instead. If you receive redirect URI errors during authorization, re-create the credentials as a Desktop app.
+      </div>
+    </section>
+
+    <section class="section" id="gmail-run">
+      <h2 class="section-heading">Running a Gmail Import</h2>
+      <p>Once credentials and a token are configured, running an import is one click.</p>
+
+      <ol class="step-list">
+        <li>Go to <strong>Import &rarr; Gmail</strong>.</li>
+        <li>Select the <strong>Entity</strong> and <strong>Tax Year</strong> to associate with imported transactions.</li>
+        <li>Click <strong>Start Gmail Import</strong>.</li>
+        <li>The job runs in the background. Watch the progress in <strong>Import &rarr; Import Jobs</strong>.</li>
+      </ol>
+
+      <h3 class="sub-heading">What gets imported</h3>
+      <p>The importer searches for emails matching these keywords: <code>receipt invoice statement payment billing 1099 W-2 tax order</code>. For each matching email, it:</p>
+      <ul>
+        <li>Extracts the subject, sender, date, and body.</li>
+        <li>Downloads PDF/image attachments and sends them to Paperless-ngx for OCR and storage.</li>
+        <li>Uses AI to extract vendor name, amount, category, and tax year from the content.</li>
+        <li>Creates a transaction record with the extracted data.</li>
+      </ul>
+
+      <div class="callout callout-tip">
+        <strong>Years covered</strong>
+        By default the importer covers 2022–2025. Change this in Settings &rarr; Gmail Years, or set the <code>GMAIL_YEARS</code> environment variable.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="paypal">
+      <h2 class="section-heading">PayPal &amp; Venmo CSV Import</h2>
+      <p>Export a transaction CSV from your PayPal or Venmo account and upload it directly.</p>
+
+      <h3 class="sub-heading">Exporting from PayPal</h3>
+      <ol class="step-list">
+        <li>Log into PayPal and go to <strong>Activity</strong>.</li>
+        <li>Click <strong>Download</strong> (top right), select <strong>CSV</strong> format.</li>
+        <li>Choose your date range (full year recommended) and download.</li>
+      </ol>
+
+      <h3 class="sub-heading">Exporting from Venmo</h3>
+      <ol class="step-list">
+        <li>Log into Venmo and go to <strong>Statements</strong> (Settings &rarr; Privacy &rarr; Download your data, or the Statements link).</li>
+        <li>Select the year and download the CSV.</li>
+      </ol>
+
+      <h3 class="sub-heading">Uploading</h3>
+      <ol class="step-list">
+        <li>Go to <strong>Import &rarr; PayPal</strong> (or Venmo).</li>
+        <li>Select the entity and tax year.</li>
+        <li>Click <strong>Choose File</strong> and select your CSV.</li>
+        <li>Click <strong>Import</strong>. The job runs in the background.</li>
+      </ol>
+
+      <div class="callout callout-note">
+        <strong>Duplicate handling</strong>
+        Transactions are upserted by a unique key (date + amount + description) so re-importing the same CSV will not create duplicates.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="bank">
+      <h2 class="section-heading">Bank CSV Import</h2>
+      <p>Most banks allow exporting a CSV of transactions. The importer supports a generic format with auto-detection for common bank layouts.</p>
+
+      <h3 class="sub-heading">Supported formats</h3>
+      <ul>
+        <li>Chase Bank CSV (Date, Description, Amount columns)</li>
+        <li>Bank of America CSV</li>
+        <li>Wells Fargo CSV</li>
+        <li>Generic OFX-to-CSV exports</li>
+        <li>Any CSV with <code>date</code>, <code>description</code> (or <code>memo</code>), and <code>amount</code> columns</li>
+      </ul>
+
+      <h3 class="sub-heading">Steps</h3>
+      <ol class="step-list">
+        <li>Download your bank statement as CSV from your bank's website.</li>
+        <li>Go to <strong>Import &rarr; Bank CSV</strong>.</li>
+        <li>Select entity and tax year.</li>
+        <li>Upload the CSV and click <strong>Import</strong>.</li>
+      </ol>
+
+      <div class="callout callout-tip">
+        <strong>Column mapping</strong>
+        If the importer cannot detect your bank's format, check the CSV Format Reference section below for the expected column names.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="url-import">
+      <h2 class="section-heading">URL Importer</h2>
+      <p>The URL importer downloads a CSV or JSON file from a URL on a recurring schedule — useful for integrations that expose a downloadable export endpoint.</p>
+
+      <ol class="step-list">
+        <li>Go to <strong>Import &rarr; URL</strong>.</li>
+        <li>Enter the URL, file format (CSV/JSON), entity, and tax year.</li>
+        <li>Set the polling interval (in minutes).</li>
+        <li>Click <strong>Add URL Poller</strong>. The background scheduler will fetch the URL at the specified interval.</li>
+      </ol>
+
+      <h3 class="sub-heading">Authentication</h3>
+      <p>If the URL requires HTTP Basic authentication, enter the credentials in the <strong>Username</strong> and <strong>Password</strong> fields. For Bearer tokens, enter the token in the Password field and leave Username empty.</p>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="cloud">
+      <h2 class="section-heading">Cloud Storage Import</h2>
+      <p>The cloud adapter connects to Google Drive, Dropbox, or Amazon S3 to scan for CSV and PDF files and import them automatically.</p>
+
+      <h3 class="sub-heading">Supported Providers</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Provider</th><th>Credential required</th></tr>
+          <tr><td>Google Drive</td><td>Service account JSON or OAuth token</td></tr>
+          <tr><td>Dropbox</td><td>App access token</td></tr>
+          <tr><td>Amazon S3</td><td>Access key ID + secret + bucket name</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Configuration</h3>
+      <ol class="step-list">
+        <li>Go to <strong>Import &rarr; Cloud</strong>.</li>
+        <li>Select a provider and enter the required credentials.</li>
+        <li>Specify the folder or bucket path to scan.</li>
+        <li>Click <strong>Connect &amp; Scan</strong>. A background job will fetch matching files.</li>
+      </ol>
+
+      <div class="callout callout-note">
+        <strong>Optional feature</strong>
+        Cloud adapters require optional Python packages (<code>google-api-python-client</code>, <code>dropbox</code>, <code>boto3</code>). If not installed, the Cloud tab will display an installation notice.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="transactions">
+      <h2 class="section-heading">Transactions</h2>
+      <p>The Transactions tab shows all financial records — income and expenses — across all import sources.</p>
+    </section>
+
+    <section class="section" id="txn-add">
+      <h2 class="section-heading">Adding Transactions Manually</h2>
+      <ol class="step-list">
+        <li>In the Transactions tab, click <strong>+ Add Transaction</strong>.</li>
+        <li>Fill in: Date, Description, Amount (positive for income, negative for expense), Category, Entity, Tax Year.</li>
+        <li>Optionally add a Vendor, Notes, and Source tag.</li>
+        <li>Click <strong>Save</strong>.</li>
+      </ol>
+    </section>
+
+    <section class="section" id="txn-filter">
+      <h2 class="section-heading">Filtering &amp; Searching Transactions</h2>
+      <p>The filter bar at the top of the Transactions tab supports:</p>
+      <ul>
+        <li><strong>Search</strong> — full-text search across description, vendor, and notes fields.</li>
+        <li><strong>Category</strong> — filter to a single category.</li>
+        <li><strong>Type</strong> — Income, Expense, or All.</li>
+        <li><strong>Date range</strong> — start and end date pickers.</li>
+        <li><strong>Entity / Year</strong> — inherited from the global selectors in the top bar.</li>
+      </ul>
+      <p>Click <strong>Apply Filters</strong> or press <span class="kbd">Enter</span> to update the list. Click <strong>Reset</strong> to clear all filters.</p>
+    </section>
+
+    <section class="section" id="txn-categorize">
+      <h2 class="section-heading">Categorizing Transactions</h2>
+      <p>Each transaction has a category used in reports and tax exports. Categories are based on IRS Schedule C / Schedule F lines for business and farm entities, and common personal finance buckets for personal entities.</p>
+
+      <h3 class="sub-heading">Changing a category</h3>
+      <ol class="step-list">
+        <li>Click anywhere on a transaction row to expand it.</li>
+        <li>Click the <strong>Category</strong> field and select a new category from the dropdown.</li>
+        <li>Changes are saved automatically.</li>
+      </ol>
+
+      <h3 class="sub-heading">AI Re-categorize</h3>
+      <p>To let AI suggest a category for a transaction, click the <strong>AI</strong> button next to the category field. The AI will analyze the description and vendor name and suggest the most appropriate category.</p>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="documents">
+      <h2 class="section-heading">Documents</h2>
+      <p>The Documents tab shows all documents imported from Paperless-ngx. It displays the document title, date, page count, OCR content length, and AI analysis status.</p>
+
+      <h3 class="sub-heading">Document status badges</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Badge</th><th>Meaning</th></tr>
+          <tr><td><span class="badge badge-green">analyzed</span></td><td>AI has extracted transactions from this document</td></tr>
+          <tr><td><span class="badge badge-yellow">pending</span></td><td>Queued for analysis</td></tr>
+          <tr><td><span class="badge badge-red">error</span></td><td>Analysis failed — hover for error details</td></tr>
+          <tr><td><span class="badge badge-blue">vision_ai</span></td><td>Poor OCR detected; re-analyzed with Vision AI</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="ai-analysis">
+      <h2 class="section-heading">AI Document Analysis</h2>
+      <p>The AI analyzer polls Paperless-ngx for new documents and automatically extracts financial data. You can also trigger analysis manually.</p>
+
+      <h3 class="sub-heading">Triggering analysis manually</h3>
+      <ol class="step-list">
+        <li>Go to the <strong>Documents</strong> tab.</li>
+        <li>Click <strong>Run AI Analysis</strong> (top right).</li>
+        <li>The analyzer will process any unanalyzed documents. Progress is shown in the activity feed.</li>
+      </ol>
+
+      <h3 class="sub-heading">Vision AI fallback</h3>
+      <p>When the analyzer detects poor OCR quality (e.g., scanned images, handwritten forms), it automatically falls back to sending document images directly to Claude's Vision API. Documents processed this way are tagged <code>aianomaly:vision_ai_extracted</code> in Paperless-ngx.</p>
+
+      <div class="callout callout-note">
+        <strong>Paperless-ngx connection</strong>
+        AI analysis requires a running Paperless-ngx instance. Configure the URL and API token in Settings &rarr; Paperless.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="chat">
+      <h2 class="section-heading">AI Chat Assistant</h2>
+      <p>The Chat tab provides a conversational interface to your financial data. Ask questions in plain English and receive answers drawn from your transactions, documents, and summaries.</p>
+
+      <h3 class="sub-heading">Starting a new chat</h3>
+      <ol class="step-list">
+        <li>Go to the <strong>Chat</strong> tab.</li>
+        <li>Click <strong>New Session</strong>.</li>
+        <li>Type your question in the input box and press <span class="kbd">Enter</span> or click <strong>Send</strong>.</li>
+      </ol>
+
+      <h3 class="sub-heading">Example questions</h3>
+      <ul>
+        <li>"What are my total business expenses for 2024?"</li>
+        <li>"Which vendor did I pay the most in 2023?"</li>
+        <li>"List all income transactions over $500 for the VoIPGuru entity."</li>
+        <li>"What categories do I still need receipts for?"</li>
+        <li>"Summarize my Schedule C deductions for 2024."</li>
+        <li>"Are there any transactions that look like duplicates?"</li>
+      </ul>
+
+      <h3 class="sub-heading">Chat history</h3>
+      <p>All sessions are saved. Click any session in the left panel of the Chat tab to reload the conversation. Sessions can be deleted by hovering the session title and clicking the trash icon.</p>
+
+      <div class="callout callout-tip">
+        <strong>Context matters</strong>
+        The AI uses your current entity and year filters when answering. Switch entities using the top bar before asking entity-specific questions.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="reports">
+      <h2 class="section-heading">Reports &amp; Exports</h2>
+      <p>The Reports tab generates financial summaries and downloadable export files.</p>
+
+      <h3 class="sub-heading">Available reports</h3>
+      <ul>
+        <li><strong>Profit &amp; Loss Summary</strong> — income minus expenses by category for the selected entity and year.</li>
+        <li><strong>Category Breakdown</strong> — bar chart and table showing spending by category.</li>
+        <li><strong>Monthly Trend</strong> — income and expense totals by month.</li>
+        <li><strong>Top Vendors</strong> — highest-spend vendors for the selected period.</li>
+      </ul>
+
+      <h3 class="sub-heading">Export formats</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Format</th><th>Use case</th></tr>
+          <tr><td>CSV</td><td>Excel / Google Sheets analysis</td></tr>
+          <tr><td>JSON</td><td>Custom integrations, backup</td></tr>
+          <tr><td>IIF</td><td>QuickBooks Desktop import</td></tr>
+          <tr><td>OFX</td><td>QuickBooks Online, Quicken, Mint</td></tr>
+          <tr><td>TXF</td><td>TurboTax and most US tax software</td></tr>
+          <tr><td>PDF</td><td>Printable P&amp;L for your accountant</td></tr>
+          <tr><td>ZIP</td><td>All formats bundled together</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Generating an export</h3>
+      <ol class="step-list">
+        <li>Select the entity and tax year using the top bar.</li>
+        <li>In the Reports tab, choose the export format.</li>
+        <li>Click <strong>Generate</strong>. The file is prepared in the background.</li>
+        <li>Once ready, click <strong>Download</strong>.</li>
+      </ol>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="settings">
+      <h2 class="section-heading">Settings</h2>
+      <p>The Settings tab configures connections, API keys, and application behavior.</p>
+
+      <div class="table-wrap">
+        <table>
+          <tr><th>Setting</th><th>Description</th></tr>
+          <tr><td>LLM Provider</td><td>anthropic or openai</td></tr>
+          <tr><td>LLM API Key</td><td>Your Anthropic or OpenAI API key</td></tr>
+          <tr><td>LLM Model</td><td>Model name (e.g. <code>claude-sonnet-4-6</code>)</td></tr>
+          <tr><td>Paperless URL</td><td>Base URL of your Paperless-ngx instance</td></tr>
+          <tr><td>Paperless Token</td><td>API token from Paperless-ngx admin panel</td></tr>
+          <tr><td>Gmail Years</td><td>Comma-separated list of years to search</td></tr>
+          <tr><td>Export Path</td><td>Server path where exports are saved</td></tr>
+          <tr><td>Poll Interval</td><td>How often (seconds) to poll Paperless for new documents</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Testing connections</h3>
+      <p>After entering settings, use the <strong>Test LLM</strong> and <strong>Test Paperless</strong> buttons to verify connectivity before saving.</p>
+
+      <div class="callout callout-warn">
+        <strong>API key security</strong>
+        API keys are stored in the SQLite database on your server. Use HTTPS and keep your server firewall properly configured to prevent unauthorized access.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="users">
+      <h2 class="section-heading">User Management</h2>
+      <p>The Users tab is visible to admin accounts only. It allows creating, editing, and deactivating user accounts.</p>
+
+      <h3 class="sub-heading">User roles</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Role</th><th>Access level</th></tr>
+          <tr><td>admin</td><td>Full access including Users tab and all settings</td></tr>
+          <tr><td>standard</td><td>Full access except Users tab and destructive settings</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Adding a user</h3>
+      <ol class="step-list">
+        <li>Go to <strong>Users</strong> tab.</li>
+        <li>Click <strong>+ Add User</strong>.</li>
+        <li>Enter username, email, password, and role.</li>
+        <li>Click <strong>Create User</strong>.</li>
+      </ol>
+
+      <h3 class="sub-heading">Resetting a password</h3>
+      <ol class="step-list">
+        <li>Find the user in the Users list.</li>
+        <li>Click <strong>Reset Password</strong> in the action menu.</li>
+        <li>Enter a new password and confirm.</li>
+        <li>Click <strong>Set Password</strong>.</li>
+      </ol>
+
+      <h3 class="sub-heading">Deactivating a user</h3>
+      <p>Click the <strong>Deactivate</strong> button next to a user. Deactivated users cannot log in but their data is retained. You can reactivate them later.</p>
+
+      <div class="callout callout-warn">
+        <strong>Admin protection</strong>
+        You cannot deactivate your own account or the last remaining admin account.
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="csv-formats">
+      <h2 class="section-heading">CSV Column Reference</h2>
+      <p>When the auto-detector cannot identify your CSV format, ensure your file has columns matching these names (case-insensitive).</p>
+
+      <h3 class="sub-heading">Generic bank CSV</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Column</th><th>Required</th><th>Description</th></tr>
+          <tr><td>date</td><td>Yes</td><td>Transaction date (YYYY-MM-DD, MM/DD/YYYY, etc.)</td></tr>
+          <tr><td>description or memo</td><td>Yes</td><td>Transaction description</td></tr>
+          <tr><td>amount</td><td>Yes</td><td>Positive for deposits, negative for withdrawals</td></tr>
+          <tr><td>debit / credit</td><td>Alt</td><td>Separate debit and credit columns (either/or with amount)</td></tr>
+          <tr><td>category</td><td>No</td><td>Pre-assigned category (will be mapped or overridden by AI)</td></tr>
+          <tr><td>reference or check_number</td><td>No</td><td>Reference number for dedup</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">PayPal CSV (standard export)</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Column</th><th>Notes</th></tr>
+          <tr><td>Date</td><td>MM/DD/YYYY format</td></tr>
+          <tr><td>Name</td><td>Counterparty name</td></tr>
+          <tr><td>Type</td><td>Transaction type (Payment Sent, etc.)</td></tr>
+          <tr><td>Status</td><td>Completed transactions are imported; others skipped</td></tr>
+          <tr><td>Gross</td><td>Amount with currency symbol (e.g. $-12.50)</td></tr>
+          <tr><td>Fee</td><td>PayPal fee (added to gross for net amount)</td></tr>
+          <tr><td>Net</td><td>Used if Gross is missing</td></tr>
+          <tr><td>Transaction ID</td><td>Used for dedup</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Venmo CSV (standard export)</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Column</th><th>Notes</th></tr>
+          <tr><td>Datetime</td><td>ISO 8601 format</td></tr>
+          <tr><td>Type</td><td>Payment or Charge</td></tr>
+          <tr><td>Status</td><td>Complete transactions only</td></tr>
+          <tr><td>Note</td><td>Payment memo (used as description)</td></tr>
+          <tr><td>From</td><td>Sender name</td></tr>
+          <tr><td>To</td><td>Recipient name</td></tr>
+          <tr><td>Amount (total)</td><td>With + or - sign</td></tr>
+          <tr><td>ID</td><td>Used for dedup</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="categories">
+      <h2 class="section-heading">Category List</h2>
+      <p>These are the built-in categories used for transactions and reports. Business and farm entities map to IRS schedule lines.</p>
+
+      <h3 class="sub-heading">Business (Schedule C)</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Category</th><th>IRS Line</th></tr>
+          <tr><td>Advertising</td><td>Line 8</td></tr>
+          <tr><td>Car and Truck Expenses</td><td>Line 9</td></tr>
+          <tr><td>Commissions and Fees</td><td>Line 10</td></tr>
+          <tr><td>Contract Labor</td><td>Line 11</td></tr>
+          <tr><td>Depletion</td><td>Line 12</td></tr>
+          <tr><td>Depreciation</td><td>Line 13</td></tr>
+          <tr><td>Employee Benefits</td><td>Line 14</td></tr>
+          <tr><td>Insurance</td><td>Line 15</td></tr>
+          <tr><td>Interest - Mortgage</td><td>Line 16a</td></tr>
+          <tr><td>Interest - Other</td><td>Line 16b</td></tr>
+          <tr><td>Legal and Professional</td><td>Line 17</td></tr>
+          <tr><td>Office Expenses</td><td>Line 18</td></tr>
+          <tr><td>Pension / Profit Sharing</td><td>Line 19</td></tr>
+          <tr><td>Rent - Machinery</td><td>Line 20a</td></tr>
+          <tr><td>Rent - Other Business Property</td><td>Line 20b</td></tr>
+          <tr><td>Repairs and Maintenance</td><td>Line 21</td></tr>
+          <tr><td>Supplies</td><td>Line 22</td></tr>
+          <tr><td>Taxes and Licenses</td><td>Line 23</td></tr>
+          <tr><td>Travel</td><td>Line 24a</td></tr>
+          <tr><td>Meals (50%)</td><td>Line 24b</td></tr>
+          <tr><td>Utilities</td><td>Line 25</td></tr>
+          <tr><td>Wages</td><td>Line 26</td></tr>
+          <tr><td>Software / SaaS</td><td>Line 27a (other)</td></tr>
+          <tr><td>Business Income</td><td>Line 1 (gross receipts)</td></tr>
+          <tr><td>Other Income</td><td>Line 6</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Personal</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Category</th></tr>
+          <tr><td>Housing</td></tr>
+          <tr><td>Food &amp; Dining</td></tr>
+          <tr><td>Transportation</td></tr>
+          <tr><td>Healthcare</td></tr>
+          <tr><td>Entertainment</td></tr>
+          <tr><td>Shopping</td></tr>
+          <tr><td>Education</td></tr>
+          <tr><td>Insurance</td></tr>
+          <tr><td>Subscriptions</td></tr>
+          <tr><td>Personal Income</td></tr>
+          <tr><td>Uncategorized</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- =========================================================== -->
+    <section class="section" id="troubleshooting">
+      <h2 class="section-heading">Troubleshooting</h2>
+
+      <h3 class="sub-heading">Login issues</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Problem</th><th>Solution</th></tr>
+          <tr><td>"Invalid username or password"</td><td>Check username spelling. Default credentials: admin / admin123.</td></tr>
+          <tr><td>Redirected to login on every page</td><td>Clear browser cookies. Ensure the server is accessible via HTTPS (required for secure cookies in production).</td></tr>
+          <tr><td>Account locked / inactive</td><td>An admin must reactivate the account in the Users tab.</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Import issues</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Problem</th><th>Solution</th></tr>
+          <tr><td>Gmail import fails immediately</td><td>Check that credentials.json and the OAuth token are both present in Settings &rarr; Gmail status. Re-run Gmail Setup if the token is expired.</td></tr>
+          <tr><td>CSV import shows 0 records</td><td>Check that the file has the expected column names. See CSV Column Reference above. Try opening the file in a text editor to inspect the headers.</td></tr>
+          <tr><td>Import job stuck at "running"</td><td>Check the container logs: <code>docker logs tax-ai-analyzer</code>. Restart the container if the job has not progressed in 10+ minutes.</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">AI / LLM issues</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Problem</th><th>Solution</th></tr>
+          <tr><td>Chat returns "API key not configured"</td><td>Go to Settings and enter your Anthropic or OpenAI API key. Click Test LLM to verify.</td></tr>
+          <tr><td>AI analysis is slow</td><td>Large documents take longer. Check container resource limits in docker-compose.yml. Reduce parallel analysis workers if memory is constrained.</td></tr>
+          <tr><td>AI gives wrong categories</td><td>You can manually override categories on any transaction. The AI uses description and vendor — adding more context in the Notes field improves future suggestions.</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Paperless-ngx connection</h3>
+      <div class="table-wrap">
+        <table>
+          <tr><th>Problem</th><th>Solution</th></tr>
+          <tr><td>Documents tab shows 0 documents</td><td>Verify Paperless URL and API token in Settings. Click Test Paperless. Ensure Paperless is running: <code>docker ps | grep paperless</code>.</td></tr>
+          <tr><td>Documents show "error" badge</td><td>Check container logs for the specific document ID. Common cause: OCR extracted no text and Vision AI fallback is not enabled.</td></tr>
+        </table>
+      </div>
+
+      <h3 class="sub-heading">Checking logs</h3>
+      <pre>
+# View real-time logs for the analyzer
+docker logs -f tax-ai-analyzer
+
+# View last 100 lines
+docker logs --tail 100 tax-ai-analyzer
+
+# View Paperless-ngx logs
+docker logs -f tax-paperless-web</pre>
+
+      <div class="callout callout-tip">
+        <strong>Activity feed</strong>
+        The Dashboard tab shows a real-time activity feed of recent operations. This is often the fastest way to see what happened during an import or analysis run without needing to check logs.
+      </div>
+    </section>
+
+    <p style="color:#aaa;font-size:0.8rem;margin-top:40px;padding-top:20px;border-top:1px solid #e0e4ea;">
+      Financial AI Analyzer &mdash; Self-hosted tax document management &amp; bookkeeping assistant.<br>
+      For support, check the container logs or open an issue on the project repository.
+    </p>
+  </div>
+</div>
+
+<!-- Back to top button -->
+<a href="#" class="back-top" id="back-top" title="Back to top">&#8593;</a>
+
+<script>
+// Sticky TOC highlighting
+var sections = document.querySelectorAll('.section[id]');
+var tocLinks = document.querySelectorAll('.toc-link[data-section]');
+var backTop = document.getElementById('back-top');
+
+function updateToc() {
+  var scrollTop = window.scrollY + 80;
+  var current = '';
+  sections.forEach(function(s) {
+    if (s.offsetTop <= scrollTop) current = s.id;
+  });
+  tocLinks.forEach(function(a) {
+    a.classList.toggle('active', a.dataset.section === current);
+  });
+  if (backTop) backTop.classList.toggle('visible', window.scrollY > 300);
+}
+
+window.addEventListener('scroll', updateToc, {passive: true});
+updateToc();
+
+// Smooth scroll for TOC links
+tocLinks.forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    var target = document.getElementById(a.dataset.section);
+    if (target) {
+      e.preventDefault();
+      target.scrollIntoView({behavior: 'smooth', block: 'start'});
+      history.replaceState(null, '', '#' + a.dataset.section);
+    }
+  });
+});
+
+// Restore scroll position from hash on load
+if (window.location.hash) {
+  var target = document.querySelector(window.location.hash);
+  if (target) setTimeout(function() { target.scrollIntoView({behavior: 'smooth'}); }, 150);
+}
+</script>
+</body>
+</html>

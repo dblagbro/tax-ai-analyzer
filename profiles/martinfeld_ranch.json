@@ -1,0 +1,22 @@
+{
+  "entity": "martinfeld_ranch",
+  "display_name": "Martinfeld Ranch (Farm)",
+  "income_types": ["farm_sales", "1099-MISC", "crop_insurance"],
+  "deduction_categories": [
+    "Farm Equipment",
+    "Feed & Supplies",
+    "Fuel & Oil",
+    "Fertilizer & Seeds",
+    "Livestock Purchases",
+    "Veterinary",
+    "Farm Insurance",
+    "Property Tax (farm)",
+    "Repairs & Maintenance",
+    "Utilities (farm)"
+  ],
+  "vendor_hints": [
+    "Tractor Supply", "Agway", "Deere", "Southern States",
+    "local feed stores", "veterinary clinics", "fuel suppliers"
+  ],
+  "tax_forms": ["Schedule F", "Form 4562", "1040"]
+}

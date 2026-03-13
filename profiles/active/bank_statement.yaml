@@ -1,0 +1,13 @@
+profile_id: bank_statement
+display_name: "Bank Statement"
+version: "1.0"
+match:
+  keywords:
+    any: ["account statement", "bank statement", "checking", "savings", "deposits",
+          "withdrawals", "beginning balance", "ending balance", "wells fargo",
+          "chase", "bank of america", "us alliance", "ally"]
+  min_score: 0.2
+financial:
+  category: other
+  doc_type: bank_statement
+tags: ["bank", "statement"]
