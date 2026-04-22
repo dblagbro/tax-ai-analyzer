@@ -9,14 +9,12 @@ from flask_login import login_required
 
 from app import db
 from app.config import URL_PREFIX
-from app.routes._state import _is_analyzing as _analyzing_flag
 from app.routes.helpers import _row_list
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("analyze", __name__)
 
-# Module-level flag — imported from _state but shadowed here for write access
 import app.routes._state as _state
 
 
@@ -29,76 +27,138 @@ def api_analyze_trigger():
     def _run():
         _state._is_analyzing = True
         try:
-            from app.paperless_client import get_all_document_ids, get_document, apply_tags
-            from app.categorizer import categorize
-            from app.extractor import extract
-            from app.state import is_analyzed, mark_analyzed
-            from app.vector_store import index_document
+            from app import config
+            from app.paperless_client import PaperlessClient
+            from app.llm_client import LLMClient
+            from app.checks.financial_rules import apply_business_rules, validate_document
+
+            llm_provider = db.get_setting("llm_provider") or config.LLM_PROVIDER
+            llm_api_key = db.get_setting("llm_api_key") or config.LLM_API_KEY
+            llm_model = db.get_setting("llm_model") or config.LLM_MODEL
+            paperless_token = db.get_setting("paperless_api_token") or config.PAPERLESS_API_TOKEN
+
+            if not llm_api_key:
+                db.log_activity("analysis_error", "LLM API key not configured")
+                return
+
+            client = PaperlessClient(token=paperless_token)
+            llm = LLMClient(provider=llm_provider, api_key=llm_api_key, model=llm_model)
 
             db.log_activity("analysis_started", "Manual trigger")
-            doc_ids = get_all_document_ids()
-            new_ids = [d for d in doc_ids if not is_analyzed(d)]
+            all_ids = client.get_all_document_ids()
+            analyzed_ids = db.get_analyzed_doc_ids()
+            new_ids = [d for d in all_ids if d not in analyzed_ids]
             analyzed = 0
 
             for doc_id in new_ids[:20]:
                 try:
-                    doc = get_document(doc_id)
+                    doc = client.get_document(doc_id)
                     content = doc.get("content", "")
                     title = doc.get("title", f"Document {doc_id}")
+                    tags = [t for t in doc.get("tags", [])]
+
+                    entity_hint = "personal"
+                    year_hint = None
+                    for tag_name in tags:
+                        if isinstance(tag_name, str):
+                            if tag_name.startswith("tax-"):
+                                entity_hint = tag_name[4:]
+                            elif tag_name.startswith("year-"):
+                                year_hint = tag_name[5:]
+
                     if not content or len(content.strip()) < 10:
-                        mark_analyzed(doc_id, {"doc_id": doc_id, "title": title,
-                                               "skipped": True, "reason": "no_content"})
+                        db.mark_document_analyzed(
+                            doc_id, None, year_hint, "other", "other",
+                            "", None, None, 0.1, "{}"
+                        )
                         continue
-                    cat = categorize(content, title)
-                    ext = extract(content)
-                    result = {
-                        "doc_id": doc_id, "title": title,
-                        "analyzed_at": datetime.utcnow().isoformat(),
-                        **cat,
-                        **{k: v for k, v in ext.items()
-                           if v is not None and k not in cat},
-                    }
-                    from app.checks.financial_rules import apply_business_rules
+
+                    result = llm.analyze_document(content, title, entity_hint, year_hint)
                     result = apply_business_rules(result, content, title)
-                    entity_tag = cat.get("entity") or "personal"
-                    year_tag = str(cat.get("tax_year") or "unknown")
-                    tags = [t for t in cat.get("tags", []) if t] + [
-                        f"tax-{entity_tag}", f"year-{year_tag}"]
-                    try:
-                        apply_tags(doc_id, tags)
-                    except Exception:
-                        pass
-                    try:
-                        index_document(doc_id, title, content, {
-                            "doc_type": cat.get("doc_type"),
-                            "category": cat.get("category"),
-                            "entity": cat.get("entity"),
-                            "tax_year": cat.get("tax_year"),
-                        })
-                    except Exception:
-                        pass
-                    mark_analyzed(doc_id, result)
-                    entity_row = db.get_entity(slug=entity_tag)
+
+                    entity = db.get_entity(slug=result.get("entity", entity_hint))
+                    entity_id = entity["id"] if entity else None
+                    tax_year = result.get("tax_year") or year_hint
+
+                    validation = validate_document(
+                        result.get("doc_type", "other"),
+                        result.get("category", "other"),
+                        result.get("amount"),
+                        result.get("date"),
+                        tax_year,
+                        result,
+                    )
+                    confidence = max(0.0, (result.get("confidence", 0.7)
+                                          - validation.get("confidence_penalty", 0)))
+
+                    ai_title = result.get("title", "").strip()
+                    if not ai_title:
+                        parts = [result.get("doc_type", "")]
+                        if result.get("vendor"):
+                            parts.append(f"— {result['vendor']}")
+                        if tax_year:
+                            parts.append(f"({tax_year})")
+                        ai_title = " ".join(p for p in parts if p) or title
+
+                    is_dup = False
+                    if result.get("vendor") and result.get("amount") and result.get("date"):
+                        is_dup = db.is_near_duplicate_analyzed_doc(
+                            vendor=result.get("vendor", ""),
+                            amount=result.get("amount"),
+                            date=result.get("date"),
+                            doc_type=result.get("doc_type", "other"),
+                            paperless_doc_id=doc_id,
+                        )
+
                     db.mark_document_analyzed(
                         paperless_doc_id=doc_id,
-                        entity_id=entity_row["id"] if entity_row else None,
-                        tax_year=year_tag,
-                        doc_type=cat.get("doc_type", "other"),
-                        category=cat.get("category", "other"),
-                        vendor=cat.get("vendor") or "",
-                        amount=float(cat.get("amount") or 0),
-                        date=ext.get("date") or "",
-                        confidence=float(cat.get("confidence") or 0),
-                        extracted_json=json.dumps(ext),
+                        entity_id=entity_id,
+                        tax_year=str(tax_year) if tax_year else None,
+                        doc_type=result.get("doc_type", "other"),
+                        category=result.get("category", "other"),
+                        vendor=result.get("vendor", ""),
+                        amount=result.get("amount"),
+                        date=result.get("date"),
+                        confidence=confidence,
+                        extracted_json=json.dumps(result),
+                        title=ai_title,
+                        is_duplicate=1 if is_dup else 0,
                     )
-                    analyzed += 1
+
+                    try:
+                        from app import vector_store as vs
+                        vs.embed_document(
+                            doc_id=str(doc_id),
+                            title=ai_title,
+                            content=content[:4000],
+                            metadata={
+                                "entity_slug": result.get("entity", entity_hint),
+                                "tax_year": str(tax_year) if tax_year else "",
+                                "doc_type": result.get("doc_type", "other"),
+                                "category": result.get("category", "other"),
+                                "vendor": result.get("vendor", ""),
+                                "amount": str(result.get("amount") or ""),
+                            },
+                        )
+                    except Exception:
+                        pass
+
+                    entity_slug = result.get("entity", entity_hint)
+                    tag_year = str(tax_year) if tax_year else "unknown"
+                    tags_to_apply = [f"tax-{entity_slug}", f"year-{tag_year}",
+                                     result.get("doc_type", "other")]
+                    try:
+                        client.apply_tags(doc_id, [t for t in tags_to_apply if t])
+                    except Exception:
+                        pass
+
                     db.log_activity("doc_analyzed",
-                                    f"Doc {doc_id}: {cat.get('doc_type')} / "
-                                    f"{entity_tag} / ${cat.get('amount') or 0}")
+                                    f"Doc {doc_id}: {result.get('doc_type')} / "
+                                    f"{entity_slug} / ${result.get('amount') or 0}")
+                    analyzed += 1
                 except Exception as e:
                     logger.error("Error analyzing doc %d: %s", doc_id, e)
-                    mark_analyzed(doc_id, {"doc_id": doc_id, "error": str(e),
-                                           "analyzed_at": datetime.utcnow().isoformat()})
+
             db.log_activity("analysis_complete", f"Analyzed {analyzed} docs")
         except Exception as e:
             db.log_activity("analysis_error", str(e))

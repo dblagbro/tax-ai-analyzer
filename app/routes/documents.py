@@ -26,25 +26,14 @@ def api_documents_list():
     rows = db.get_analyzed_documents(entity_id=entity_id, tax_year=year,
                                      category=category, limit=limit)
     docs = _row_list(rows)
-    try:
-        from app.state import get_result
-        for d in docs:
-            if not d.get("title"):
-                sr = get_result(d.get("paperless_doc_id") or 0)
-                paperless_title = sr.get("title", "")
-                if paperless_title:
-                    d["title"] = paperless_title
-                else:
-                    parts = [d.get("doc_type", "")]
-                    if d.get("vendor"):
-                        parts.append(f"— {d['vendor']}")
-                    if d.get("tax_year"):
-                        parts.append(f"({d['tax_year']})")
-                    d["title"] = " ".join(p for p in parts if p) or f"Document {d.get('paperless_doc_id','?')}"
-    except Exception:
-        for d in docs:
-            if not d.get("title"):
-                d["title"] = f"Document {d.get('paperless_doc_id','?')}"
+    for d in docs:
+        if not d.get("title"):
+            parts = [d.get("doc_type", "")]
+            if d.get("vendor"):
+                parts.append(f"— {d['vendor']}")
+            if d.get("tax_year"):
+                parts.append(f"({d['tax_year']})")
+            d["title"] = " ".join(p for p in parts if p) or f"Document {d.get('paperless_doc_id','?')}"
     return jsonify({"total": len(docs), "documents": docs})
 
 
@@ -114,8 +103,6 @@ def api_backfill_titles():
 @login_required
 def api_document_detail(doc_id):
     try:
-        from app.state import get_result
-        state_doc = get_result(doc_id)
         paperless_doc = {}
         try:
             from app.paperless_client import get_document
@@ -129,7 +116,7 @@ def api_document_detail(doc_id):
             (doc_id,)).fetchone()
         conn.close()
         db_rec = dict(row) if row else {}
-        return jsonify({**paperless_doc, **state_doc, **db_rec, "doc_id": doc_id})
+        return jsonify({**paperless_doc, **db_rec, "doc_id": doc_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -142,17 +129,11 @@ def api_document_recategorize(doc_id):
             from app.paperless_client import get_document, apply_tags
             from app.categorizer import categorize
             from app.extractor import extract
-            from app.state import mark_analyzed
             doc = get_document(doc_id)
             content = doc.get("content", "")
             title = doc.get("title", f"Document {doc_id}")
             cat = categorize(content, title)
             ext = extract(content)
-            result = {"doc_id": doc_id, "title": title,
-                      "analyzed_at": datetime.utcnow().isoformat(), "recategorized": True,
-                      **cat,
-                      **{k: v for k, v in ext.items() if v is not None and k not in cat}}
-            mark_analyzed(doc_id, result)
             entity_row = db.get_entity(slug=cat.get("entity", "personal"))
             db.mark_document_analyzed(
                 paperless_doc_id=doc_id,

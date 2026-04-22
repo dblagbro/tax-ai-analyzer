@@ -1,11 +1,13 @@
 """Shared decorators and helper functions used across all Blueprint modules."""
+import json
+import os
 from functools import wraps
 
 from flask import jsonify, make_response, redirect, request
 from flask_login import current_user
 
 from app import db
-from app.config import URL_PREFIX
+from app.config import URL_PREFIX, LLM_MODEL
 
 
 def _url(path: str) -> str:
@@ -71,3 +73,34 @@ def _user_can_write_session(sess) -> bool:
         s["shared_with_user_id"] == current_user.id and s["can_write"]
         for s in shares
     )
+
+
+def setup_chat_stream(system_prompt: str, history: list, user_message: str):
+    """SSE generator factory for guided setup chat endpoints (Gmail, PayPal, etc.)."""
+    settings = db.get_all_settings()
+    api_key = settings.get("llm_api_key") or os.environ.get("LLM_API_KEY", "")
+    model = settings.get("llm_model") or LLM_MODEL
+
+    messages = []
+    for h in history[-20:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": user_message})
+
+    def _generate():
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            with client.messages.stream(
+                model=model, max_tokens=1024,
+                system=system_prompt,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return _generate

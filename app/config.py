@@ -90,10 +90,24 @@ DEFAULT_TAX_YEARS = [str(y) for y in range(2015, 2027)]
 # ── Polling ───────────────────────────────────────────────────────────────────
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))
 
-# ── Legacy compat (kept so old imports don't break) ──────────────────────────
 ENTITIES = [e["slug"] for e in DEFAULT_ENTITIES]
 TAX_YEARS = DEFAULT_TAX_YEARS
-STATE_FILE = os.path.join(DATA_DIR, "tax_analyzer_state.json")
+
+
+def validate():
+    """Log warnings for missing required settings at startup."""
+    warnings = []
+    if not LLM_API_KEY:
+        warnings.append("LLM_API_KEY is not set — document analysis will not run")
+    if not PAPERLESS_API_TOKEN:
+        warnings.append("PAPERLESS_API_TOKEN is not set — Paperless polling will not work")
+    if LLM_PROVIDER not in ("anthropic", "openai"):
+        warnings.append(f"LLM_PROVIDER='{LLM_PROVIDER}' is not a known provider (anthropic, openai)")
+    if WEB_PORT < 1 or WEB_PORT > 65535:
+        warnings.append(f"WEB_PORT={WEB_PORT} is out of valid range 1-65535")
+    for w in warnings:
+        logger.warning("CONFIG: %s", w)
+    return warnings
 
 
 def get_flask_secret_key() -> str:

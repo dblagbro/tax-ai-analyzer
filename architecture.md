@@ -49,17 +49,20 @@ app/
 │
 ├── routes/             — Flask Blueprint modules (one domain per file)
 │   ├── _state.py       — Shared in-process mutable globals (job logs, stop events)
-│   ├── helpers.py      — Shared decorators and helper functions
+│   ├── helpers.py      — Shared decorators, helper functions, setup_chat_stream SSE factory
 │   ├── __init__.py     — register_blueprints(app) wiring function
 │   ├── auth.py         — /login, /logout
 │   ├── pages.py        — SPA shell routes (render dashboard.html per tab)
 │   ├── stats.py        — /api/stats, /api/activity, /api/health, filed returns
 │   ├── entities.py     — /api/entities/*, /api/user/profile
 │   ├── documents.py    — /api/documents/*
-│   ├── transactions.py — /api/transactions/*, CSV parse helpers
-│   ├── import_.py      — /api/import/*: Gmail, PayPal, US Alliance, CSV/OFX/URL/LocalFS
+│   ├── transactions.py — /api/transactions/*
+│   ├── import_.py      — /api/import/*: CSV (PayPal/Venmo/Bank), URL, OFX, LocalFS
 │   ├── import_jobs.py  — /api/import/jobs/*: job CRUD, log polling, cancel
 │   ├── import_cloud.py — /api/cloud/*: GDrive, Dropbox, S3; /api/filed-returns/import-from-folder
+│   ├── import_gmail.py — /api/import/gmail/*, /import/gmail/*: OAuth + import
+│   ├── import_paypal.py— /api/import/paypal/*: API pull + setup chat
+│   ├── import_usalliance.py— /api/import/usalliance/*: Playwright scraper
 │   ├── export_.py      — /api/export/*, /export/<year>/<slug>
 │   ├── tax_review.py   — /api/tax-review (SSE streaming)
 │   ├── settings.py     — /api/settings/*, LLM/Paperless test endpoints
@@ -70,6 +73,7 @@ app/
 │   └── folder_manager.py— /api/folder-manager/*
 │
 ├── importers/          — Data source importers (one per source)
+│   ├── csv_runner.py   — parse_csv() + run_csv_job() shared by all CSV import routes
 │   ├── gmail_importer.py
 │   ├── paypal_api.py
 │   ├── usalliance_importer.py

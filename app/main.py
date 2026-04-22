@@ -233,6 +233,7 @@ def main():
 
     db.init_db()
     db.ensure_default_data()
+    config.validate()
     _log("Financial AI Analyzer starting...")
     _log(f"Web UI: http://0.0.0.0:{config.WEB_PORT}{config.URL_PREFIX}/")
 

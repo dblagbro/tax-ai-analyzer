@@ -35,13 +35,10 @@ def api_stats():
                 "net": round(es["net"], 2),
                 "doc_count": sum(es["counts"].values()),
             }
-        total_docs = 0
-        try:
-            from app.state import get_stats as ss
-            total_docs = ss().get("total", 0)
-        except Exception:
-            pass
         conn = db.get_connection()
+        total_docs = conn.execute(
+            "SELECT COUNT(*) FROM analyzed_documents"
+        ).fetchone()[0]
         dup_count = conn.execute(
             "SELECT COUNT(*) FROM analyzed_documents WHERE is_duplicate=1"
         ).fetchone()[0]
