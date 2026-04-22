@@ -58,8 +58,8 @@ def api_analyze_trigger():
                         **{k: v for k, v in ext.items()
                            if v is not None and k not in cat},
                     }
-                    from app.main import _apply_business_rules
-                    result = _apply_business_rules(result, content, title)
+                    from app.checks.financial_rules import apply_business_rules
+                    result = apply_business_rules(result, content, title)
                     entity_tag = cat.get("entity") or "personal"
                     year_tag = str(cat.get("tax_year") or "unknown")
                     tags = [t for t in cat.get("tags", []) if t] + [

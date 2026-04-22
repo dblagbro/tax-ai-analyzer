@@ -57,7 +57,9 @@ app/
 │   ├── entities.py     — /api/entities/*, /api/user/profile
 │   ├── documents.py    — /api/documents/*
 │   ├── transactions.py — /api/transactions/*, CSV parse helpers
-│   ├── import_.py      — /api/import/*, Gmail OAuth, PayPal, US Alliance, cloud adapters
+│   ├── import_.py      — /api/import/*: Gmail, PayPal, US Alliance, CSV/OFX/URL/LocalFS
+│   ├── import_jobs.py  — /api/import/jobs/*: job CRUD, log polling, cancel
+│   ├── import_cloud.py — /api/cloud/*: GDrive, Dropbox, S3; /api/filed-returns/import-from-folder
 │   ├── export_.py      — /api/export/*, /export/<year>/<slug>
 │   ├── tax_review.py   — /api/tax-review (SSE streaming)
 │   ├── settings.py     — /api/settings/*, LLM/Paperless test endpoints
@@ -81,8 +83,8 @@ app/
 ├── cloud_adapters/     — Optional cloud storage backends
 │   ├── google_drive.py, dropbox_adapter.py
 │
-├── checks/             — Deterministic document validation rules
-│   └── financial_rules.py
+├── checks/             — Deterministic classification rules
+│   └── financial_rules.py  — validate_document(), check_*, apply_business_rules()
 │
 └── templates/          — Jinja2 templates
     ├── dashboard.html  — SPA shell (31-line wrapper; all content via {% include %})

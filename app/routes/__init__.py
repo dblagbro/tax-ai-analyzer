@@ -9,6 +9,8 @@ def register_blueprints(app):
     from app.routes.documents import bp as documents_bp
     from app.routes.transactions import bp as transactions_bp
     from app.routes.import_ import bp as import_bp
+    from app.routes.import_jobs import bp as import_jobs_bp
+    from app.routes.import_cloud import bp as import_cloud_bp
     from app.routes.export_ import bp as export_bp
     from app.routes.tax_review import bp as tax_review_bp
     from app.routes.settings import bp as settings_bp
@@ -26,6 +28,8 @@ def register_blueprints(app):
         documents_bp,
         transactions_bp,
         import_bp,
+        import_jobs_bp,
+        import_cloud_bp,
         export_bp,
         tax_review_bp,
         settings_bp,

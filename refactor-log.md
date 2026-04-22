@@ -116,3 +116,36 @@
 | `_modal_paypal.html` | 643 | PayPal Setup modal HTML + its JS |
 
 **Verification**: `render_template("dashboard.html", ...)` inside `tax-ai-analyzer` container renders 289,115 bytes. All 18 structural markers (tab IDs, modal IDs, `</body>`, `</html>`) confirmed present.
+
+---
+
+## Incremental Refactor #1 (completed)
+
+Three targeted improvements to maintainability and module boundaries.
+
+### 1 — Deleted `web_ui_monolith.py` (3,568 lines)
+
+The original monolith had been kept as a fallback reference after Phase 4. With all 120 routes verified in production and Phase 5 template rendering confirmed, it was dead code. Removed.
+
+### 2 — Split `routes/import_.py` (1,290 → 876 lines) into 3 files
+
+| File | Lines | Responsibility |
+|------|-------|----------------|
+| `routes/import_.py` | 876 | Gmail, PayPal, US Alliance, CSV/OFX/URL/LocalFS — transactional import sources |
+| `routes/import_jobs.py` | 74 | Job CRUD, log polling, cancel — orthogonal to import source choice |
+| `routes/import_cloud.py` | 375 | GDrive, Dropbox, S3, filed-return AI extraction — remote storage adapters |
+
+**Why this split**: Job management (debugging a stuck job, polling logs, cancelling) is a distinct operator concern from import source orchestration. Cloud adapters are already fully abstracted in `app/cloud_adapters/`; the route file is a thin HTTP wrapper and deserved its own home. Adding a new cloud adapter now only touches `import_cloud.py`.
+
+`url_for("import_.api_gdrive_callback")` references updated to `url_for("import_cloud.api_gdrive_callback")` in the auth routes — URL path unchanged, only the Flask endpoint name changed.
+
+### 3 — Moved `_apply_business_rules` from `main.py` to `checks/financial_rules.py`
+
+`main.py` is the process entry point (daemon orchestration). It was exporting domain classification logic that `routes/analyze.py` imported via `from app.main import _apply_business_rules` — a route importing from the entry point is a layering violation.
+
+- **Moved to**: `app/checks/financial_rules.py` as `apply_business_rules()` (now public)
+- **Updated callers**: `main.py` and `routes/analyze.py` both now import from `checks.financial_rules`
+- **`main.py`**: 353 → 303 lines
+- **`checks/financial_rules.py`**: 256 → 311 lines
+
+**Verification**: All 6 changed modules import cleanly in container. All 5 tested endpoints present in `app.url_map`. `apply_business_rules` logic confirmed correct (proposal override test passes).
