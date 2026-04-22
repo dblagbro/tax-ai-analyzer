@@ -8,12 +8,17 @@ AI-powered financial document management and tax preparation tool. Organizes doc
 
 ## Features
 
-- **Multi-source import** — Local folders, Gmail, Google Drive, Dropbox, PayPal
+- **Multi-source import** — Local folders, Gmail, Google Drive, Dropbox, PayPal, US Alliance FCU (Playwright-based)
 - **AI document analysis** — Claude-powered OCR, categorization, vendor/amount/date extraction
 - **Vision AI fallback** — When OCR fails, Claude reads document images directly
+- **Duplicate detection** — Automatic near-duplicate flagging and PDF content-hash deduplication across imports
 - **Multi-entity support** — Manage Personal, LLC, Corp, DBA entities in a hierarchy
 - **Transaction tracking** — Import bank CSVs, OFX/QFX files with AI categorization
-- **AI Chat** — Natural language Q&A about your finances, exportable as PDF
+- **AI Chat** — Natural language Q&A about your finances, exportable as PDF; multi-turn Tax Review mode
+- **Tax Review** — AI acts as a tax accountant, streaming questions and flags for any year; compare against filed 1040 data
+- **Filed Tax Returns** — Enter actual 1040 data (income, AGI, deductions, refund) for year-over-year comparison
+- **Folder Manager** — Browse, rename, and queue local document folders for import with AI-assisted rename suggestions
+- **AI Cost Tracking** — Per-model token and cost breakdown for all LLM calls
 - **Multiple export formats** — CSV, PDF report, OFX/QFX, TurboTax TXF, QuickBooks IIF, JSON, ZIP bundle
 - **Elasticsearch integration** — Optional vector search across all documents
 
@@ -108,6 +113,7 @@ Use **Admin → Entities** to manage your entity tree. The **Merge / Acquire** f
 | Google Drive | OAuth2 | Import from Drive folder |
 | Dropbox | OAuth2 | Import from Dropbox path |
 | PayPal | API credentials | Client ID + Secret |
+| US Alliance FCU | Username + Password / Cookies | Playwright browser automation; cookie-based session reuse |
 
 ## Export Formats
 

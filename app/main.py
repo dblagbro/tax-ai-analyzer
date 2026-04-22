@@ -184,6 +184,20 @@ def analysis_daemon():
                             parts.append(f"({tax_year})")
                         ai_title = " ".join(p for p in parts if p) or title
 
+                    # Check for near-duplicate before saving
+                    is_dup = False
+                    if result.get("vendor") and result.get("amount") and result.get("date"):
+                        is_dup = db.is_near_duplicate_analyzed_doc(
+                            vendor=result.get("vendor", ""),
+                            amount=result.get("amount"),
+                            date=result.get("date"),
+                            doc_type=result.get("doc_type", "other"),
+                            paperless_doc_id=doc_id,
+                        )
+                        if is_dup:
+                            _log(f"Doc {doc_id} flagged as duplicate: {result.get('vendor')} "
+                                 f"${result.get('amount')} {result.get('date')}")
+
                     # Save to DB
                     db.mark_document_analyzed(
                         paperless_doc_id=doc_id,
@@ -197,6 +211,7 @@ def analysis_daemon():
                         confidence=confidence,
                         extracted_json=json.dumps(result),
                         title=ai_title,
+                        is_duplicate=1 if is_dup else 0,
                     )
 
                     # Embed into vector store for RAG
@@ -240,6 +255,16 @@ def analysis_daemon():
             _analysis_status["analyzed_this_cycle"] = analyzed_this_cycle
             _analysis_status["last_run"] = datetime.utcnow().isoformat()
 
+            # Auto-dedup: if anything was analyzed this cycle, re-scan for duplicates
+            if analyzed_this_cycle > 0:
+                try:
+                    result = db.flag_duplicate_analyzed_docs()
+                    if result["flagged"] > 0:
+                        _log(f"Auto-dedup: flagged {result['flagged']} new duplicates "
+                             f"across {result['groups']} groups")
+                except Exception as de:
+                    _log(f"Auto-dedup error: {de}")
+
         except Exception as e:
             _log(f"Analysis daemon cycle error: {e}")
         finally:
@@ -261,9 +286,57 @@ def main():
     _log("Financial AI Analyzer starting...")
     _log(f"Web UI: http://0.0.0.0:{config.WEB_PORT}{config.URL_PREFIX}/")
 
+    # Seed PDF hash store from any PDFs still sitting in the consume directory
+    # (catches files dropped but not yet ingested by Paperless)
+    try:
+        seeded = 0
+        for root, dirs, files in os.walk(config.CONSUME_PATH):
+            for fname in files:
+                if not fname.lower().endswith(".pdf"):
+                    continue
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath, "rb") as f:
+                        data = f.read()
+                    parts = root.replace(config.CONSUME_PATH, "").strip("/").split("/")
+                    entity_slug = parts[0] if parts else ""
+                    year = parts[1] if len(parts) > 1 else ""
+                    is_new = db.record_pdf_hash(
+                        __import__("hashlib").sha256(data).hexdigest(),
+                        source="consume_seed", filename=fname,
+                        entity_slug=entity_slug, year=year,
+                    )
+                    if is_new:
+                        seeded += 1
+                except Exception:
+                    pass
+        if seeded:
+            _log(f"Seeded {seeded} PDF hashes from consume directory")
+    except Exception as e:
+        _log(f"Consume dir hash seed error: {e}")
+
     # Start analysis daemon
     daemon = threading.Thread(target=analysis_daemon, daemon=True, name="analysis-daemon")
     daemon.start()
+
+    # Daily dedup scan — runs at startup then every 24 hours
+    def _daily_dedup():
+        while True:
+            try:
+                result = db.flag_duplicate_analyzed_docs()
+                if result["flagged"] or result["already_flagged"]:
+                    _log(f"Scheduled dedup scan: {result['flagged']} newly flagged, "
+                         f"{result['already_flagged']} already flagged, "
+                         f"{result['groups']} total groups")
+                hash_stats = db.pdf_hash_stats()
+                _log(f"PDF hash store: {hash_stats['total']} entries "
+                     f"({', '.join(f'{v} {k}' for k,v in hash_stats['by_source'].items())})")
+            except Exception as e:
+                _log(f"Scheduled dedup error: {e}")
+            time.sleep(86400)  # 24 hours
+
+    dedup_thread = threading.Thread(target=_daily_dedup, daemon=True, name="dedup-scheduler")
+    dedup_thread.start()
 
     # Start Flask
     from app.web_ui import app as flask_app

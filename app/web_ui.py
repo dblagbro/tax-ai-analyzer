@@ -201,55 +201,78 @@ def logout():
 # SPA shell — all tabs render dashboard.html
 # ---------------------------------------------------------------------------
 
+def _no_cache_page(html_response):
+    """Add no-cache headers so browsers always fetch fresh HTML."""
+    from flask import make_response
+    resp = make_response(html_response)
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
 @app.route(URL_PREFIX + "/")
 @app.route(URL_PREFIX + "")
 @login_required
 def index():
-    return render_template("dashboard.html", active_tab="dashboard")
+    return _no_cache_page(render_template("dashboard.html", active_tab="dashboard"))
 
 
 @app.route(URL_PREFIX + "/transactions")
 @login_required
 def transactions_page():
-    return render_template("dashboard.html", active_tab="transactions")
+    return _no_cache_page(render_template("dashboard.html", active_tab="transactions"))
 
 
 @app.route(URL_PREFIX + "/documents")
 @login_required
 def documents_page():
-    return render_template("dashboard.html", active_tab="documents")
+    return _no_cache_page(render_template("dashboard.html", active_tab="documents"))
 
 
 @app.route(URL_PREFIX + "/import")
 @login_required
 def import_page():
-    return render_template("dashboard.html", active_tab="import")
+    return _no_cache_page(render_template("dashboard.html", active_tab="import"))
 
 
 @app.route(URL_PREFIX + "/chat")
 @login_required
 def chat_page():
-    return render_template("dashboard.html", active_tab="chat")
+    return _no_cache_page(render_template("dashboard.html", active_tab="chat"))
 
 
 @app.route(URL_PREFIX + "/reports")
 @login_required
 def reports_page():
-    return render_template("dashboard.html", active_tab="reports")
+    return _no_cache_page(render_template("dashboard.html", active_tab="reports"))
 
 
 @app.route(URL_PREFIX + "/settings")
 @login_required
 @admin_required
 def settings_page():
-    return render_template("dashboard.html", active_tab="settings")
+    return _no_cache_page(render_template("dashboard.html", active_tab="settings"))
 
 
 @app.route(URL_PREFIX + "/users")
 @login_required
 @admin_required
 def users_page():
-    return render_template("dashboard.html", active_tab="users")
+    return _no_cache_page(render_template("dashboard.html", active_tab="users"))
+
+
+@app.route(URL_PREFIX + "/entities")
+@login_required
+def entities_page():
+    return _no_cache_page(render_template("dashboard.html", active_tab="entities"))
+
+
+@app.route(URL_PREFIX + "/ai-costs")
+@app.route(URL_PREFIX + "/ai_costs")
+@login_required
+def ai_costs_page():
+    return _no_cache_page(render_template("dashboard.html", active_tab="ai_costs"))
 
 
 @app.route(URL_PREFIX + "/docs")
@@ -453,6 +476,72 @@ Focus on what the client needs to gather or clarify before filing (or for amende
     )
 
 
+@app.route(URL_PREFIX + "/api/tax-review/followup", methods=["POST"])
+@login_required
+def api_tax_review_followup():
+    """Stream a follow-up response in the tax review Q&A thread."""
+    import json as _json
+    data = request.get_json(silent=True) or {}
+    year = data.get("year", "")
+    entity_id = data.get("entity_id")
+    messages = data.get("messages", [])   # [{role, content}, ...] full history
+    if not messages:
+        return jsonify({"error": "messages required"}), 400
+
+    from app.llm_client import LLMClient
+    from app import config as _cfg
+
+    llm_provider = db.get_setting("llm_provider") or _cfg.LLM_PROVIDER
+    llm_api_key = db.get_setting("llm_api_key") or _cfg.LLM_API_KEY
+    llm_model = db.get_setting("llm_model") or _cfg.LLM_MODEL
+
+    # System context so the AI stays in tax-advisor mode
+    system = (
+        f"You are an expert US tax accountant helping a client with their {year} tax return. "
+        "You have already reviewed all their financial documents and generated an initial review. "
+        "Continue the conversation, answering their questions and clarifying items from your review. "
+        "Be specific: reference amounts, document IDs, vendor names, and tax rules where relevant. "
+        "Use markdown formatting."
+    )
+
+    def generate():
+        try:
+            client = LLMClient(provider=llm_provider, api_key=llm_api_key, model=llm_model)
+            if llm_provider == "anthropic":
+                import anthropic
+                ac = anthropic.Anthropic(api_key=llm_api_key)
+                with ac.messages.stream(
+                    model=llm_model,
+                    max_tokens=4096,
+                    system=system,
+                    messages=messages,
+                ) as stream:
+                    for chunk in stream.text_stream:
+                        yield f"data: {_json.dumps({'chunk': chunk})}\n\n"
+            else:
+                # OpenAI
+                import openai as _oai
+                oai = _oai.OpenAI(api_key=llm_api_key)
+                stream = oai.chat.completions.create(
+                    model=llm_model,
+                    messages=[{"role": "system", "content": system}] + messages,
+                    stream=True,
+                )
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        yield f"data: {_json.dumps({'chunk': delta})}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'error': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.route(URL_PREFIX + "/tax-review")
 @login_required
 def tax_review_page():
@@ -487,6 +576,11 @@ def api_stats():
             total_docs = ss().get("total", 0)
         except Exception:
             pass
+        conn = db.get_connection()
+        dup_count = conn.execute(
+            "SELECT COUNT(*) FROM analyzed_documents WHERE is_duplicate=1"
+        ).fetchone()[0]
+        conn.close()
         return jsonify({
             "total_docs": total_docs,
             "analyzed": total_docs,
@@ -494,6 +588,7 @@ def api_stats():
             "total_expenses": round(summary["expense"] + summary["deduction"], 2),
             "net": round(summary["net"], 2),
             "by_entity": by_entity,
+            "duplicate_docs": dup_count,
         })
     except Exception as e:
         logger.error(f"Stats error: {e}")
@@ -771,6 +866,19 @@ def api_documents_list():
             if not d.get("title"):
                 d["title"] = f"Document {d.get('paperless_doc_id','?')}"
     return jsonify({"total": len(docs), "documents": docs})
+
+
+@app.route(URL_PREFIX + "/api/documents/dedup", methods=["POST"])
+@login_required
+@admin_required
+def api_documents_dedup():
+    """Scan analyzed_documents for duplicates and flag them with is_duplicate=1."""
+    result = db.flag_duplicate_analyzed_docs()
+    db.log_activity("dedup_scan",
+        f"Flagged {result['flagged']} duplicates in {result['groups']} groups "
+        f"({result['already_flagged']} already flagged)",
+        user_id=current_user.id)
+    return jsonify({"status": "ok", **result})
 
 
 @app.route(URL_PREFIX + "/api/documents/backfill-titles", methods=["POST"])
@@ -1148,9 +1256,12 @@ def api_import_gmail_start():
                 e = db.get_entity(entity_id=eid)
                 if e:
                     entity_slug = e.get("slug", "personal")
+            def _flush(imported, skipped):
+                db.update_import_job(jid, count_imported=imported,
+                                     count_skipped=skipped)
             result = run_import(entity_id=eid, years=yrs,
                                 consume_path=CONSUME_PATH, entity_slug=entity_slug,
-                                log_fn=log, stop_event=stop)
+                                log_fn=log, stop_event=stop, progress_fn=_flush)
             count = result.get("imported", 0) if isinstance(result, dict) else result
             skipped = result.get("skipped", 0) if isinstance(result, dict) else 0
             filtered = result.get("ai_filtered", 0) if isinstance(result, dict) else 0
@@ -1522,14 +1633,64 @@ def api_usalliance_save_credentials():
     return jsonify({"status": "saved", "message": "Credentials saved."})
 
 
+@app.route(URL_PREFIX + "/api/import/usalliance/cookies", methods=["POST"])
+@login_required
+def api_usalliance_save_cookies():
+    """Save browser session cookies for US Alliance (bypasses bot detection).
+
+    Accepts either a JSON array of cookie objects (exported from browser DevTools)
+    or a raw Netscape/curl cookie string.  The cookies are stored as a JSON string
+    and injected into Playwright before navigation — the login form is skipped.
+    """
+    data = request.get_json() or {}
+    cookies_raw = data.get("cookies")
+    if not cookies_raw:
+        return jsonify({"error": "cookies field is required"}), 400
+
+    # Accept raw JSON array or string
+    if isinstance(cookies_raw, str):
+        try:
+            cookies_list = json.loads(cookies_raw)
+        except Exception:
+            return jsonify({"error": "cookies must be a valid JSON array"}), 400
+    elif isinstance(cookies_raw, list):
+        cookies_list = cookies_raw
+    else:
+        return jsonify({"error": "cookies must be a JSON array"}), 400
+
+    if not isinstance(cookies_list, list) or len(cookies_list) == 0:
+        return jsonify({"error": "cookies must be a non-empty JSON array"}), 400
+
+    db.set_setting("usalliance_cookies", json.dumps(cookies_list))
+    return jsonify({"status": "saved", "message": f"{len(cookies_list)} cookies saved.",
+                    "count": len(cookies_list)})
+
+
+@app.route(URL_PREFIX + "/api/import/usalliance/cookies", methods=["DELETE"])
+@login_required
+def api_usalliance_clear_cookies():
+    """Clear stored browser cookies."""
+    db.set_setting("usalliance_cookies", "")
+    return jsonify({"status": "cleared"})
+
+
 @app.route(URL_PREFIX + "/api/import/usalliance/status", methods=["GET"])
 @login_required
 def api_usalliance_status():
     """Return whether US Alliance credentials are configured."""
     user = db.get_setting("usalliance_username") or ""
+    cookies_raw = db.get_setting("usalliance_cookies") or ""
+    cookies_count = 0
+    if cookies_raw:
+        try:
+            cookies_count = len(json.loads(cookies_raw))
+        except Exception:
+            pass
     return jsonify({
         "configured": bool(user),
         "username_preview": (user[:3] + "…") if len(user) > 3 else user,
+        "cookies_saved": cookies_count > 0,
+        "cookies_count": cookies_count,
     })
 
 
@@ -1546,40 +1707,49 @@ def api_usalliance_test():
     except ImportError:
         return jsonify({"error": "Playwright not installed in this container"}), 500
     try:
+        from playwright_stealth import Stealth
+        _stealth = Stealth(navigator_webdriver=True, navigator_plugins=True,
+                           chrome_app=True, chrome_csi=True, webgl_vendor=True,
+                           navigator_platform_override="Win32")
+    except ImportError:
+        _stealth = None
+    try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-            page = browser.new_page()
-            page.goto("https://www.usalliance.org/", timeout=20000)
-            page.wait_for_selector("input[type='text'],input[type='email'],input[name*='user'],input[id*='user']", timeout=10000)
-            # Try to find and fill login fields
-            for sel in ["input[name*='username' i]", "input[id*='username' i]", "input[type='text']"]:
-                try:
-                    page.fill(sel, username, timeout=3000)
-                    break
-                except Exception:
-                    continue
-            for sel in ["input[name*='password' i]", "input[id*='password' i]", "input[type='password']"]:
-                try:
-                    page.fill(sel, password, timeout=3000)
-                    break
-                except Exception:
-                    continue
-            # Submit
-            try:
-                page.press("input[type='password']", "Enter")
-            except Exception:
-                pass
-            import time as _time
-            _time.sleep(3)
-            # Check for obvious login failure indicators
+            if _stealth:
+                _stealth.hook_playwright_context(p)
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                      "--headless=new", "--disable-blink-features=AutomationControlled",
+                      "--window-size=1280,900"],
+            )
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+                locale="en-US",
+                timezone_id="America/New_York",
+            )
+            page = context.new_page()
+            if _stealth:
+                _stealth.apply_stealth_sync(page)
+            login_url = "https://account.usalliance.org/login"
+            page.goto(login_url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_load_state("networkidle", timeout=15000)
+            page.wait_for_timeout(2000)
             content = page.content().lower()
+            current_url = page.url
             browser.close()
-            if any(w in content for w in ["invalid", "incorrect", "failed", "wrong password", "error"]):
-                return jsonify({"error": "Login failed — invalid credentials"})
-            elif any(w in content for w in ["logout", "sign out", "my account", "dashboard", "accounts"]):
-                return jsonify({"status": "ok", "message": "Login successful"})
+            # If we were blocked/redirected to a 404, bot detection fired
+            if "404 page not found" in content or "404 - page not found" in content:
+                return jsonify({"error": "Portal is blocking this server's browser (bot detection). Stealth is active — try running a full import which may succeed."})
+            # Check if login page loaded
+            if "login" in current_url or "username" in content or "password" in content or "sign in" in content:
+                return jsonify({"status": "ok", "message": "Login page reached successfully. Run a full import to authenticate."})
+            elif "dashboard" in current_url or "account" in current_url:
+                return jsonify({"status": "ok", "message": "Already authenticated (session active)."})
             else:
-                return jsonify({"status": "ok", "message": "Login attempted — check if MFA was triggered"})
+                return jsonify({"status": "ok", "message": f"Portal reached at {current_url}. Run a full import to authenticate."})
     except Exception as e:
         return jsonify({"error": f"Test failed: {str(e)[:200]}"})
 
@@ -1613,6 +1783,15 @@ def api_import_usalliance_start():
     if not username or not password:
         return jsonify({"error": "US Alliance credentials not configured. Save them first."}), 400
 
+    # Load browser cookies if saved (bypass bot detection)
+    cookies = None
+    cookies_raw = db.get_setting("usalliance_cookies") or ""
+    if cookies_raw:
+        try:
+            cookies = json.loads(cookies_raw)
+        except Exception:
+            cookies = None
+
     # Resolve entity slug
     entity_slug = "personal"
     if entity_id:
@@ -1621,10 +1800,11 @@ def api_import_usalliance_start():
             entity_slug = ent.get("slug", "personal")
 
     job_id = db.create_import_job("usalliance", entity_id=entity_id,
-                                  config_json=json.dumps({"years": years}))
+                                  config_json=json.dumps({"years": years,
+                                                          "cookie_auth": cookies is not None}))
     _job_logs[job_id] = []
 
-    def _run(jid, uname, pw, yrs, eid, eslug):
+    def _run(jid, uname, pw, yrs, eid, eslug, ckies):
         log = lambda msg: _append_job_log(jid, msg)
         db.update_import_job(jid, status="running",
                              started_at=datetime.utcnow().isoformat())
@@ -1638,6 +1818,7 @@ def api_import_usalliance_start():
                 entity_slug=eslug,
                 job_id=jid,
                 log=log,
+                cookies=ckies,
             )
             total = result.get("imported", 0)
             db.update_import_job(jid, status="completed", count_imported=total,
@@ -1652,7 +1833,7 @@ def api_import_usalliance_start():
                                  completed_at=datetime.utcnow().isoformat())
 
     threading.Thread(target=_run,
-                     args=(job_id, username, password, years, entity_id, entity_slug),
+                     args=(job_id, username, password, years, entity_id, entity_slug, cookies),
                      daemon=True, name=f"usalliance-{job_id}").start()
     return jsonify({"status": "started", "job_id": job_id})
 
@@ -2418,47 +2599,26 @@ def api_user_entity_access_revoke(user_id, entity_id):
 @login_required
 def api_export_generate(year, entity_slug):
     try:
-        from app.state import get_all_results
-        from app.export.csv_exporter import export_csv
-        from app.export.json_exporter import export_json
-        from app.export.quickbooks import export_iif
-        from app.export.ofx_exporter import export_ofx
-        from app.export.txf_exporter import export_txf
-        from app.export.pdf_report import export_pdf
-        from app.export.zip_bundler import create_bundle
+        from app.export import export_all
 
-        all_docs = list(get_all_results().values())
-        docs = [d for d in all_docs
-                if str(d.get("tax_year", "")) == year
-                and d.get("entity") == entity_slug
-                and not d.get("skipped") and not d.get("error")]
+        entity = db.get_entity(slug=entity_slug)
+        entity_id = entity["id"] if entity else None
+        doc_count = len(db.get_analyzed_documents(entity_id=entity_id, tax_year=year, limit=10000))
 
-        db.log_activity("export_started", f"{entity_slug}/{year}: {len(docs)} docs",
+        db.log_activity("export_started", f"{entity_slug}/{year}: {doc_count} docs",
                         user_id=current_user.id)
-        files, errors = [], []
 
-        for fn in (export_csv, export_json, export_iif, export_ofx, export_txf, export_pdf):
-            try:
-                result = fn(year, entity_slug, docs)
-                if result:
-                    files.append(result)
-            except Exception as e:
-                errors.append(f"{fn.__name__}: {e}")
-
-        zip_path = None
-        if files:
-            try:
-                zip_path = create_bundle(year, entity_slug, files)
-            except Exception as e:
-                errors.append(f"zip: {e}")
+        result = export_all(year, entity_slug)
+        files = result.get("files", {})
+        errors = list(result.get("errors", {}).values())
 
         db.log_activity("export_complete", f"{entity_slug}/{year}",
                         user_id=current_user.id)
         return jsonify({
             "status": "ok", "year": year, "entity": entity_slug,
-            "doc_count": len(docs),
-            "files": [os.path.basename(f) for f in files],
-            "zip": os.path.basename(zip_path) if zip_path else None,
+            "doc_count": doc_count,
+            "files": [os.path.basename(f) for f in files.values()],
+            "zip": os.path.basename(files["zip"]) if "zip" in files else None,
             "errors": errors,
         })
     except Exception as e:
@@ -3101,32 +3261,25 @@ def export_download_direct(year, entity_slug):
             return send_file(path, as_attachment=True, download_name=filename)
     # Generate on the fly
     try:
-        from app.state import get_all_results
-        all_docs = list(get_all_results().values())
-        docs = [d for d in all_docs
-                if str(d.get("tax_year", "")) == year
-                and d.get("entity") == entity_slug
-                and not d.get("skipped") and not d.get("error")]
         if format_name == "csv":
-            from app.export.csv_exporter import export_csv
-            path = export_csv(year, entity_slug, docs)
+            from app.export.csv_exporter import export_transactions_csv
+            path = export_transactions_csv(year, entity_slug)
         elif format_name == "pdf":
             from app.export.pdf_report import export_pdf
-            path = export_pdf(year, entity_slug, docs)
+            path = export_pdf(year, entity_slug)
         elif format_name == "iif":
             from app.export.quickbooks import export_iif
-            path = export_iif(year, entity_slug, docs)
+            path = export_iif(year, entity_slug)
         elif format_name == "ofx":
             from app.export.ofx_exporter import export_ofx
-            path = export_ofx(year, entity_slug, docs)
+            path = export_ofx(year, entity_slug)
         elif format_name == "txf":
             from app.export.txf_exporter import export_txf
-            path = export_txf(year, entity_slug, docs)
+            path = export_txf(year, entity_slug)
         elif format_name == "zip":
-            from app.export.csv_exporter import export_csv
-            from app.export.zip_bundler import create_bundle
-            csv_path = export_csv(year, entity_slug, docs)
-            path = create_bundle(year, entity_slug, [csv_path] if csv_path else [])
+            from app.export import export_all
+            result = export_all(year, entity_slug)
+            path = result.get("files", {}).get("zip")
         else:
             return jsonify({"error": f"unknown format: {format_name}"}), 400
         if path and os.path.exists(path):
@@ -3135,6 +3288,266 @@ def export_download_direct(year, entity_slug):
     except Exception as e:
         logger.error(f"Export error {year}/{entity_slug}/{format_name}: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route(URL_PREFIX + "/api/ai-costs")
+@login_required
+def api_ai_costs():
+    """LLM API usage statistics."""
+    days = request.args.get("days", 30, type=int)
+    from app import llm_usage_tracker as tracker
+    stats = tracker.get_stats(days=days)
+    return jsonify({"stats": stats})
+
+
+@app.route(URL_PREFIX + "/api/ai-costs/recent")
+@login_required
+def api_ai_costs_recent():
+    """Most recent LLM API calls."""
+    limit = request.args.get("limit", 50, type=int)
+    from app import llm_usage_tracker as tracker
+    calls = tracker.get_recent_calls(limit=limit)
+    return jsonify({"calls": calls})
+
+
+@app.route(URL_PREFIX + "/api/filed-returns/import-from-folder", methods=["POST"])
+@login_required
+@admin_required
+def api_import_filed_return_from_folder():
+    """Read a filed tax return PDF from /tax/<year>/ folder and extract 1040 data via AI."""
+    import glob as _glob
+    import base64
+    import re as _re
+    data = request.get_json(silent=True) or {}
+    year = str(data.get("year", "")).strip()
+    entity_id = data.get("entity_id")
+
+    if not year:
+        return jsonify({"error": "year required"}), 400
+
+    tax_base = "/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax"
+    year_dir = os.path.join(tax_base, str(year))
+
+    if not os.path.isdir(year_dir):
+        return jsonify({"error": f"No tax folder found for {year} at {year_dir}"}), 404
+
+    pdfs = sorted(
+        _glob.glob(os.path.join(year_dir, "*.pdf")) +
+        _glob.glob(os.path.join(year_dir, "*.PDF"))
+    )
+    if not pdfs:
+        return jsonify({"error": f"No PDF files found in {year_dir}"}), 404
+
+    # Prefer files that look like a complete filed tax return
+    _RETURN_SIGNALS = ["1040", "client copy", "client_copy", "tax return",
+                       "filed return", "complete return", "blag"]
+    # Exclude files that are clearly NOT the return
+    _EXCLUDE_SIGNALS = ["w2", "w-2", "1099", "1098", "property_tax", "property tax",
+                        "mortgage", "statement", "invoice", "receipt", "billing",
+                        "refi", "initial_disclosure", "interest"]
+
+    def _is_return(path: str) -> bool:
+        name = os.path.basename(path).lower()
+        if any(s in name for s in _EXCLUDE_SIGNALS):
+            return False
+        return any(s in name for s in _RETURN_SIGNALS)
+
+    preferred = [p for p in pdfs if _is_return(p)]
+    pdf_path = preferred[0] if preferred else pdfs[0]
+
+    from app import config as _cfg
+    from app.llm_client import LLMClient
+
+    llm_provider = db.get_setting("llm_provider") or _cfg.LLM_PROVIDER
+    llm_api_key = db.get_setting("llm_api_key") or _cfg.LLM_API_KEY
+    llm_model = db.get_setting("llm_model") or _cfg.LLM_MODEL
+
+    if not llm_api_key:
+        return jsonify({"error": "LLM API key not configured"}), 400
+
+    prompt = (
+        f"This is a US tax return PDF for tax year {year}. "
+        "Extract these fields and return ONLY valid JSON (no markdown):\n"
+        "filing_status, agi, wages_income, business_income, other_income, "
+        "total_income, total_deductions, taxable_income, total_tax, "
+        "refund_amount, amount_owed, preparer_name, preparer_firm, filed_date (YYYY-MM-DD), notes\n"
+        "Use null for fields not found. Numeric fields as numbers not strings."
+    )
+
+    try:
+        with open(pdf_path, "rb") as f:
+            pdf_b64 = base64.b64encode(f.read()).decode()
+    except Exception as e:
+        return jsonify({"error": f"Failed to read PDF: {e}"}), 500
+
+    try:
+        if llm_provider == "anthropic":
+            import anthropic
+            ac = anthropic.Anthropic(api_key=llm_api_key)
+            msg = ac.messages.create(
+                model=llm_model,
+                max_tokens=2000,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }],
+            )
+            raw = msg.content[0].text
+        else:
+            # OpenAI: extract text with pdftotext then send as text
+            import subprocess
+            result = subprocess.run(["pdftotext", pdf_path, "-"], capture_output=True, text=True, timeout=30)
+            pdf_text = result.stdout[:8000] if result.returncode == 0 else ""
+            if not pdf_text:
+                return jsonify({"error": "Could not extract text from PDF"}), 400
+            client = LLMClient(provider=llm_provider, api_key=llm_api_key, model=llm_model)
+            raw = client.chat([{"role": "user", "content": f"Tax return text:\n{pdf_text}\n\n{prompt}"}])
+            if not isinstance(raw, str):
+                raw = str(raw)
+
+        match = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        if not match:
+            return jsonify({"error": "Could not parse JSON from AI response", "raw": raw[:500]}), 500
+        extracted = json.loads(match.group(0))
+    except Exception as e:
+        logger.error(f"Filed return extraction failed: {e}")
+        return jsonify({"error": f"AI extraction failed: {e}"}), 500
+
+    # Resolve entity
+    if not entity_id:
+        ent = db.get_entity(slug="personal")
+        if ent:
+            entity_id = ent["id"]
+    if not entity_id:
+        return jsonify({"error": "entity_id required and could not be resolved"}), 400
+
+    allowed_fields = {
+        "filing_status", "agi", "wages_income", "business_income", "other_income",
+        "total_income", "total_deductions", "taxable_income", "total_tax",
+        "refund_amount", "amount_owed", "preparer_name", "preparer_firm",
+        "filed_date", "notes",
+    }
+    kwargs = {k: v for k, v in extracted.items() if v is not None and k in allowed_fields}
+
+    try:
+        result = db.upsert_filed_return(entity_id=entity_id, tax_year=str(year), **kwargs)
+        return jsonify({
+            "status": "ok",
+            "source": pdf_path,
+            "source_name": os.path.basename(pdf_path),
+            "all_pdfs_found": [os.path.basename(p) for p in pdfs],
+            "extracted": extracted,
+            "return": result,
+        })
+    except Exception as e:
+        return jsonify({"error": f"DB save failed: {e}"}), 500
+
+
+# ── Folder Manager ────────────────────────────────────────────────────────────
+TAX_SOURCE_ROOT = "/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax"
+TAX_CONSUME_ROOT = "/mnt/s/documents/tax-organizer/consume"
+
+
+@app.route(URL_PREFIX + "/api/folder-manager/scan")
+@login_required
+def api_fm_scan():
+    """Return inconsistent folders in the tax archive."""
+    from app.folder_manager import find_inconsistencies, scan_tree
+    year = request.args.get("year")
+    root = os.path.join(TAX_SOURCE_ROOT, year) if year else TAX_SOURCE_ROOT
+    issues = find_inconsistencies(root)
+    return jsonify({"root": root, "issues": issues, "count": len(issues)})
+
+
+@app.route(URL_PREFIX + "/api/folder-manager/tree")
+@login_required
+def api_fm_tree():
+    """Return folder tree for a given year (or root)."""
+    from app.folder_manager import scan_tree
+    year = request.args.get("year")
+    root = os.path.join(TAX_SOURCE_ROOT, year) if year else TAX_SOURCE_ROOT
+    tree = scan_tree(root, max_depth=3)
+    return jsonify({"tree": tree})
+
+
+@app.route(URL_PREFIX + "/api/folder-manager/rename", methods=["POST"])
+@login_required
+@admin_required
+def api_fm_rename():
+    """Rename or merge a single folder. Pass dry_run=false to execute."""
+    from app.folder_manager import rename_folder, merge_folders
+    data = request.get_json(silent=True) or {}
+    src = data.get("src", "").strip()
+    new_name = data.get("new_name", "").strip()
+    dry_run = data.get("dry_run", True)
+    merge = data.get("merge", False)
+
+    if not src or not new_name:
+        return jsonify({"error": "src and new_name required"}), 400
+    # Safety: must be within TAX_SOURCE_ROOT
+    if not os.path.abspath(src).startswith(os.path.abspath(TAX_SOURCE_ROOT)):
+        return jsonify({"error": "Path outside allowed root"}), 403
+
+    from pathlib import Path
+    dst = str(Path(src).parent / new_name)
+    if merge and Path(dst).exists():
+        result = merge_folders(src, dst, dry_run=dry_run)
+    else:
+        result = rename_folder(src, new_name, dry_run=dry_run)
+    return jsonify(result)
+
+
+@app.route(URL_PREFIX + "/api/folder-manager/rename-all", methods=["POST"])
+@login_required
+@admin_required
+def api_fm_rename_all():
+    """Apply all auto-detected renames. Pass dry_run=false to execute."""
+    from app.folder_manager import apply_all_auto_renames
+    data = request.get_json(silent=True) or {}
+    dry_run = data.get("dry_run", True)
+    year = data.get("year")
+    root = os.path.join(TAX_SOURCE_ROOT, year) if year else TAX_SOURCE_ROOT
+    results = apply_all_auto_renames(root, dry_run=dry_run)
+    return jsonify({"dry_run": dry_run, "results": results, "count": len(results)})
+
+
+@app.route(URL_PREFIX + "/api/folder-manager/coverage")
+@login_required
+def api_fm_coverage():
+    """Check which source PDFs are already in Paperless."""
+    from app.folder_manager import check_paperless_coverage
+    from app import config as _cfg
+    year = request.args.get("year")
+    root = os.path.join(TAX_SOURCE_ROOT, year) if year else TAX_SOURCE_ROOT
+    token = db.get_setting("paperless_api_token") or _cfg.PAPERLESS_API_TOKEN
+    url = db.get_setting("paperless_url") or _cfg.PAPERLESS_API_BASE_URL
+    result = check_paperless_coverage(root, token, url)
+    return jsonify(result)
+
+
+@app.route(URL_PREFIX + "/api/folder-manager/queue", methods=["POST"])
+@login_required
+@admin_required
+def api_fm_queue():
+    """Copy source PDFs for a year into the Paperless consume queue."""
+    from app.folder_manager import queue_year_for_paperless
+    data = request.get_json(silent=True) or {}
+    year = str(data.get("year", "")).strip()
+    entity_slug = data.get("entity_slug", "personal")
+    dry_run = data.get("dry_run", True)
+    if not year:
+        return jsonify({"error": "year required"}), 400
+    result = queue_year_for_paperless(TAX_SOURCE_ROOT, year, TAX_CONSUME_ROOT, entity_slug, dry_run=dry_run)
+    return jsonify(result)
+
+
+@app.route(URL_PREFIX + "/folder-manager")
+@login_required
+def folder_manager_page():
+    return render_template("dashboard.html", active_tab="folder_manager")
 
 
 @app.route(URL_PREFIX + "/import/gmail/clear-credentials", methods=["POST"])

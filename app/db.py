@@ -281,6 +281,27 @@ def _migrate(conn):
         conn.execute("ALTER TABLE entities ADD COLUMN sort_order INTEGER DEFAULT 0")
         conn.commit()
 
+    # is_duplicate flag on analyzed_documents
+    ad_cols = {r[1] for r in conn.execute("PRAGMA table_info(analyzed_documents)").fetchall()}
+    if "is_duplicate" not in ad_cols:
+        conn.execute("ALTER TABLE analyzed_documents ADD COLUMN is_duplicate INTEGER DEFAULT 0")
+        conn.commit()
+        logger.info("Migration: added analyzed_documents.is_duplicate")
+
+    # Persistent PDF content-hash store — survives Paperless consume dir clearing
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS pdf_content_hashes (
+            sha256      TEXT PRIMARY KEY,
+            first_seen  TEXT DEFAULT (datetime('now')),
+            source      TEXT,
+            filename    TEXT,
+            entity_slug TEXT,
+            year        TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pdf_hashes_source ON pdf_content_hashes(source);
+    """)
+    conn.commit()
+
     # New tables for sharing and entity-level access control
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS chat_session_shares (
@@ -594,6 +615,7 @@ def mark_document_analyzed(
     confidence: float,
     extracted_json: str = "{}",
     title: str = None,
+    is_duplicate: int = 0,
 ) -> int:
     conn = get_connection()
     try:
@@ -601,8 +623,8 @@ def mark_document_analyzed(
             """
             INSERT INTO analyzed_documents
                 (paperless_doc_id,entity_id,tax_year,title,doc_type,category,vendor,
-                 amount,date,confidence,extracted_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                 amount,date,confidence,extracted_json,is_duplicate)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(paperless_doc_id) DO UPDATE SET
                 entity_id=excluded.entity_id,
                 tax_year=excluded.tax_year,
@@ -614,11 +636,12 @@ def mark_document_analyzed(
                 date=excluded.date,
                 confidence=excluded.confidence,
                 extracted_json=excluded.extracted_json,
+                is_duplicate=excluded.is_duplicate,
                 analyzed_at=datetime('now')
             """,
             (
                 paperless_doc_id, entity_id, tax_year, title, doc_type, category,
-                vendor, amount, date, confidence, extracted_json,
+                vendor, amount, date, confidence, extracted_json, is_duplicate,
             ),
         )
         conn.commit()
@@ -640,6 +663,7 @@ def get_analyzed_documents(
     entity_id: int = None,
     tax_year: str = None,
     category: str = None,
+    include_duplicates: bool = False,
     limit: int = 500,
 ):
     conn = get_connection()
@@ -654,8 +678,10 @@ def get_analyzed_documents(
         if category:
             where.append("d.category=?")
             params.append(category)
+        if not include_duplicates:
+            where.append("(d.is_duplicate IS NULL OR d.is_duplicate=0)")
         w = f"WHERE {' AND '.join(where)}" if where else ""
-        return conn.execute(
+        rows = conn.execute(
             f"""
             SELECT d.*, e.name as entity_name, e.slug as entity_slug, e.color as entity_color
             FROM analyzed_documents d
@@ -664,6 +690,7 @@ def get_analyzed_documents(
             """,
             (*params, limit),
         ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 
@@ -882,7 +909,7 @@ def list_transactions(
             where.append("t.source=?")
             params.append(source)
         w = f"WHERE {' AND '.join(where)}" if where else ""
-        return conn.execute(
+        rows = conn.execute(
             f"""
             SELECT t.*, e.name as entity_name, e.color as entity_color
             FROM transactions t
@@ -891,6 +918,7 @@ def list_transactions(
             """,
             (*params, limit),
         ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 
@@ -1897,6 +1925,151 @@ def append_import_job_log(job_id: int, line: str) -> None:
             (job_id, line),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Duplicate detection for analyzed_documents ────────────────────────────────
+
+def find_duplicate_analyzed_docs() -> list[dict]:
+    """
+    Return all analyzed_document groups where vendor+amount+date+doc_type match
+    more than one record.  Within each group, the record with the highest
+    confidence (ties broken by lowest id) is the canonical one; all others
+    are duplicates.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT vendor, amount, date, doc_type,
+                   COUNT(*) as n,
+                   GROUP_CONCAT(id ORDER BY confidence DESC, id ASC) as id_list
+            FROM analyzed_documents
+            WHERE vendor != '' AND amount IS NOT NULL AND amount > 0 AND date IS NOT NULL
+            GROUP BY vendor, amount, date, doc_type
+            HAVING n > 1
+        """).fetchall()
+        results = []
+        for r in rows:
+            ids = [int(i) for i in r["id_list"].split(",")]
+            results.append({
+                "canonical_id": ids[0],  # best confidence, then lowest id
+                "duplicate_ids": ids[1:],
+                "vendor": r["vendor"],
+                "amount": r["amount"],
+                "date": r["date"],
+                "doc_type": r["doc_type"],
+                "count": r["n"],
+            })
+        return results
+    finally:
+        conn.close()
+
+
+def flag_duplicate_analyzed_docs() -> dict:
+    """
+    Mark all duplicate analyzed_documents with is_duplicate=1.
+    Canonical record (highest confidence, tie-broken by lowest id) stays 0.
+    Returns counts: {flagged, groups, already_flagged}.
+    """
+    conn = get_connection()
+    try:
+        groups = find_duplicate_analyzed_docs()
+        flagged = 0
+        already = 0
+        for g in groups:
+            for dup_id in g["duplicate_ids"]:
+                row = conn.execute(
+                    "SELECT is_duplicate FROM analyzed_documents WHERE id=?", (dup_id,)
+                ).fetchone()
+                if row and row["is_duplicate"]:
+                    already += 1
+                else:
+                    conn.execute(
+                        "UPDATE analyzed_documents SET is_duplicate=1 WHERE id=?", (dup_id,)
+                    )
+                    flagged += 1
+        # Also clear any false-positive flags (canonical records that got flagged)
+        canonical_ids = [g["canonical_id"] for g in groups]
+        if canonical_ids:
+            conn.execute(
+                f"UPDATE analyzed_documents SET is_duplicate=0 WHERE id IN "
+                f"({','.join('?' for _ in canonical_ids)})",
+                canonical_ids,
+            )
+        conn.commit()
+        return {"flagged": flagged, "already_flagged": already, "groups": len(groups)}
+    finally:
+        conn.close()
+
+
+def is_near_duplicate_analyzed_doc(
+    vendor: str, amount: float, date: str, doc_type: str, paperless_doc_id: int
+) -> bool:
+    """
+    Return True if an analyzed_document with the same vendor+amount+date+doc_type
+    already exists (for a DIFFERENT paperless_doc_id).  Used at analysis time to
+    avoid inserting duplicates into the DB in the first place.
+    """
+    if not vendor or not amount or not date:
+        return False
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """SELECT 1 FROM analyzed_documents
+               WHERE vendor=? AND ABS(amount - ?)< 0.01
+                 AND date=? AND doc_type=?
+                 AND paperless_doc_id != ?
+                 AND (is_duplicate IS NULL OR is_duplicate=0)
+               LIMIT 1""",
+            (vendor, float(amount), date, doc_type, paperless_doc_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+# ── Persistent PDF content-hash store ─────────────────────────────────────────
+
+def pdf_hash_exists(sha256: str) -> bool:
+    """Return True if this PDF content hash has been seen before (any source)."""
+    conn = get_connection()
+    try:
+        return conn.execute(
+            "SELECT 1 FROM pdf_content_hashes WHERE sha256=? LIMIT 1", (sha256,)
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def record_pdf_hash(sha256: str, source: str = "", filename: str = "",
+                    entity_slug: str = "", year: str = "") -> bool:
+    """
+    Insert a PDF hash record.  Returns True if newly inserted, False if already existed.
+    Uses INSERT OR IGNORE so duplicates are silently skipped.
+    """
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO pdf_content_hashes(sha256,source,filename,entity_slug,year) "
+            "VALUES(?,?,?,?,?)",
+            (sha256, source, filename[:255] if filename else "", entity_slug, year),
+        )
+        conn.commit()
+        return cur.rowcount > 0  # True = new, False = already existed
+    finally:
+        conn.close()
+
+
+def pdf_hash_stats() -> dict:
+    """Return total count and per-source breakdown of stored PDF hashes."""
+    conn = get_connection()
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM pdf_content_hashes").fetchone()[0]
+        rows = conn.execute(
+            "SELECT source, COUNT(*) as n FROM pdf_content_hashes GROUP BY source"
+        ).fetchall()
+        return {"total": total, "by_source": {r["source"]: r["n"] for r in rows}}
     finally:
         conn.close()
 

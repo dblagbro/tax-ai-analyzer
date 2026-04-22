@@ -36,6 +36,7 @@ chromadb==0.5.0
 
 # Browser automation (US Alliance FCU statement downloader)
 playwright==1.44.0
+playwright-stealth>=2.0.0
 
 # Utilities
 python-dateutil==2.9.0

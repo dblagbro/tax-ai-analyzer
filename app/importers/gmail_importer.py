@@ -362,20 +362,21 @@ def _file_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _hash_exists_in_dir(data: bytes, directory: str) -> bool:
-    if not os.path.isdir(directory):
-        return False
+def _is_known_pdf(data: bytes, source: str = "gmail", filename: str = "",
+                  entity_slug: str = "", year: str = "") -> bool:
+    """
+    Check whether we've seen this exact PDF content before (persistent DB store).
+    If not seen, record it so future imports are deduplicated.
+    Returns True if it's a duplicate (already known), False if it's new.
+
+    Replaces the old _hash_exists_in_dir() which only scanned the consume directory
+    and became useless after Paperless cleared the files it ingested.
+    """
+    from app import db as _db
     h = _file_hash(data)
-    for fname in os.listdir(directory):
-        fpath = os.path.join(directory, fname)
-        if os.path.isfile(fpath):
-            try:
-                with open(fpath, "rb") as f:
-                    if _file_hash(f.read()) == h:
-                        return True
-            except OSError:
-                pass
-    return False
+    is_new = _db.record_pdf_hash(h, source=source, filename=filename,
+                                  entity_slug=entity_slug, year=year)
+    return not is_new  # True = duplicate
 
 
 def _ai_review_email(subject: str, sender: str, body_snippet: str,
@@ -635,12 +636,12 @@ def _process_month(
             # ── Write files ───────────────────────────────────────────────────
             dest_dir = os.path.join(consume_path, slug, msg_year)
             saved = False
-            # Hash dedup check outside the write_lock (it's a read-only scan)
             os.makedirs(dest_dir, exist_ok=True)
             deduped_pdfs = []
             for fname, pdf_bytes in pdf_files:
-                if _hash_exists_in_dir(pdf_bytes, dest_dir):
-                    log(f"    → SKIP (hash duplicate)")
+                if _is_known_pdf(pdf_bytes, source="gmail", filename=fname,
+                                 entity_slug=slug, year=msg_year):
+                    log(f"    → SKIP (content already imported: {fname})")
                     with stats_lock:
                         stats["skipped"] += 1
                 else:
@@ -689,6 +690,7 @@ def run_import(
     log_fn: Callable = None,
     stop_event: threading.Event = None,
     max_workers: int = 12,
+    progress_fn: Callable = None,
 ) -> dict:
     """
     Run a full Gmail import using month-parallel threads.
@@ -785,6 +787,12 @@ def run_import(
             log(f"━━━ Year {year} done: "
                 f"{stats['imported']} imported, {stats['ai_filtered']} AI-filtered, "
                 f"{stats['skipped']} skipped, {stats['errors']} errors ━━━")
+        # Flush running counts to DB after each year so they survive a restart
+        if progress_fn:
+            try:
+                progress_fn(stats["imported"], stats["skipped"])
+            except Exception:
+                pass
 
     log(
         f"━━━ Import {'CANCELLED' if stop_event.is_set() else 'complete'}: "

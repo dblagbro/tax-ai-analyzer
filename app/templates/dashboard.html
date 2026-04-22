@@ -76,6 +76,7 @@
     td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: #fafbfc; }
+    tr[onclick]:hover td { background: #eef3f8; }
     .empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: .9rem; }
     /* Badges */
     .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: .72rem; font-weight: 600; }
@@ -505,6 +506,14 @@
       <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
       Users
     </a>
+    <a class="nav-item {% if active_tab == 'folder_manager' %}active{% endif %}" onclick="sw('folder_manager')" href="#">
+      <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
+      File Organizer
+    </a>
+    <a class="nav-item {% if active_tab == 'ai_costs' %}active{% endif %}" onclick="sw('ai_costs')" href="#">
+      <svg viewBox="0 0 24 24"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
+      AI Costs
+    </a>
     <a class="nav-item" href="{{ url_prefix }}/docs" target="_blank">
       <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
       Help &amp; Docs
@@ -761,6 +770,13 @@
 
   <!-- US Alliance FCU — Playwright scraper -->
   <div id="ip-usalliance" class="imp-panel">
+
+    <!-- Bot detection notice -->
+    <div id="usa-bot-notice" style="background:#fff3cd;border-left:4px solid #ff9800;padding:12px 16px;border-radius:0 6px 6px 0;margin-bottom:14px;font-size:.84rem;display:none">
+      <strong>&#9888; Bot Detection Active</strong> — US Alliance's security system is blocking automated logins from this server's IP address.
+      Use <strong>Cookie Authentication</strong> below to bypass this: log in from your real browser, export your session cookies, and paste them here.
+    </div>
+
     <div class="two-col">
 
       <!-- Credentials card -->
@@ -769,8 +785,7 @@
         <div id="usa-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
         <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
           Enter your US Alliance online banking login. Credentials are stored
-          locally and never leave your server. A headless browser will log in and
-          download monthly PDF statements for each selected year.
+          locally and never leave your server.
         </p>
         <div class="form-group">
           <label>Online Banking Username</label>
@@ -788,6 +803,39 @@
           <button class="btn btn-outline btn-sm" id="usa-test-btn" onclick="testUsaCreds()">&#9654; Test Login</button>
         </div>
         <div id="usa-test-result" style="margin-top:8px;font-size:.8rem"></div>
+
+        <!-- Cookie Authentication -->
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">&#127850; Cookie Authentication <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(bypasses bot detection)</span></div>
+        <div id="usa-cookie-status" style="margin-bottom:8px;font-size:.8rem;color:var(--muted)"></div>
+        <p style="font-size:.79rem;color:var(--muted);margin-bottom:8px">
+          Log in to US Alliance from your real browser, then use <strong>one</strong> of these methods:
+        </p>
+        <div style="background:#f8f9fa;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:.78rem">
+          <strong>Method A — Console snippet (no extension needed):</strong><br>
+          Open DevTools (F12) → Console tab, then click the button below to copy the snippet, paste it in the console, and press Enter:<br>
+          <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
+            <code id="usa-cookie-snippet" style="flex:1;display:block;background:#1e1e1e;color:#9cdcfe;padding:6px 8px;border-radius:4px;word-break:break-all;font-size:.72rem;overflow-x:auto;white-space:pre-wrap;min-width:0">copy(JSON.stringify(document.cookie.split(';').map(c=>{var p=c.trim().indexOf('=');return{name:c.trim().slice(0,p),value:c.trim().slice(p+1),domain:'account.usalliance.org',path:'/'};}).filter(c=>c.name)))</code>
+            <button class="btn btn-outline btn-sm" onclick="usaCopySnippet()" id="usa-snippet-copy-btn" style="white-space:nowrap;flex-shrink:0">&#128203; Copy</button>
+          </div>
+          Then paste (Ctrl+V) into the console and hit Enter, then paste the result into the box below.<br>
+          <em style="color:#888">Note: this only captures non-HttpOnly cookies. If import still fails, use Method B.</em>
+        </div>
+        <div style="background:#f8f9fa;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:.78rem">
+          <strong>Method B — Cookie-Editor extension (gets all cookies including HttpOnly):</strong><br>
+          1. Install <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" style="color:var(--accent)">Cookie-Editor</a> from Chrome Web Store<br>
+          2. While logged in to US Alliance, click the Cookie-Editor icon in your toolbar<br>
+          3. Click the <strong>Export</strong> button at the bottom → JSON is copied to clipboard<br>
+          4. Paste into the box below
+        </div>
+        <div class="form-group">
+          <textarea id="usa-cookies-input" class="form-control" rows="3" style="font-family:monospace;font-size:.72rem" placeholder='[{"name":"session","value":"...","domain":"account.usalliance.org",...}]'></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveUsaCookies()">&#128190; Save Cookies</button>
+          <button class="btn btn-outline btn-sm" id="usa-clear-cookies-btn" onclick="clearUsaCookies()" style="color:#d32f2f">&#128465; Clear Cookies</button>
+        </div>
+        <div id="usa-cookie-result" style="margin-top:6px;font-size:.8rem"></div>
       </div>
 
       <!-- Run import card -->
@@ -1044,11 +1092,12 @@
           {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
         </select>
       </div>
-      <div>
+      <div style="display:flex;gap:8px">
         <button class="btn btn-primary" onclick="runTaxReview()" id="tr-run-btn">
           <svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
           Run AI Review
         </button>
+        <button class="btn btn-danger" id="tr-stop-btn" style="display:none" onclick="stopTaxReview()">&#9632; Stop</button>
       </div>
     </div>
     <p style="font-size:.8rem;color:var(--muted);margin-top:8px">The AI will review all documents for the selected year, identify unclear items, missing documents, capital improvement depreciation needs, and generate specific questions for your accountant.</p>
@@ -1058,21 +1107,46 @@
   <div class="card" style="margin-bottom:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="card-title" style="margin-bottom:0">Filed Tax Return Data</div>
-      <button class="btn btn-sm btn-outline" onclick="openFiledReturnModal()">&#43; Enter / Update Return Data</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-outline" id="tr-import-folder-btn" onclick="importFiledReturnFromFolder()">&#128196; Import from Tax Folder</button>
+        <button class="btn btn-sm btn-outline" onclick="openFiledReturnModal()">&#43; Enter / Update Return Data</button>
+      </div>
     </div>
     <div id="tr-filed-returns-list">
       <div class="empty" style="padding:20px">No filed return data entered yet. Click "Enter / Update Return Data" to add actual filed return numbers for comparison.</div>
     </div>
   </div>
 
-  <!-- AI Review Output -->
+  <!-- AI Review Output + Q&A Thread -->
   <div id="tr-review-output" style="display:none">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div class="card-title" style="margin-bottom:0">AI Tax Review — <span id="tr-review-year"></span></div>
         <div id="tr-review-status" style="font-size:.8rem;color:var(--muted)"></div>
       </div>
-      <div id="tr-review-content" style="font-size:.875rem;line-height:1.65;white-space:pre-wrap;max-height:70vh;overflow-y:auto;background:#f8f9fb;border-radius:8px;padding:16px;font-family:inherit"></div>
+      <!-- Initial review content -->
+      <div id="tr-review-content" style="font-size:.875rem;line-height:1.65;white-space:pre-wrap;background:#f8f9fb;border-radius:8px;padding:16px;font-family:inherit;max-height:60vh;overflow-y:auto"></div>
+    </div>
+
+    <!-- Follow-up Q&A thread -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="margin-bottom:12px">Ask Follow-up Questions</div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:14px">Answer the AI's questions above, ask for clarification, or provide additional context. The AI remembers the full review above.</p>
+      <!-- Q&A messages thread -->
+      <div id="tr-qa-thread" style="margin-bottom:14px"></div>
+      <!-- Input area -->
+      <div style="display:flex;gap:8px;align-items:flex-end" id="tr-qa-input-area">
+        <textarea id="tr-qa-input" class="form-control" rows="3"
+          placeholder="Type your answer or question here… e.g. 'The WiFi APs were for VoIPGuru home office, not personal' or 'Can you explain the capital improvement rule for the roof?'"
+          style="flex:1;resize:vertical"
+          onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){trSendFollowup();event.preventDefault();}"></textarea>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="btn btn-primary" id="tr-qa-send-btn" onclick="trSendFollowup()" style="white-space:nowrap">
+            Send <small style="opacity:.7">(Ctrl+↵)</small>
+          </button>
+          <button class="btn btn-outline" id="tr-qa-stop-btn" style="display:none;white-space:nowrap" onclick="trStopFollowup()">&#9632; Stop</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1345,6 +1419,107 @@
     <div class="tbl-wrap"><table>
       <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Active</th><th>Last Login</th><th></th></tr></thead>
       <tbody id="usersBody"><tr><td colspan="6"><div class="empty">Loading…</div></td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- FILE ORGANIZER / MIGRATION -->
+<div id="tab-folder_manager" class="tab-panel {% if active_tab == 'folder_manager' %}active{% endif %}">
+  <div class="page-header">
+    <div>
+      <div class="page-title">File Organizer &amp; Migration</div>
+      <div class="page-sub">Pull your existing tax archive into Paperless + AI — stop hunting for documents at tax time</div>
+    </div>
+    <button class="btn btn-primary" onclick="foLoadMigration()">Refresh Status</button>
+  </div>
+
+  <!-- Migration status per year — the primary view -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">Archive Migration Status</div>
+        <div style="font-size:.8rem;color:var(--muted)">
+          Source: <code style="font-size:.75rem">/mnt/s/…/tax/</code> &nbsp;→&nbsp;
+          Paperless OCR &amp; index &nbsp;→&nbsp; AI Analysis &amp; Tax Review
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <select id="fo-entity-sel" class="form-control" style="width:auto">
+          {% for e in entities %}<option value="{{ e.slug }}">{{ e.name }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div id="fo-migration-body"><div class="empty" style="padding:20px">Click "Refresh Status" to scan which years have been imported.</div></div>
+  </div>
+
+  <!-- Folder name issues — secondary, shows after scan -->
+  <div class="card" id="fo-issues-card" style="margin-bottom:16px;display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">Folder Naming Issues <span id="fo-issue-count" class="badge badge-expense"></span></div>
+        <div style="font-size:.8rem;color:var(--muted)">Fix before importing to keep tags consistent</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-outline" onclick="foDryRunAll()">Preview Fixes</button>
+        <button class="btn btn-sm btn-success" onclick="foApplyAll()">Fix All Names</button>
+      </div>
+    </div>
+    <div id="fo-issues-body"></div>
+    <div class="card" id="fo-preview-card" style="margin-top:12px;display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <strong>Preview <span id="fo-preview-mode" class="badge"></span></strong>
+        <button class="btn btn-sm btn-success" id="fo-apply-btn" style="display:none" onclick="foExecuteRename()">Execute Renames</button>
+      </div>
+      <div id="fo-preview-body"></div>
+    </div>
+  </div>
+</div>
+
+<!-- AI COSTS -->
+<div id="tab-ai_costs" class="tab-panel {% if active_tab == 'ai_costs' %}active{% endif %}">
+  <div class="page-header">
+    <div><div class="page-title">AI Costs</div><div class="page-sub">LLM API usage and cost tracking</div></div>
+    <select id="ac-days" class="form-control" style="width:auto" onchange="loadAiCosts()">
+      <option value="7">Last 7 days</option>
+      <option value="30" selected>Last 30 days</option>
+      <option value="90">Last 90 days</option>
+      <option value="365">Last year</option>
+    </select>
+  </div>
+  <div class="stat-grid" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-label">Total API Calls</div><div class="stat-value" id="ac-calls">—</div></div>
+    <div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value" id="ac-tokens">—</div></div>
+    <div class="stat-card"><div class="stat-label">Total Cost</div><div class="stat-value" id="ac-cost">—</div></div>
+    <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value" id="ac-success">—</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div class="card">
+      <div class="card-title">Cost by Model</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Model</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+        <tbody id="ac-by-model"><tr><td colspan="4"><div class="empty">Loading…</div></td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Cost by Operation</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Operation</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+        <tbody id="ac-by-op"><tr><td colspan="4"><div class="empty">Loading…</div></td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">Daily Usage</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Date</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+      <tbody id="ac-by-day"><tr><td colspan="4"><div class="empty">Loading…</div></td></tr></tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Recent API Calls</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Time</th><th>Provider</th><th>Model</th><th>Operation</th><th>In Tok</th><th>Out Tok</th><th>Cost</th><th>OK</th></tr></thead>
+      <tbody id="ac-recent"><tr><td colspan="8"><div class="empty">Loading…</div></td></tr></tbody>
     </table></div>
   </div>
 </div>
@@ -2001,13 +2176,16 @@ function sw(t) {
     if (n.getAttribute('onclick') && n.getAttribute('onclick').includes("'"+t+"'")) n.classList.add('active');
   });
   loadTab(t);
-  history.replaceState(null,'', P + (t==='dashboard' ? '/' : '/'+t));
+  const urlSlug = {tax_review:'tax-review', folder_manager:'folder-manager', ai_costs:'ai-costs'}[t] || t;
+  history.replaceState(null,'', P + (t==='dashboard' ? '/' : '/'+urlSlug));
 }
 
 function loadTab(t) {
   const m = {dashboard:()=>{loadStats();loadAct();loadRecentJobs();loadFiledReturns();},transactions:loadTxns,documents:docReload,
     import:()=>{loadJobs();loadGmailImportStatus();loadUsaStatus();startJobRefresh();},
     tax_review:()=>{loadTaxReviewYears();},
+    ai_costs:loadAiCosts,
+    folder_manager:foLoadMigration,
     chat:loadSessions,reports:loadExports,settings:loadSettings,users:loadUsers};
   if(t!=='import') stopJobRefresh();
   m[t]?.();
@@ -2209,6 +2387,10 @@ function editTxn(id){toast('Edit #'+id+' (coming soon)');}
 
 /* Documents — shared view state */
 const PAPERLESS_WEB_URL = '{{ paperless_web_url }}';
+function paperlessDocUrl(docId) {
+  if (!docId) return null;
+  return PAPERLESS_WEB_URL + '/documents/' + docId + '/';
+}
 let _docView = 'table';
 let _docTM = null;
 
@@ -2251,11 +2433,13 @@ async function loadDocs() {
 
   const renderRow = (doc) => {
     const docId = doc.paperless_doc_id || doc.doc_id;
-    const previewUrl = PAPERLESS_WEB_URL + '/documents/' + docId + '/preview/';
-    return `<tr>
+    const plUrl = paperlessDocUrl(docId);
+    const rowClick = plUrl ? `onclick="window.open('${plUrl}','_blank')" style="cursor:pointer"` : '';
+    const stopProp = `onclick="event.stopPropagation()"`;
+    return `<tr ${rowClick}>
       <td>${docId||'—'}</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(doc.title||'')}">
-        <a href="${previewUrl}" target="_blank" style="color:var(--navy);text-decoration:none">${esc(doc.title||'Untitled')}</a>
+        ${esc(doc.title||'Untitled')}
       </td>
       <td><span class="tag">${esc(doc.doc_type||'?')}</span></td>
       <td><span class="badge badge-${doc.category||'other'}">${esc(doc.category||'?')}</span></td>
@@ -2265,8 +2449,7 @@ async function loadDocs() {
       <td style="text-align:right;font-weight:600">$${fmt(Math.abs(doc.amount||0))}</td>
       <td>${doc.confidence?Math.round(doc.confidence*100)+'%':'—'}</td>
       <td style="font-size:.78rem;color:var(--muted)">${(doc.analyzed_at||'').slice(0,16).replace('T',' ')}</td>
-      <td style="display:flex;gap:4px;flex-wrap:nowrap">
-        <a href="${previewUrl}" target="_blank" class="btn btn-sm btn-outline" title="Open in Paperless">&#128196;</a>
+      <td style="display:flex;gap:4px;flex-wrap:nowrap" ${stopProp}>
         <button class="btn btn-sm btn-outline" onclick="recat(${docId})">Re-analyze</button>
       </td>
     </tr>`;
@@ -2381,18 +2564,20 @@ function fbBuildHtml(docs) {
         const tid = 'fb-t-'+yr+'-'+ed.id+'-'+dt.replace(/\W/g,'_');
         const docsHtml = tdocs.map(doc => {
           const docId = doc.paperless_doc_id || doc.doc_id;
-          const previewUrl = PAPERLESS_WEB_URL + '/documents/' + docId + '/preview/';
+          const plUrl = paperlessDocUrl(docId);
           const amt = doc.amount ? '$'+fmt(doc.amount) : '';
           const amtClass = doc.category==='income' ? 'pos' : (doc.amount ? 'neg' : '');
           const docJson = JSON.stringify(doc).replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$');
-          return `<div class="fb-doc-row" style="display:flex;align-items:center;">
-            <a style="flex:1;display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;overflow:hidden;" href="${previewUrl}" target="_blank">
-              <span class="fb-doc-icon">&#128196;</span>
+          const inner = `<span class="fb-doc-icon">&#128196;</span>
               <span class="fb-doc-title" title="${esc(doc.title||'')}">${esc(doc.title||'Untitled')}</span>
               <span class="fb-doc-vendor">${esc(doc.vendor||'')}</span>
               <span class="fb-doc-amt ${amtClass}">${amt}</span>
-              <span class="fb-doc-link">Open &#8599;</span>
-            </a>
+              ${plUrl ? '<span class="fb-doc-link">Open &#8599;</span>' : ''}`;
+          const rowContent = plUrl
+            ? `<a style="flex:1;display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;overflow:hidden;" href="${plUrl}" target="_blank">${inner}</a>`
+            : `<div style="flex:1;display:flex;align-items:center;gap:8px;overflow:hidden;">${inner}</div>`;
+          return `<div class="fb-doc-row" style="display:flex;align-items:center;">
+            ${rowContent}
             <button class="btn" onclick="event.stopPropagation();openDocOverride(\`${docJson}\`)" title="Correct classification" style="font-size:.7rem;padding:2px 6px;margin-left:4px;flex-shrink:0;color:#888;border:1px solid #ddd;background:none;">&#9998;</button>
           </div>`;
         }).join('');
@@ -2619,52 +2804,107 @@ async function importUrl() {
 
 var _jobRefreshTimer = null;
 
-async function loadJobs() {
-  const jobs = await fetch(P+'/api/import/jobs').then(r=>r.json()).catch(()=>[]);
+let _jobsCache = [];
+let _jobsSort = {col: 'id', dir: -1}; // default: newest first
+
+function sortJobs(col) {
+  if (_jobsSort.col === col) _jobsSort.dir *= -1;
+  else { _jobsSort.col = col; _jobsSort.dir = col === 'id' ? -1 : 1; }
+  renderJobs(_jobsCache);
+}
+
+function renderJobs(jobs) {
   const el = document.getElementById('jobsList');
-  if(!el) return;
-  const hasRunning = jobs.some(j=>j.status==='running'||j.status==='pending');
-  // Update refresh indicator
-  const hdr = document.getElementById('jobs-refresh-ind');
-  if(hdr) hdr.textContent = hasRunning ? '↻ Auto-refreshing…' : 'Last refreshed: '+new Date().toLocaleTimeString();
-  if(!jobs.length){el.innerHTML='<div class="empty">No import jobs yet.</div>';return;}
+  if (!el) return;
   function fmtAge(iso) {
     if(!iso) return '';
     const s = Math.round((Date.now()-new Date(iso+'Z').getTime())/1000);
     if(s<60) return s+'s ago'; if(s<3600) return Math.round(s/60)+'m ago'; return Math.round(s/3600)+'h ago';
   }
-  el.innerHTML='<div class="tbl-wrap"><table><thead><tr>'
-    +'<th>ID</th><th>Source</th><th>Entity</th><th>Status</th><th>Count</th><th>Started</th><th>Duration</th><th>Detail</th><th></th>'
-    +'</tr></thead><tbody>'
-    +jobs.map(j=>{
-      const dur = j.started_at && j.completed_at
-        ? Math.round((new Date(j.completed_at+'Z')-new Date(j.started_at+'Z'))/1000)+'s'
-        : j.started_at ? '⏱ '+fmtAge(j.started_at) : '';
-      const detail = j.error_msg
-        ? `<span style="color:var(--red);font-size:.78rem" title="${esc(j.error_msg)}">${esc(j.error_msg.slice(0,80))}${j.error_msg.length>80?'…':''}</span>`
-        : (j.config_json ? `<span style="font-size:.75rem;color:var(--muted)">${esc(JSON.parse(j.config_json||'{}').years||'')}</span>` : '');
-      const isRunning = ['running','pending','cancelling'].includes(j.status);
-      const cancelBtn = isRunning
-        ? `<button class="btn btn-sm" style="color:#e53e3e;border-color:#e53e3e;padding:2px 8px;font-size:.72rem"
-             onclick="cancelJob(${j.id})">&#9632; Cancel</button>`
-        : '';
-      const logsBtn = `<button class="btn btn-sm btn-outline" style="padding:2px 8px;font-size:.72rem"
-           onclick="openJobLog(${j.id},'${j.source_type||''}')">&#128196; Logs</button>`;
-      const delBtn = _isAdmin && !isRunning
-        ? `<button class="btn btn-sm" style="color:#e53e3e;padding:2px 6px;font-size:.72rem;background:transparent;border:1px solid #e53e3e"
-             onclick="deleteJob(${j.id})" title="Delete job">&#128465;</button>`
-        : '';
-      return `<tr>
-        <td>${j.id}</td>
-        <td><strong>${j.source_type||''}</strong></td>
-        <td>${esc(j.entity_name||'—')}</td>
-        <td><span class="badge badge-${j.status||'pending'}">${j.status||'pending'}</span></td>
-        <td>${j.count_imported??'—'}</td>
-        <td style="font-size:.8rem">${(j.started_at||'').slice(0,16).replace('T',' ')}</td>
-        <td style="font-size:.8rem">${dur}</td>
-        <td>${detail}</td>
-        <td style="white-space:nowrap">${cancelBtn} ${logsBtn} ${delBtn}</td></tr>`;
-    }).join('')+'</tbody></table></div>';
+  function durSecs(j) {
+    if (j.started_at && j.completed_at)
+      return Math.round((new Date(j.completed_at+'Z')-new Date(j.started_at+'Z'))/1000);
+    return j.started_at ? (Date.now()-new Date(j.started_at+'Z').getTime())/1000 : 0;
+  }
+  const col = _jobsSort.col, dir = _jobsSort.dir;
+  const sorted = [...jobs].sort((a,b)=>{
+    let av, bv;
+    if (col==='id')          { av=a.id; bv=b.id; }
+    else if (col==='source') { av=a.source_type||''; bv=b.source_type||''; }
+    else if (col==='status') { av=a.status||''; bv=b.status||''; }
+    else if (col==='count')  { av=a.count_imported||0; bv=b.count_imported||0; }
+    else if (col==='started'){ av=a.started_at||''; bv=b.started_at||''; }
+    else if (col==='dur')    { av=durSecs(a); bv=durSecs(b); }
+    else                     { av=a.id; bv=b.id; }
+    if (av < bv) return -dir; if (av > bv) return dir; return 0;
+  });
+  function thBtn(label, key) {
+    const active = _jobsSort.col === key;
+    const arrow = active ? (_jobsSort.dir > 0 ? ' ▲' : ' ▼') : ' ⇅';
+    return `<th style="cursor:pointer;user-select:none${active?';color:var(--primary)':''}" onclick="sortJobs('${key}')">${label}${arrow}</th>`;
+  }
+  try {
+    el.innerHTML='<div class="tbl-wrap"><table><thead><tr>'
+      +thBtn('ID','id')+thBtn('Source','source')+'<th>Entity</th>'
+      +thBtn('Status','status')+thBtn('Count','count')+thBtn('Started','started')
+      +thBtn('Duration','dur')+'<th>Detail</th><th></th>'
+      +'</tr></thead><tbody>'
+      +sorted.map(j=>{
+        try {
+        const dur = j.started_at && j.completed_at
+          ? durSecs(j)+'s'
+          : j.started_at ? '⏱ '+fmtAge(j.started_at) : '';
+        const yearsStr = (() => { try { return JSON.parse(j.config_json||'{}').years||''; } catch(e){ return ''; } })();
+        const errMsg = j.error_msg || '';
+        const detail = errMsg
+          ? `<span style="color:var(--red);font-size:.78rem" title="${esc(errMsg)}">${esc(errMsg.slice(0,80))}${errMsg.length>80?'…':''}</span>`
+          : (yearsStr ? `<span style="font-size:.75rem;color:var(--muted)">${esc(String(yearsStr))}</span>` : '');
+        const isRunning = ['running','pending','cancelling'].includes(j.status);
+        const cancelBtn = isRunning
+          ? `<button class="btn btn-sm" style="color:#e53e3e;border-color:#e53e3e;padding:2px 8px;font-size:.72rem"
+               onclick="cancelJob(${j.id})">&#9632; Cancel</button>`
+          : '';
+        const logsBtn = `<button class="btn btn-sm btn-outline" style="padding:2px 8px;font-size:.72rem"
+             onclick="openJobLog(${j.id},'${j.source_type||''}')">&#128196; Logs</button>`;
+        const delBtn = _isAdmin && !isRunning
+          ? `<button class="btn btn-sm" style="color:#e53e3e;padding:2px 6px;font-size:.72rem;background:transparent;border:1px solid #e53e3e"
+               onclick="deleteJob(${j.id})" title="Delete job">&#128465;</button>`
+          : '';
+        return `<tr>
+          <td>${j.id}</td>
+          <td><strong>${j.source_type||''}</strong></td>
+          <td>${esc(j.entity_name||'—')}</td>
+          <td><span class="badge badge-${j.status||'pending'}">${j.status||'pending'}</span></td>
+          <td>${j.count_imported != null ? j.count_imported : '—'}</td>
+          <td style="font-size:.8rem">${(j.started_at||'').slice(0,16).replace('T',' ')}</td>
+          <td style="font-size:.8rem">${dur}</td>
+          <td>${detail}</td>
+          <td style="white-space:nowrap">${cancelBtn} ${logsBtn} ${delBtn}</td></tr>`;
+        } catch(e) { return '<tr><td colspan="9" style="color:var(--red);font-size:.78rem">Job render error: '+String(e)+'</td></tr>'; }
+      }).join('')+'</tbody></table></div>';
+  } catch(e) {
+    el.innerHTML = '<div class="empty" style="color:var(--red)">Error rendering jobs: '+String(e)+'</div>';
+  }
+}
+
+async function loadJobs() {
+  const el = document.getElementById('jobsList');
+  let jobs = [];
+  try {
+    const r = await fetch(P+'/api/import/jobs');
+    if (r.ok) jobs = await r.json();
+  } catch(e) {
+    if (el) el.innerHTML = '<div class="empty" style="color:var(--red)">Failed to load jobs — check console.</div>';
+    return;
+  }
+  if (!Array.isArray(jobs)) jobs = [];
+  _jobsCache = jobs;
+  if(!el) return;
+  const hasRunning = jobs.some(j=>j.status==='running'||j.status==='pending');
+  const hdr = document.getElementById('jobs-refresh-ind');
+  if(hdr) hdr.textContent = hasRunning ? '↻ Auto-refreshing…' : 'Last refreshed: '+new Date().toLocaleTimeString();
+  if(!jobs.length){el.innerHTML='<div class="empty">No import jobs yet.</div>';return;}
+  renderJobs(jobs);
 }
 
 async function cancelJob(jobId) {
@@ -3168,46 +3408,159 @@ async function loadTaxReviewYears() {
   loadFiledReturns();
 }
 
-var _trReviewAbort = null;
+var _trAbortCtrl = null;
 async function runTaxReview() {
   const year = document.getElementById('tr-year').value;
   const eid = document.getElementById('tr-entity').value;
   if (!year) { toast('Select a year to review.','error'); return; }
   const btn = document.getElementById('tr-run-btn');
+  const stopBtn = document.getElementById('tr-stop-btn');
   const output = document.getElementById('tr-review-output');
   const content = document.getElementById('tr-review-content');
   const status = document.getElementById('tr-review-status');
   document.getElementById('tr-review-year').textContent = year;
   output.style.display = '';
   content.textContent = '';
-  btn.disabled = true;
+  // Reset Q&A thread for new review
+  const qaThread = document.getElementById('tr-qa-thread');
+  if (qaThread) qaThread.innerHTML = '';
+  _trQaMessages = [];
+  btn.style.display = 'none';
+  stopBtn.style.display = '';
   status.textContent = 'Reviewing…';
+  _trAbortCtrl = new AbortController();
   const params = new URLSearchParams({year});
   if (eid) params.set('entity_id', eid);
-  const resp = await fetch(P+'/api/tax-review?'+params, {headers:{'Accept':'text/event-stream'}});
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  while (true) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, {stream:true});
-    const lines = buf.split('\n');
-    buf = lines.pop();
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (raw === '[DONE]') { status.textContent = 'Complete'; btn.disabled = false; break; }
-      try {
-        const d = JSON.parse(raw);
-        if (d.chunk) { content.textContent += d.chunk; content.scrollTop = content.scrollHeight; }
-        if (d.error) { content.textContent += '\n\nError: '+d.error; status.textContent = 'Error'; btn.disabled = false; break; }
-      } catch(e) {}
+  try {
+    const resp = await fetch(P+'/api/tax-review?'+params, {headers:{'Accept':'text/event-stream'}, signal:_trAbortCtrl.signal});
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    outer: while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream:true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') { status.textContent = 'Complete'; break outer; }
+        try {
+          const d = JSON.parse(raw);
+          if (d.chunk) { content.textContent += d.chunk; content.scrollTop = content.scrollHeight; }
+          if (d.error) { content.textContent += '\n\nError: '+d.error; status.textContent = 'Error'; break outer; }
+        } catch(e) {}
+      }
     }
+  } catch(e) {
+    if (e.name === 'AbortError') { status.textContent = 'Stopped'; }
+    else { status.textContent = 'Error: '+e.message; }
   }
-  btn.disabled = false;
+  btn.style.display = '';
+  stopBtn.style.display = 'none';
+  _trAbortCtrl = null;
   if (status.textContent === 'Reviewing…') status.textContent = 'Complete';
+  // Seed Q&A history with the initial review so follow-ups have full context
+  const reviewText = document.getElementById('tr-review-content')?.textContent || '';
+  if (reviewText) {
+    _trQaMessages = [{role:'assistant', content: reviewText}];
+    document.getElementById('tr-qa-input')?.focus();
+  }
 }
+function stopTaxReview() { if (_trAbortCtrl) _trAbortCtrl.abort(); }
+
+/* Tax Review Q&A */
+var _trQaMessages = [];  // [{role:'user'|'assistant', content:str}]
+var _trQaAbort = null;
+
+function _trQaAppend(role, text, streaming) {
+  const thread = document.getElementById('tr-qa-thread');
+  const isUser = role === 'user';
+  const id = streaming ? 'tr-qa-streaming' : null;
+  const div = document.createElement('div');
+  if (id) div.id = id;
+  div.style.cssText = `margin-bottom:14px;padding:10px 14px;border-radius:8px;font-size:.875rem;line-height:1.65;white-space:pre-wrap;${
+    isUser ? 'background:#e8f4fd;border-left:3px solid #1a3c5e;margin-left:20px' :
+              'background:#f0f9f0;border-left:3px solid var(--income)'}`;
+  div.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:6px;font-weight:600">${isUser?'YOU':'AI ACCOUNTANT'}</div>${esc(text)}`;
+  thread.appendChild(div);
+  div.scrollIntoView({behavior:'smooth', block:'nearest'});
+  return div;
+}
+
+async function trSendFollowup() {
+  const input = document.getElementById('tr-qa-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  const year = document.getElementById('tr-year').value;
+  const eid = document.getElementById('tr-entity').value;
+  const sendBtn = document.getElementById('tr-qa-send-btn');
+  const stopBtn = document.getElementById('tr-qa-stop-btn');
+
+  // Add user message to history and UI
+  _trQaMessages.push({role:'user', content: msg});
+  _trQaAppend('user', msg);
+  input.value = '';
+  sendBtn.disabled = true;
+  sendBtn.style.display = 'none';
+  stopBtn.style.display = '';
+
+  // Create streaming div for assistant response
+  const streamDiv = _trQaAppend('assistant', '', true);
+  streamDiv.querySelector('div').nextSibling?.remove?.();
+  let responseText = '';
+
+  _trQaAbort = new AbortController();
+  try {
+    const resp = await fetch(P+'/api/tax-review/followup', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({year, entity_id: eid||null, messages: _trQaMessages}),
+      signal: _trQaAbort.signal,
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    outer: while(true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream:true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') break outer;
+        try {
+          const d = JSON.parse(raw);
+          if (d.chunk) {
+            responseText += d.chunk;
+            // Re-render the streaming div content
+            const label = streamDiv.querySelector('div');
+            if (label) label.nextSibling ? label.nextSibling.textContent = responseText : streamDiv.appendChild(Object.assign(document.createTextNode(responseText)));
+            // Simpler: just update the full innerHTML safely
+            streamDiv.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:6px;font-weight:600">AI ACCOUNTANT</div>${esc(responseText)}`;
+            streamDiv.scrollIntoView({behavior:'smooth', block:'nearest'});
+          }
+          if (d.error) { responseText += '\n[Error: '+d.error+']'; break outer; }
+        } catch(e) {}
+      }
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') responseText += '\n[Error: '+e.message+']';
+  }
+
+  // Remove streaming id, save to history
+  streamDiv.id = '';
+  if (responseText) _trQaMessages.push({role:'assistant', content: responseText});
+  sendBtn.disabled = false;
+  sendBtn.style.display = '';
+  stopBtn.style.display = 'none';
+  _trQaAbort = null;
+}
+
+function trStopFollowup() { if (_trQaAbort) _trQaAbort.abort(); }
 
 /* Reports */
 async function genExport(y,e) {
@@ -3832,6 +4185,39 @@ class TableManager {
   var _usaLogTimer = null;
   var _usaLogOffset = 0;
 
+  window.usaCopySnippet = function() {
+    var el = document.getElementById('usa-cookie-snippet');
+    var btn = document.getElementById('usa-snippet-copy-btn');
+    if (!el) return;
+    var text = el.textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        btn.textContent = '✓ Copied!';
+        setTimeout(function(){ btn.innerHTML = '&#128203; Copy'; }, 2000);
+      }).catch(function() {
+        _usaFallbackCopy(text, btn);
+      });
+    } else {
+      _usaFallbackCopy(text, btn);
+    }
+  };
+
+  function _usaFallbackCopy(text, btn) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    try {
+      document.execCommand('copy');
+      if (btn) { btn.textContent = '✓ Copied!'; setTimeout(function(){ btn.innerHTML = '&#128203; Copy'; }, 2000); }
+    } catch(e) {
+      alert('Copy failed — please select the snippet text manually.');
+    }
+    document.body.removeChild(ta);
+  }
+
   window.saveUsaCreds = async function() {
     var u = document.getElementById('usa-username').value.trim();
     var p = document.getElementById('usa-password').value.trim();
@@ -3855,6 +4241,42 @@ class TableManager {
     } else {
       badge.innerHTML = '<span style="color:#f57c00">&#9888; No credentials saved — enter them below</span>';
     }
+    // Cookie status
+    var ckEl = document.getElementById('usa-cookie-status');
+    if (ckEl) {
+      if (r.cookies_saved) {
+        ckEl.innerHTML = '<span style="color:#4caf50">&#10003; ' + r.cookies_count + ' cookies saved — cookie auth active</span>';
+        // Show bot notice as info, not warning
+        var notice = document.getElementById('usa-bot-notice');
+        if (notice) notice.style.display = 'none';
+      } else {
+        ckEl.innerHTML = '<span style="color:var(--muted)">No cookies saved — using credential login</span>';
+      }
+    }
+  };
+
+  window.saveUsaCookies = async function() {
+    var raw = document.getElementById('usa-cookies-input').value.trim();
+    if (!raw) { alert('Paste your cookies JSON first.'); return; }
+    var res = document.getElementById('usa-cookie-result');
+    res.innerHTML = '<span style="color:var(--muted)">Saving…</span>';
+    var r = await post('/api/import/usalliance/cookies', {cookies: raw});
+    if (r.status === 'saved') {
+      res.innerHTML = '<span style="color:#4caf50">&#10003; ' + esc(r.message) + '</span>';
+      document.getElementById('usa-cookies-input').value = '';
+      document.getElementById('usa-bot-notice').style.display = 'none';
+      await loadUsaStatus();
+    } else {
+      res.innerHTML = '<span style="color:#d32f2f">&#10007; ' + esc(r.error || 'Failed to save cookies') + '</span>';
+    }
+  };
+
+  window.clearUsaCookies = async function() {
+    if (!confirm('Clear saved browser cookies?')) return;
+    var r = await fetch(P + '/api/import/usalliance/cookies', {method:'DELETE'}).then(r=>r.json()).catch(()=>({}));
+    document.getElementById('usa-cookie-status').innerHTML = '<span style="color:var(--muted)">Cookies cleared</span>';
+    document.getElementById('usa-cookie-result').innerHTML = '';
+    await loadUsaStatus();
   };
 
   window.testUsaCreds = async function() {
@@ -3904,6 +4326,12 @@ class TableManager {
             if (line.toLowerCase().includes('mfa') || line.toLowerCase().includes('verification')) {
               div.style.color = '#ffc107';
               document.getElementById('usa-mfa-box').style.display = '';
+            }
+            // Highlight bot detection error
+            if (line.toLowerCase().includes('bot detection') || line.toLowerCase().includes('unable to log')) {
+              div.style.color = '#ff7043';
+              var notice = document.getElementById('usa-bot-notice');
+              if (notice) notice.style.display = '';
             }
             box.appendChild(div);
           });
@@ -4251,6 +4679,327 @@ async function saveProfile() {
   if (!r || r.error) { toast((r&&r.error)||'Save failed','error'); return; }
   toast('Profile saved');
   document.getElementById('mUserProfile').classList.remove('open');
+}
+
+/* AI Costs */
+async function loadAiCosts() {
+  const days = document.getElementById('ac-days')?.value || 30;
+  const data = await fetch(P+'/api/ai-costs?days='+days).then(r=>r.json()).catch(()=>({}));
+  const s = data.stats || {};
+  document.getElementById('ac-calls').textContent = (s.total_calls||0).toLocaleString();
+  document.getElementById('ac-tokens').textContent = (s.total_tokens||0).toLocaleString();
+  document.getElementById('ac-cost').textContent = '$'+(s.total_cost_usd||0).toFixed(4);
+  document.getElementById('ac-success').textContent = ((s.success_rate||1)*100).toFixed(1)+'%';
+  const bm = document.getElementById('ac-by-model');
+  const byModel = s.by_model||{};
+  bm.innerHTML = Object.keys(byModel).length ? Object.entries(byModel).sort((a,b)=>b[1].cost_usd-a[1].cost_usd).map(([m,v])=>
+    `<tr><td>${esc(m)}<br><small style="color:var(--muted)">${esc(v.provider)}</small></td><td>${v.calls}</td><td>${((v.input_tokens||0)+(v.output_tokens||0)).toLocaleString()}</td><td>$${v.cost_usd.toFixed(5)}</td></tr>`
+  ).join('') : '<tr><td colspan="4"><div class="empty">No data.</div></td></tr>';
+  const bo = document.getElementById('ac-by-op');
+  const byOp = s.by_operation||{};
+  bo.innerHTML = Object.keys(byOp).length ? Object.entries(byOp).sort((a,b)=>b[1].cost_usd-a[1].cost_usd).map(([op,v])=>
+    `<tr><td>${esc(op)}</td><td>${v.calls}</td><td>${(v.tokens||0).toLocaleString()}</td><td>$${v.cost_usd.toFixed(5)}</td></tr>`
+  ).join('') : '<tr><td colspan="4"><div class="empty">No data.</div></td></tr>';
+  const bd = document.getElementById('ac-by-day');
+  const byDay = s.by_day||[];
+  bd.innerHTML = byDay.length ? [...byDay].reverse().map(d=>
+    `<tr><td>${esc(d.date)}</td><td>${d.calls}</td><td>${(d.tokens||0).toLocaleString()}</td><td>$${d.cost_usd.toFixed(5)}</td></tr>`
+  ).join('') : '<tr><td colspan="4"><div class="empty">No data for this period.</div></td></tr>';
+  const rc = await fetch(P+'/api/ai-costs/recent').then(r=>r.json()).catch(()=>({calls:[]}));
+  const tbody = document.getElementById('ac-recent');
+  tbody.innerHTML = (rc.calls||[]).length ? rc.calls.map(c=>
+    `<tr><td style="font-size:.78rem">${(c.ts||'').slice(0,16).replace('T',' ')}</td><td>${esc(c.provider)}</td><td style="font-size:.78rem">${esc(c.model)}</td><td>${esc(c.operation)}</td><td>${(c.input_tokens||0).toLocaleString()}</td><td>${(c.output_tokens||0).toLocaleString()}</td><td>$${(c.cost_usd||0).toFixed(5)}</td><td>${c.success?'<span style="color:var(--income)">✓</span>':'<span style="color:var(--expense)">✗</span>'}</td></tr>`
+  ).join('') : '<tr><td colspan="8"><div class="empty">No recent calls.</div></td></tr>';
+}
+
+/* ============================================================
+   File Organizer / Migration
+   ============================================================ */
+var _foPendingRenames = [];
+
+// Years present in the source archive (detected via scan)
+var _foArchiveYears = ["2008","2009","2010","2011","2012","2013","2014","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024","2025"];
+
+async function foLoadMigration() {
+  const body = document.getElementById('fo-migration-body');
+  const issuesCard = document.getElementById('fo-issues-card');
+  body.innerHTML = '<div class="empty" style="padding:20px">Scanning archive and Paperless index… this may take 30–60 seconds.</div>';
+
+  // Run coverage check (all years) and issues scan in parallel
+  const [covData, issueData] = await Promise.all([
+    fetch(P+'/api/folder-manager/coverage').then(r=>r.json()).catch(()=>({})),
+    fetch(P+'/api/folder-manager/scan').then(r=>r.json()).catch(()=>({issues:[]})),
+  ]);
+
+  // Build per-year rows
+  const byYear = {};
+  (covData.files||[]).forEach(f => {
+    if (!byYear[f.year]) byYear[f.year] = {total:0, in_pl:0, missing:[]};
+    byYear[f.year].total++;
+    if (f.in_paperless) byYear[f.year].in_pl++;
+    else byYear[f.year].missing.push(f.name);
+  });
+
+  const years = Object.keys(byYear).sort((a,b)=>b.localeCompare(a));
+  if (!years.length) {
+    body.innerHTML = '<div class="empty" style="padding:20px">No files found in archive. Check that /mnt/s/ is mounted.</div>';
+    return;
+  }
+
+  const totalFiles = covData.total_files||0;
+  const totalIn = covData.in_paperless||0;
+  const totalOut = covData.not_in_paperless||0;
+  const overallPct = totalFiles ? Math.round(totalIn/totalFiles*100) : 0;
+
+  body.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">Total Source PDFs</div><div class="stat-value">${totalFiles.toLocaleString()}</div></div>
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">In Paperless</div><div class="stat-value" style="color:var(--income)">${totalIn.toLocaleString()}</div></div>
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">Not Yet Imported</div><div class="stat-value" style="color:var(--expense)">${totalOut.toLocaleString()}</div></div>
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">Overall Progress</div><div class="stat-value">${overallPct}%</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Year</th><th>Source PDFs</th><th>In Paperless</th><th>Not Imported</th><th>Progress</th><th></th></tr></thead>
+      <tbody>${years.map(yr => {
+        const d = byYear[yr];
+        const pct = d.total ? Math.round(d.in_pl/d.total*100) : 0;
+        const color = pct===100?'var(--income)':pct>50?'#ffc107':'var(--expense)';
+        const missing = d.total - d.in_pl;
+        return `<tr>
+          <td><strong>${esc(yr)}</strong></td>
+          <td>${d.total}</td>
+          <td style="color:var(--income)">${d.in_pl}</td>
+          <td style="color:${missing?'var(--expense)':'var(--income)'}">${missing||'✓ all'}</td>
+          <td style="min-width:140px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:8px;background:#e9ecef;border-radius:4px;overflow:hidden">
+                <div style="width:${pct}%;height:100%;background:${color};transition:width .3s"></div>
+              </div>
+              <span style="font-size:.75rem;color:var(--muted);min-width:32px">${pct}%</span>
+            </div>
+          </td>
+          <td>
+            ${missing ? `<button class="btn btn-sm btn-primary" onclick="foImportYear('${esc(yr)}')" style="white-space:nowrap">
+              Import ${missing} files
+            </button>` : '<span style="color:var(--income);font-size:.85rem">✓ Complete</span>'}
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:10px">
+      Coverage is estimated by filename similarity — some files may be in Paperless under different names.
+      "Import" copies files to the Paperless consume queue; Paperless will OCR, index, and tag them automatically.
+    </p>`;
+
+  // Show issues panel if any
+  const issues = issueData.issues||[];
+  if (issues.length) {
+    issuesCard.style.display = '';
+    const badge = document.getElementById('fo-issue-count');
+    badge.textContent = issues.length + ' issues';
+    const issuesBody = document.getElementById('fo-issues-body');
+    issuesBody.innerHTML = `<table>
+      <thead><tr><th>Current Name</th><th>Should Be</th><th>Reason</th><th>PDFs</th><th></th></tr></thead>
+      <tbody>${issues.map(item=>`<tr>
+        <td><strong style="color:var(--expense)">${esc(item.name)}</strong></td>
+        <td><strong style="color:var(--income)">${esc(item.canonical)}</strong></td>
+        <td style="font-size:.78rem;color:var(--muted)">${esc(item.issue)}</td>
+        <td>${item.pdf_count}</td>
+        <td><button class="btn btn-sm btn-outline" onclick="foRenameOne('${esc(item.path)}','${esc(item.canonical)}',this)">Fix</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  } else {
+    issuesCard.style.display = 'none';
+  }
+}
+
+async function foImportYear(year) {
+  const entity = document.getElementById('fo-entity-sel')?.value || 'personal';
+  if (!confirm(`Import all not-yet-imported PDFs for ${year} into Paperless?\n\nThis copies them to the consume queue. Paperless will OCR and index them. Your originals are not moved.`)) return;
+  const r = await post('/api/folder-manager/queue', {year, entity_slug: entity, dry_run: false});
+  if (r?.status === 'error') { toast('Error: '+r.message, 'error'); return; }
+  const queued = r?.queued?.length || 0;
+  const skipped = r?.skipped_count || 0;
+  toast(`Queued ${queued} files for ${year}. Skipped ${skipped} already present. Paperless will process them shortly.`, 'success');
+  setTimeout(foLoadMigration, 2000);
+}
+
+async function foScanIssues() {
+  // Just an alias — load migration loads both
+  foLoadMigration();
+}
+  const year = document.getElementById('fo-year')?.value || '';
+  const body = document.getElementById('fo-issues-body');
+  const badge = document.getElementById('fo-issue-count');
+  body.innerHTML = '<div class="empty" style="padding:20px">Scanning…</div>';
+  const params = year ? '?year='+year : '';
+  const data = await fetch(P+'/api/folder-manager/scan'+params).then(r=>r.json()).catch(()=>({issues:[]}));
+  const issues = data.issues || [];
+  badge.textContent = issues.length;
+  badge.style.display = issues.length ? '' : 'none';
+  if (!issues.length) {
+    body.innerHTML = '<div class="empty" style="padding:20px;color:var(--income)">✓ No naming issues found. All folders look consistent.</div>';
+    return;
+  }
+  body.innerHTML = `<table>
+    <thead><tr><th>Path</th><th>Current Name</th><th>Canonical Name</th><th>Issue</th><th>PDFs</th><th></th></tr></thead>
+    <tbody>${issues.map((item,i) => `<tr>
+      <td style="font-size:.75rem;color:var(--muted);max-width:280px;word-break:break-all">${esc(item.path.replace('/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax/','…/tax/'))}</td>
+      <td><strong style="color:var(--expense)">${esc(item.name)}</strong></td>
+      <td><strong style="color:var(--income)">${esc(item.canonical)}</strong></td>
+      <td style="font-size:.78rem;color:var(--muted)">${esc(item.issue)}</td>
+      <td>${item.pdf_count}</td>
+      <td><button class="btn btn-sm btn-outline" onclick="foRenameOne('${esc(item.path)}','${esc(item.canonical)}',this)">Fix</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+  _foPendingRenames = issues;
+}
+
+async function foRenameOne(src, newName, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  const r = await post('/api/folder-manager/rename', {src, new_name: newName, dry_run: false, merge: true});
+  btn.disabled = false;
+  if (r?.status === 'renamed' || r?.status === 'merged') {
+    toast('Renamed to '+newName, 'success');
+    btn.textContent = '✓'; btn.style.color = 'var(--income)';
+    foScanIssues();
+  } else if (r?.status === 'conflict') {
+    if (confirm('Folder "'+newName+'" already exists. Merge contents?')) {
+      const r2 = await post('/api/folder-manager/rename', {src, new_name: newName, dry_run: false, merge: true});
+      r2?.status === 'merged' ? (toast('Merged into '+newName, 'success'), foScanIssues()) : toast('Error: '+(r2?.message||'?'), 'error');
+    }
+    btn.textContent = orig; btn.disabled = false;
+  } else {
+    toast('Error: '+(r?.message||'?'), 'error');
+    btn.textContent = orig;
+  }
+}
+
+async function foDryRunAll() {
+  const year = document.getElementById('fo-year')?.value || '';
+  const card = document.getElementById('fo-preview-card');
+  const preBody = document.getElementById('fo-preview-body');
+  const modeEl = document.getElementById('fo-preview-mode');
+  const applyBtn = document.getElementById('fo-apply-btn');
+  card.style.display = '';
+  modeEl.textContent = 'DRY RUN';
+  modeEl.className = 'badge badge-other';
+  preBody.innerHTML = '<div class="empty">Running preview…</div>';
+  applyBtn.style.display = 'none';
+  const r = await post('/api/folder-manager/rename-all', {dry_run: true, year: year||null});
+  const results = r?.results || [];
+  if (!results.length) { preBody.innerHTML = '<div class="empty" style="color:var(--income)">✓ Nothing to rename.</div>'; return; }
+  preBody.innerHTML = `<table><thead><tr><th>From</th><th>To</th><th>Action</th></tr></thead>
+    <tbody>${results.map(r=>`<tr>
+      <td style="font-size:.78rem">${esc((r.src||'').replace('/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax/','…/tax/'))}</td>
+      <td><strong>${esc(r.canonical_name||r.dst||'')}</strong></td>
+      <td><span class="badge badge-${r.status==='dry_run'?'other':'income'}">${esc(r.status)}</span></td>
+    </tr>`).join('')}</tbody></table>`;
+  applyBtn.style.display = '';
+  card.scrollIntoView({behavior:'smooth'});
+}
+
+async function foApplyAll() {
+  if (!confirm('Apply all folder renames now? This will modify the source archive. A dry-run preview will show first.')) return;
+  await foDryRunAll();
+  const applyBtn = document.getElementById('fo-apply-btn');
+  applyBtn.style.display = '';
+}
+
+async function foExecuteRename() {
+  const year = document.getElementById('fo-year')?.value || '';
+  const btn = document.getElementById('fo-apply-btn');
+  const modeEl = document.getElementById('fo-preview-mode');
+  btn.disabled = true; btn.textContent = 'Applying…';
+  const r = await post('/api/folder-manager/rename-all', {dry_run: false, year: year||null});
+  btn.disabled = false; btn.textContent = 'Execute Renames';
+  const results = r?.results || [];
+  const ok = results.filter(r=>r.status==='renamed'||r.status==='merged').length;
+  const err = results.filter(r=>r.status==='error').length;
+  modeEl.textContent = 'APPLIED'; modeEl.className = 'badge badge-income';
+  toast(`Done: ${ok} renamed${err?' ('+err+' errors)':''}`, err?'error':'success');
+  foScanIssues();
+}
+
+async function foCoverage() {
+  const year = document.getElementById('fo-year')?.value || '';
+  const body = document.getElementById('fo-coverage-body');
+  const summary = document.getElementById('fo-coverage-summary');
+  const queueBtn = document.getElementById('fo-queue-btn');
+  body.innerHTML = '<div class="empty" style="padding:20px">Checking coverage — this may take a moment…</div>';
+  summary.style.display = 'none';
+  const params = year ? '?year='+year : '';
+  const data = await fetch(P+'/api/folder-manager/coverage'+params).then(r=>r.json()).catch(()=>({}));
+  if (data.error) { body.innerHTML = `<div class="empty" style="color:var(--expense)">${esc(data.error)}</div>`; return; }
+  document.getElementById('fo-cov-total').textContent = (data.total_files||0).toLocaleString();
+  document.getElementById('fo-cov-in').textContent = (data.in_paperless||0).toLocaleString();
+  document.getElementById('fo-cov-out').textContent = (data.not_in_paperless||0).toLocaleString();
+  summary.style.display = '';
+  const missing = (data.files||[]).filter(f=>!f.in_paperless);
+  queueBtn.style.display = missing.length ? '' : 'none';
+  if (!data.files?.length) { body.innerHTML = '<div class="empty">No PDF files found.</div>'; return; }
+  // Group by year
+  const byYear = {};
+  (data.files||[]).forEach(f=>{ (byYear[f.year]||(byYear[f.year]=[])).push(f); });
+  body.innerHTML = Object.entries(byYear).sort((a,b)=>b[0].localeCompare(a[0])).map(([yr, files]) => {
+    const inPl = files.filter(f=>f.in_paperless).length;
+    const pct = Math.round(inPl/files.length*100);
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <strong>${esc(yr)}</strong>
+        <div style="flex:1;height:8px;background:#e9ecef;border-radius:4px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${pct>80?'var(--income)':pct>40?'#ffc107':'var(--expense)'}"></div>
+        </div>
+        <span style="font-size:.8rem;color:var(--muted)">${inPl}/${files.length} (${pct}%)</span>
+        <button class="btn btn-sm btn-outline" onclick="foQueueYear(false,'${esc(yr)}')" style="font-size:.75rem">Queue Missing</button>
+      </div>
+      ${files.filter(f=>!f.in_paperless).slice(0,20).map(f=>`<div style="font-size:.75rem;color:var(--muted);padding:2px 0 2px 16px">
+        ✗ ${esc(f.name)}
+      </div>`).join('')}
+      ${files.filter(f=>!f.in_paperless).length > 20 ? `<div style="font-size:.75rem;color:var(--muted);padding:2px 0 2px 16px">…and ${files.filter(f=>!f.in_paperless).length-20} more not in Paperless</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function foQueueYear(dryRun=true, year=null) {
+  const yr = year || document.getElementById('fo-year')?.value;
+  if (!yr) { toast('Select a year to queue', 'error'); return; }
+  const entity = '{% if entities %}{{ entities[0].slug }}{% else %}personal{% endif %}';
+  if (!dryRun && !confirm(`Copy all PDFs for ${yr} to the Paperless consume queue?\nThis will NOT move the originals — it copies them.`)) return;
+  const r = await post('/api/folder-manager/queue', {year: yr, entity_slug: entity, dry_run: dryRun});
+  if (r?.status === 'error') { toast('Error: '+r.message, 'error'); return; }
+  const queued = r?.queued?.length || 0;
+  const skipped = r?.skipped_count || 0;
+  if (dryRun) {
+    toast(`Preview: ${queued} files would be queued, ${skipped} already present`, '');
+    if (queued && confirm(`Queue ${queued} files for Paperless ingestion?`)) foQueueYear(false, yr);
+  } else {
+    toast(`Queued ${queued} files for Paperless. Skipped ${skipped} already present.`, 'success');
+    foCoverage();
+  }
+}
+
+/* Import Filed Return from Tax Folder */
+async function importFiledReturnFromFolder() {
+  const year = document.getElementById('tr-year').value;
+  const eid = document.getElementById('tr-entity').value;
+  if (!year) { toast('Select a year first.', 'error'); return; }
+  const btn = document.getElementById('tr-import-folder-btn');
+  const origText = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Importing…';
+  const r = await post('/api/filed-returns/import-from-folder', {year, entity_id: eid ? parseInt(eid) : null});
+  btn.disabled = false; btn.textContent = origText;
+  if (r?.status === 'ok') {
+    toast('Imported from: '+r.source_name, 'success');
+    if (r.all_pdfs_found?.length > 1) {
+      console.log('Other PDFs in folder (not selected):', r.all_pdfs_found.filter(n=>n!==r.source_name));
+    }
+    loadFiledReturns();
+    loadTaxReviewYears();
+  } else {
+    toast('Import failed: '+(r?.error||'?'), 'error');
+  }
 }
 
 /* ---- Help / About ---- */
