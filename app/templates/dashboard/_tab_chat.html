@@ -1,0 +1,70 @@
+<!-- CHAT -->
+<div id="tab-chat" class="tab-panel {% if active_tab == 'chat' %}active{% endif %}">
+  <div class="page-header"><div class="page-title">AI Bookkeeping Assistant</div></div>
+  <div class="chat-layout">
+    <div class="chat-sidebar">
+      <div class="chat-sb-hdr">
+        Conversations
+        <button class="btn btn-sm btn-primary" onclick="newSession()">+ New</button>
+      </div>
+      <!-- Search bar -->
+      <div style="padding:6px 10px;border-bottom:1px solid #e2e8f0">
+        <input id="chatSearch" class="form-control" style="font-size:.78rem;padding:5px 8px"
+               placeholder="&#128269; Search chats…" oninput="searchSessions(this.value)">
+      </div>
+      <div class="chat-sess-list" id="sessList"><div class="empty" style="padding:12px;font-size:.82rem">No sessions</div></div>
+    </div>
+    <div class="chat-main">
+      <div class="chat-hdr">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <span id="chatTitle" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Select or start a conversation</span>
+          <span id="chatSharedTag" style="display:none;font-size:.72rem;color:#7c3aed;font-weight:500">&#128275; Shared with you</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+          <select id="chat-entity" class="form-control" style="font-size:.8rem;padding:4px 8px">
+            <option value="">All Entities</option>
+            {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+          </select>
+          <select id="chat-year" class="form-control" style="font-size:.8rem;padding:4px 8px">
+            <option value="">All Years</option>
+            {% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}
+          </select>
+          <button class="btn btn-sm btn-outline" id="btnShare" style="display:none" onclick="openShareModal()" title="Share">&#128279; Share</button>
+        </div>
+      </div>
+      <div class="chat-msgs" id="chatMsgs">
+        <div class="empty">Start a conversation by clicking + New.<br><small style="color:var(--muted)">The AI has access to your indexed documents — ask about transactions, deductions, or any tax question.</small></div>
+      </div>
+      <div class="chat-input">
+        <textarea id="chatIn" rows="1" placeholder="Ask about your finances…" onkeydown="chatKey(event)" oninput="resize(this)"></textarea>
+        <button class="btn btn-primary" onclick="sendMsg()" id="sendBtn">Send</button>
+        <button class="btn btn-outline" onclick="stopChat()" id="stopBtn" style="display:none;color:#e53e3e;border-color:#e53e3e">&#9632; Stop</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Chat Share Modal -->
+<div class="modal-overlay" id="mChatShare">
+  <div class="modal" style="max-width:480px">
+    <div class="gm-modal-hdr" style="background:#1a3c5e">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:1.1rem">&#128279;</span>
+        <h3>Share Conversation</h3>
+      </div>
+      <button class="gm-modal-close" onclick="closeM('mChatShare')">&times;</button>
+    </div>
+    <div style="padding:20px">
+      <div id="shareCurrentList" style="margin-bottom:14px;font-size:.82rem"></div>
+      <div class="form-group">
+        <label style="font-size:.82rem">Share with user (username)</label>
+        <input id="shareUsername" class="form-control" type="text" placeholder="username">
+      </div>
+      <div class="form-group">
+        <label style="font-size:.82rem"><input type="checkbox" id="shareCanWrite"> Allow them to send messages</label>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="doShareChat()">Share</button>
+      <div id="shareMsg" style="margin-top:8px;font-size:.82rem"></div>
+    </div>
+  </div>
+</div>

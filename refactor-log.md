@@ -89,6 +89,30 @@
 
 ---
 
-## Pending
+## Phase 5 — dashboard.html → partials (completed)
 
-- **Phase 5**: Split `templates/dashboard.html` (~5,000 lines) into `templates/base.html` + `templates/dashboard/` tab partials using Jinja `{% include %}`.
+**Before**: single `app/templates/dashboard.html` — 5,023 lines mixing CSS, topbar/sidebar HTML, 12 tab panels, 8 modal dialogs, 2,334 lines of JavaScript, and a PayPal setup modal.
+
+**After**: thin `dashboard.html` shell (31 lines) + `app/templates/dashboard/` package with 16 focused partials.
+
+| Partial | Lines | Content |
+|---------|-------|---------|
+| `_head.html` | 393 | `<head>` block: all CSS / style declarations |
+| `_topbar_sidebar.html` | 126 | Topbar nav + sidebar navigation |
+| `_tab_dashboard.html` | 45 | Dashboard overview: stat cards, entities, activity, recent jobs, filed returns |
+| `_tab_transactions.html` | 52 | Transaction list + sub-tabs + filters |
+| `_tab_documents.html` | 52 | Document table + file browser view |
+| `_tab_import.html` | 324 | Import Hub: Gmail, PayPal, US Alliance, Venmo, OFX, Bank CSV, Local FS, URL, Cloud |
+| `_tab_chat.html` | 70 | AI chat UI + Chat Share modal |
+| `_tab_tax_review.html` | 83 | Tax review form, filed return entry, SSE output + Q&A thread |
+| `_tab_reports.html` | 34 | Export cards per entity/year + existing files table |
+| `_tab_entities.html` | 151 | Entity tree + Add/Edit modal + Merge modal |
+| `_tab_settings.html` | 70 | LLM / Paperless / SMTP / S3 settings form |
+| `_tab_users.html` | 17 | User admin table |
+| `_tab_folder_manager.html` | 52 | Archive migration status + folder naming issues |
+| `_tab_ai_costs.html` | 49 | AI cost stats: by model, by operation, daily, recent calls |
+| `_modals.html` | 516 | Shared modals: Job Log, Add Txn, Add User, Reset Pw, Gmail Setup, User Profile, Help, About, Classification, Filed Return |
+| `_scripts.html` | 2,334 | Main JS + US Alliance FCU importer JS |
+| `_modal_paypal.html` | 643 | PayPal Setup modal HTML + its JS |
+
+**Verification**: `render_template("dashboard.html", ...)` inside `tax-ai-analyzer` container renders 289,115 bytes. All 18 structural markers (tab IDs, modal IDs, `</body>`, `</html>`) confirmed present.

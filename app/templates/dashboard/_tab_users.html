@@ -1,0 +1,17 @@
+<!-- USERS -->
+<div id="tab-users" class="tab-panel {% if active_tab == 'users' %}active{% endif %}">
+  <div class="page-header">
+    <div class="page-title">User Management</div>
+    <button class="btn btn-primary" onclick="openAddUser()">
+      <svg viewBox="0 0 24 24"><path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+      Add User
+    </button>
+  </div>
+  <div class="card">
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Active</th><th>Last Login</th><th></th></tr></thead>
+      <tbody id="usersBody"><tr><td colspan="6"><div class="empty">Loading…</div></td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+

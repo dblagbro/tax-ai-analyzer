@@ -85,7 +85,25 @@ app/
 │   └── financial_rules.py
 │
 └── templates/          — Jinja2 templates
-    ├── dashboard.html  — Single-page app shell (~5,000 lines; all tabs inline)
+    ├── dashboard.html  — SPA shell (31-line wrapper; all content via {% include %})
+    ├── dashboard/      — Tab and modal partials for dashboard.html
+    │   ├── _head.html              — CSS / <head> block
+    │   ├── _topbar_sidebar.html    — Topbar nav + sidebar
+    │   ├── _tab_dashboard.html     — Overview tab
+    │   ├── _tab_transactions.html  — Transactions tab
+    │   ├── _tab_documents.html     — Documents tab
+    │   ├── _tab_import.html        — Import Hub tab
+    │   ├── _tab_chat.html          — AI Chat tab + share modal
+    │   ├── _tab_tax_review.html    — Tax Review tab
+    │   ├── _tab_reports.html       — Reports & Exports tab
+    │   ├── _tab_entities.html      — Entity Management tab + modals
+    │   ├── _tab_settings.html      — Settings tab
+    │   ├── _tab_users.html         — User Admin tab
+    │   ├── _tab_folder_manager.html— File Organizer tab
+    │   ├── _tab_ai_costs.html      — AI Costs tab
+    │   ├── _modals.html            — Shared modals (job log, txn, users, Gmail, profile, help, about…)
+    │   ├── _scripts.html           — Main JS + US Alliance importer JS
+    │   └── _modal_paypal.html      — PayPal Setup modal + its JS
     ├── login.html
     ├── gmail_setup.html
     └── docs.html

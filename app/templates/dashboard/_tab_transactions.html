@@ -1,0 +1,52 @@
+<!-- TRANSACTIONS -->
+<div id="tab-transactions" class="tab-panel {% if active_tab == 'transactions' %}active{% endif %}">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Transactions</div>
+      <div class="page-sub">Income, expenses, and deductions by year</div>
+    </div>
+    <button class="btn btn-primary" onclick="openAddTxn()">
+      <svg viewBox="0 0 24 24"><path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+      Add Transaction
+    </button>
+  </div>
+  <!-- Quick sub-tabs: All / Income / Expenses / Deductions -->
+  <div class="imp-tabs" style="margin-bottom:16px">
+    <button id="txn-sub-all" class="imp-tab active" onclick="txnSubTab('',this)">All Transactions</button>
+    <button id="txn-sub-income" class="imp-tab" onclick="txnSubTab('income',this)">
+      <span style="color:#28a745">&#9650;</span> Income
+    </button>
+    <button id="txn-sub-expense" class="imp-tab" onclick="txnSubTab('expense',this)">
+      <span style="color:#dc3545">&#9660;</span> Expenses
+    </button>
+    <button id="txn-sub-deduction" class="imp-tab" onclick="txnSubTab('deduction',this)">
+      <span style="color:#6f42c1">&#10004;</span> Deductions
+    </button>
+  </div>
+  <!-- Summary row for the active filter -->
+  <div id="txn-summary-row" style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div class="filter-bar">
+    <select id="tf-entity" class="form-control" onchange="loadTxns()">
+      <option value="">All Entities</option>
+      {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+    </select>
+    <select id="tf-year" class="form-control" onchange="loadTxns()">
+      <option value="">All Years</option>
+      {% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}
+    </select>
+    <select id="tf-source" class="form-control" onchange="loadTxns()">
+      <option value="">All Sources</option>
+      <option value="gmail">Gmail</option><option value="paypal">PayPal</option>
+      <option value="venmo">Venmo</option><option value="bank_csv">Bank CSV</option>
+      <option value="manual">Manual</option><option value="url">URL</option>
+    </select>
+    <input type="text" id="tf-search" class="form-control" placeholder="Search description, vendor…" oninput="filterTxns()">
+  </div>
+  <div class="card">
+    <div class="tbl-wrap">
+      <table id="txn-table"></table>
+    </div>
+    <div id="txnInfo" style="margin-top:10px;font-size:.82rem;color:var(--muted);text-align:center"></div>
+  </div>
+</div>
+

@@ -1,0 +1,34 @@
+<!-- REPORTS -->
+<div id="tab-reports" class="tab-panel {% if active_tab == 'reports' %}active{% endif %}">
+  <div class="page-header">
+    <div><div class="page-title">Reports &amp; Exports</div><div class="page-sub">Generate accountant-ready files</div></div>
+    <button class="btn btn-outline" onclick="loadExports()">Refresh Files</button>
+  </div>
+  <div class="export-grid">
+    {% for e in entities %}{% for y in tax_years %}
+    <div class="export-card">
+      <h4>{{ e.name }} &mdash; {{ y }}</h4>
+      <p>Export all {{ y }} data for {{ e.name }} in multiple formats.</p>
+      <button class="btn btn-success btn-sm" style="margin-bottom:10px" onclick="genExport('{{ y }}','{{ e.slug }}')">Generate All</button>
+      <div class="fmt-btns">
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','csv')">CSV</button>
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','pdf')">PDF</button>
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','iif')">IIF</button>
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','ofx')">OFX</button>
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','txf')">TXF</button>
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','json')">JSON</button>
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','zip')">ZIP</button>
+      </div>
+    </div>
+    {% endfor %}{% endfor %}
+  </div>
+  <br>
+  <div class="card">
+    <div class="card-title">Existing Export Files</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>File</th><th>Path</th><th>Size</th><th>Modified</th></tr></thead>
+      <tbody id="exportFiles"><tr><td colspan="4"><div class="empty">Click Refresh Files</div></td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+

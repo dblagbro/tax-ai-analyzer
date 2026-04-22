@@ -1,0 +1,324 @@
+<!-- IMPORT -->
+<div id="tab-import" class="tab-panel {% if active_tab == 'import' %}active{% endif %}">
+  <div class="page-header">
+    <div class="page-title">Import Hub</div>
+    <button class="btn btn-outline" onclick="loadJobs()">Refresh Jobs</button>
+  </div>
+  <div class="imp-tabs">
+    <button class="imp-tab active" onclick="impTab('gmail',this)">Gmail</button>
+    <button class="imp-tab" onclick="impTab('paypal',this)">PayPal</button>
+    <button class="imp-tab" onclick="impTab('venmo',this)">Venmo</button>
+    <button class="imp-tab" onclick="impTab('usalliance',this)">US Alliance FCU</button>
+    <button class="imp-tab" onclick="impTab('bank',this)">Bank / OFX</button>
+    <button class="imp-tab" onclick="impTab('localfs',this)">Local Folder</button>
+    <button class="imp-tab" onclick="impTab('url',this)">URL</button>
+    <button class="imp-tab" onclick="impTab('cloud',this)">Cloud</button>
+  </div>
+  <div id="ip-gmail" class="imp-panel active">
+    <div class="card" style="max-width:680px">
+      <div class="card-title">Gmail Import</div>
+      <div id="gm-import-status" style="margin-bottom:12px;font-size:.82rem;color:var(--muted)">Checking status…</div>
+      <div class="form-row">
+        <div class="form-group"><label>Entity</label>
+          <select id="gm-entity" class="form-control">
+            <option value="">Auto-detect</option>
+            {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated, any year)</span></label>
+          <input id="gm-years-input" class="form-control" type="text" placeholder="e.g. 2020,2021,2022,2023" value="2021,2022,2023,2024">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Enter any years you want to import. Year is auto-detected from email date.</div>
+        </div>
+      </div>
+      <div style="margin-bottom:12px;background:#f8f9fb;border:1px solid #e0e4ea;border-radius:7px;padding:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:.78rem;font-weight:600;color:#555">Gmail Search Terms</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm btn-outline" onclick="editSearchTerms()" id="gm-terms-edit-btn" style="padding:2px 8px;font-size:.75rem">&#9998; Edit</button>
+            <button class="btn btn-sm btn-primary" onclick="saveSearchTerms()" id="gm-terms-save-btn" style="padding:2px 8px;font-size:.75rem;display:none">&#10003; Save</button>
+            <button class="btn btn-sm btn-outline" onclick="cancelSearchTerms()" id="gm-terms-cancel-btn" style="padding:2px 8px;font-size:.75rem;display:none">&#10005;</button>
+          </div>
+        </div>
+        <div id="gm-search-terms" style="font-size:.78rem;color:var(--muted);line-height:1.8">Loading…</div>
+        <textarea id="gm-terms-editor" class="form-control" rows="3" style="display:none;font-family:monospace;font-size:.78rem;margin-top:6px" placeholder="Space-separated search terms, e.g: receipt invoice statement 1099 W-2 from:iactaxes.com"></textarea>
+        <div id="gm-terms-hint" style="display:none;font-size:.72rem;color:var(--muted);margin-top:4px">Space-separated. Use <code>from:domain.com</code> to include all emails from a sender. Accountant emails (iactaxes.com) are always included automatically.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="gm-start-btn" onclick="startGmail()">▶ Start Import</button>
+        <button class="btn btn-outline" onclick="openGmailSetupModal()">&#9881; Setup / Credentials</button>
+      </div>
+    </div>
+    <!-- Live log terminal -->
+    <div id="gm-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a1a2e;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Import Log — <span id="gm-log-status">running</span></span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="gm-cancel-btn" onclick="cancelGmailImport()" style="background:#e53e3e;border:none;color:#fff;cursor:pointer;font-size:.72rem;padding:2px 8px;border-radius:4px;display:none">&#9632; Cancel</button>
+            <button onclick="document.getElementById('gm-log-panel').style.display='none'" style="background:none;border:none;color:#888;cursor:pointer;font-size:1rem">&times;</button>
+          </div>
+        </div>
+        <div id="gm-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+  <!-- PayPal API -->
+  <div id="ip-paypal" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">Connect PayPal API</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Get credentials at <strong>developer.paypal.com</strong> → My Apps &amp; Credentials → Create App → Live.<br>
+          Paste Client ID and Secret below — we use the Transactions API to pull data directly.
+        </p>
+        <div id="pp-status-badge" style="margin-bottom:10px"></div>
+        <div class="form-group"><label>Client ID</label><input id="pp-cid" class="form-control" type="text" placeholder="AXxxx…" autocomplete="off"></div>
+        <div class="form-group"><label>Client Secret</label><input id="pp-csec" class="form-control" type="password" placeholder="EKxxx…" autocomplete="off"></div>
+        <div class="form-group"><label><input type="checkbox" id="pp-sandbox"> Sandbox / test mode</label></div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn btn-outline btn-sm" onclick="savePaypalCreds()">Save &amp; Test Credentials</button>
+          <button class="btn btn-secondary btn-sm" onclick="openPaypalSetupModal()">&#128172; Setup Guide</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pull Transactions</div>
+        <div class="form-row">
+          <div class="form-group"><label>Entity</label><select id="pp-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label>Years (comma-separated)</label><input id="pp-years" class="form-control" value="2022,2023,2024,2025"></div>
+        </div>
+        <button class="btn btn-primary" onclick="pullPaypal()">Pull from PayPal</button>
+        <p style="font-size:.8rem;color:var(--muted);margin-top:8px">Pulls all transactions for the selected years directly from PayPal's API. Deduplicates automatically.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- US Alliance FCU — Playwright scraper -->
+  <div id="ip-usalliance" class="imp-panel">
+
+    <!-- Bot detection notice -->
+    <div id="usa-bot-notice" style="background:#fff3cd;border-left:4px solid #ff9800;padding:12px 16px;border-radius:0 6px 6px 0;margin-bottom:14px;font-size:.84rem;display:none">
+      <strong>&#9888; Bot Detection Active</strong> — US Alliance's security system is blocking automated logins from this server's IP address.
+      Use <strong>Cookie Authentication</strong> below to bypass this: log in from your real browser, export your session cookies, and paste them here.
+    </div>
+
+    <div class="two-col">
+
+      <!-- Credentials card -->
+      <div class="card">
+        <div class="card-title" style="color:#1a3d7c">&#127968; US Alliance FCU</div>
+        <div id="usa-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Enter your US Alliance online banking login. Credentials are stored
+          locally and never leave your server.
+        </p>
+        <div class="form-group">
+          <label>Online Banking Username</label>
+          <input id="usa-username" class="form-control" type="text" autocomplete="off" placeholder="Your username">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input id="usa-password" class="form-control" type="password" autocomplete="new-password" placeholder="Your password">
+            <span class="pw-eye" onclick="togglePw('usa-password',this)" title="Show/hide">&#128065;</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveUsaCreds()">Save Credentials</button>
+          <button class="btn btn-outline btn-sm" id="usa-test-btn" onclick="testUsaCreds()">&#9654; Test Login</button>
+        </div>
+        <div id="usa-test-result" style="margin-top:8px;font-size:.8rem"></div>
+
+        <!-- Cookie Authentication -->
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">&#127850; Cookie Authentication <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(bypasses bot detection)</span></div>
+        <div id="usa-cookie-status" style="margin-bottom:8px;font-size:.8rem;color:var(--muted)"></div>
+        <p style="font-size:.79rem;color:var(--muted);margin-bottom:8px">
+          Log in to US Alliance from your real browser, then use <strong>one</strong> of these methods:
+        </p>
+        <div style="background:#f8f9fa;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:.78rem">
+          <strong>Method A — Console snippet (no extension needed):</strong><br>
+          Open DevTools (F12) → Console tab, then click the button below to copy the snippet, paste it in the console, and press Enter:<br>
+          <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
+            <code id="usa-cookie-snippet" style="flex:1;display:block;background:#1e1e1e;color:#9cdcfe;padding:6px 8px;border-radius:4px;word-break:break-all;font-size:.72rem;overflow-x:auto;white-space:pre-wrap;min-width:0">copy(JSON.stringify(document.cookie.split(';').map(c=>{var p=c.trim().indexOf('=');return{name:c.trim().slice(0,p),value:c.trim().slice(p+1),domain:'account.usalliance.org',path:'/'};}).filter(c=>c.name)))</code>
+            <button class="btn btn-outline btn-sm" onclick="usaCopySnippet()" id="usa-snippet-copy-btn" style="white-space:nowrap;flex-shrink:0">&#128203; Copy</button>
+          </div>
+          Then paste (Ctrl+V) into the console and hit Enter, then paste the result into the box below.<br>
+          <em style="color:#888">Note: this only captures non-HttpOnly cookies. If import still fails, use Method B.</em>
+        </div>
+        <div style="background:#f8f9fa;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:.78rem">
+          <strong>Method B — Cookie-Editor extension (gets all cookies including HttpOnly):</strong><br>
+          1. Install <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" style="color:var(--accent)">Cookie-Editor</a> from Chrome Web Store<br>
+          2. While logged in to US Alliance, click the Cookie-Editor icon in your toolbar<br>
+          3. Click the <strong>Export</strong> button at the bottom → JSON is copied to clipboard<br>
+          4. Paste into the box below
+        </div>
+        <div class="form-group">
+          <textarea id="usa-cookies-input" class="form-control" rows="3" style="font-family:monospace;font-size:.72rem" placeholder='[{"name":"session","value":"...","domain":"account.usalliance.org",...}]'></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveUsaCookies()">&#128190; Save Cookies</button>
+          <button class="btn btn-outline btn-sm" id="usa-clear-cookies-btn" onclick="clearUsaCookies()" style="color:#d32f2f">&#128465; Clear Cookies</button>
+        </div>
+        <div id="usa-cookie-result" style="margin-top:6px;font-size:.8rem"></div>
+      </div>
+
+      <!-- Run import card -->
+      <div class="card">
+        <div class="card-title">Download Statements</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="usa-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated)</span></label>
+            <input id="usa-years-input" class="form-control" type="text" placeholder="e.g. 2020,2021,2022" value="2021,2022,2023">
+            <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Any years — not limited to a preset list</div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="usa-start-btn" onclick="startUsaImport()">&#9654; Download Statements</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Downloads PDF bank statements directly from the portal. Statements land in
+          Paperless consume folder and are auto-tagged by year. MFA prompt appears below if triggered.
+        </p>
+        <!-- MFA entry (shown on demand) -->
+        <div id="usa-mfa-box" style="display:none;margin-top:12px;background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0">
+          <strong style="font-size:.85rem">&#128274; MFA Required</strong>
+          <p style="font-size:.82rem;margin:4px 0 8px">Check your email/SMS/authenticator for a code from US Alliance FCU.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="usa-mfa-code" class="form-control" type="text" placeholder="Enter code" style="max-width:160px;font-family:monospace;letter-spacing:.1em">
+            <button class="btn btn-primary btn-sm" onclick="submitUsaMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live log terminal -->
+    <div id="usa-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a3d7c;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; US Alliance Import Log — <span id="usa-log-status">running</span></span>
+          <button onclick="document.getElementById('usa-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="usa-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Venmo CSV (no public API exists) -->
+  <div id="ip-venmo" class="imp-panel">
+    <div class="card" style="max-width:560px">
+      <div class="card-title">Import Venmo CSV</div>
+      <div style="background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0;margin-bottom:14px;font-size:.85rem">
+        <strong>Note:</strong> Venmo has no public API. CSV export is the only option.<br>
+        Download: Venmo app → Settings → Privacy → Download Your Data → transactions.csv
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Entity</label><select id="vm-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Year</label><select id="vm-year" class="form-control"><option value="">Auto-detect</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="upload-area" onclick="document.getElementById('vmFile').click()">
+        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        <span id="vmName">Click to select Venmo CSV</span>
+      </div>
+      <input type="file" id="vmFile" style="display:none" accept=".csv" onchange="document.getElementById('vmName').textContent=this.files[0].name">
+      <br><button class="btn btn-primary" onclick="importVenmo()">Import</button>
+    </div>
+  </div>
+
+  <!-- Bank: OFX/QFX + CSV -->
+  <div id="ip-bank" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">Import OFX / QFX (US Alliance FCU &amp; most banks)</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          In your online banking: <strong>Export Transactions → QuickBooks (OFX/QFX)</strong>.<br>
+          US Alliance FCU: Accounts → [account] → Export → QuickBooks
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Entity</label><select id="ofx-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label>Year (optional)</label><select id="ofx-year" class="form-control"><option value="">Auto-detect from file</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="upload-area" onclick="document.getElementById('ofxFile').click()">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span id="ofxName">Click to select .ofx or .qfx file</span>
+        </div>
+        <input type="file" id="ofxFile" style="display:none" accept=".ofx,.qfx,.qbo" onchange="document.getElementById('ofxName').textContent=this.files[0].name">
+        <br><button class="btn btn-primary" onclick="importOFX()">Import OFX</button>
+      </div>
+      <div class="card">
+        <div class="card-title">Import Bank CSV</div>
+        <div class="form-row">
+          <div class="form-group"><label>Entity</label><select id="bk-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label>Year</label><select id="bk-year" class="form-control"><option value="">Auto-detect</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Date Column</label><input id="bk-date" class="form-control" value="Date"></div>
+          <div class="form-group"><label>Description Column</label><input id="bk-desc" class="form-control" value="Description"></div>
+          <div class="form-group"><label>Amount Column</label><input id="bk-amt" class="form-control" value="Amount"></div>
+        </div>
+        <div class="upload-area" onclick="document.getElementById('bkFile').click()">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span id="bkName">Click to select Bank CSV</span>
+        </div>
+        <input type="file" id="bkFile" style="display:none" accept=".csv" onchange="document.getElementById('bkName').textContent=this.files[0].name">
+        <br><button class="btn btn-primary" onclick="importBank()">Import CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Local Folder -->
+  <div id="ip-localfs" class="imp-panel">
+    <div class="card" style="max-width:640px">
+      <div class="card-title">Import from Local Folder</div>
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+        Scan a directory path on the server for PDFs, CSVs, and OFX files.<br>
+        PDFs are queued into Paperless-ngx. CSVs and OFX files are imported as transactions.
+      </p>
+      <div class="form-group">
+        <label>Directory Path (on server)</label>
+        <input id="lf-path" class="form-control" type="text"
+               value="/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax"
+               placeholder="/mnt/s/documents/...">
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Entity</label><select id="lf-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Default Year</label><select id="lf-year" class="form-control"><option value="">Auto-detect from filenames</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+      </div>
+      <div id="lf-preview" style="display:none;background:var(--surface2);border-radius:6px;padding:10px;margin-bottom:12px;font-size:.85rem"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="scanLocalFs()">Scan (Preview)</button>
+        <button class="btn btn-primary" onclick="runLocalFs()">Import All</button>
+      </div>
+    </div>
+  </div>
+  <div id="ip-url" class="imp-panel">
+    <div class="card" style="max-width:560px">
+      <div class="card-title">Import from URL</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>URL</label><input id="urlInput" class="form-control" type="url" placeholder="https://…"></div>
+        <div class="form-group"><label>Entity</label><select id="url-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+      </div>
+      <button class="btn btn-primary" onclick="importUrl()">Fetch &amp; Import</button>
+    </div>
+  </div>
+  <div id="ip-cloud" class="imp-panel">
+    <div class="three-col">
+      <div class="card"><div class="card-title">Google Drive</div><p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Import from Google Drive.</p><a href="{{ url_prefix }}/api/cloud/google-drive/auth" class="btn btn-outline">Connect Drive</a></div>
+      <div class="card"><div class="card-title">Dropbox</div><p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Import from Dropbox.</p><a href="{{ url_prefix }}/api/cloud/dropbox/auth" class="btn btn-outline">Connect Dropbox</a></div>
+      <div class="card"><div class="card-title">Amazon S3</div><p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Configure bucket in Settings.</p><button class="btn btn-outline" onclick="toast('Configure S3 in Settings first.')">Browse S3</button></div>
+    </div>
+  </div>
+  <br>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" style="margin:0">Import Jobs</div>
+      <span id="jobs-refresh-ind" style="font-size:.75rem;color:var(--muted)"></span>
+    </div>
+    <div id="jobsList"><div class="empty"><div class="spinner"></div></div></div>
+  </div>
+</div>
+

@@ -1,0 +1,52 @@
+<!-- FILE ORGANIZER / MIGRATION -->
+<div id="tab-folder_manager" class="tab-panel {% if active_tab == 'folder_manager' %}active{% endif %}">
+  <div class="page-header">
+    <div>
+      <div class="page-title">File Organizer &amp; Migration</div>
+      <div class="page-sub">Pull your existing tax archive into Paperless + AI — stop hunting for documents at tax time</div>
+    </div>
+    <button class="btn btn-primary" onclick="foLoadMigration()">Refresh Status</button>
+  </div>
+
+  <!-- Migration status per year — the primary view -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">Archive Migration Status</div>
+        <div style="font-size:.8rem;color:var(--muted)">
+          Source: <code style="font-size:.75rem">/mnt/s/…/tax/</code> &nbsp;→&nbsp;
+          Paperless OCR &amp; index &nbsp;→&nbsp; AI Analysis &amp; Tax Review
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <select id="fo-entity-sel" class="form-control" style="width:auto">
+          {% for e in entities %}<option value="{{ e.slug }}">{{ e.name }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div id="fo-migration-body"><div class="empty" style="padding:20px">Click "Refresh Status" to scan which years have been imported.</div></div>
+  </div>
+
+  <!-- Folder name issues — secondary, shows after scan -->
+  <div class="card" id="fo-issues-card" style="margin-bottom:16px;display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">Folder Naming Issues <span id="fo-issue-count" class="badge badge-expense"></span></div>
+        <div style="font-size:.8rem;color:var(--muted)">Fix before importing to keep tags consistent</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-outline" onclick="foDryRunAll()">Preview Fixes</button>
+        <button class="btn btn-sm btn-success" onclick="foApplyAll()">Fix All Names</button>
+      </div>
+    </div>
+    <div id="fo-issues-body"></div>
+    <div class="card" id="fo-preview-card" style="margin-top:12px;display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <strong>Preview <span id="fo-preview-mode" class="badge"></span></strong>
+        <button class="btn btn-sm btn-success" id="fo-apply-btn" style="display:none" onclick="foExecuteRename()">Execute Renames</button>
+      </div>
+      <div id="fo-preview-body"></div>
+    </div>
+  </div>
+</div>
+

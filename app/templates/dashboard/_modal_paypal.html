@@ -1,0 +1,643 @@
+<!-- PayPal Setup Modal -->
+<div class="modal-overlay" id="mPaypalSetup">
+  <div class="modal modal-xl">
+    <div class="gm-modal-hdr" style="background:#003087">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:1.2rem">&#128172;</span>
+        <h3>PayPal Setup &mdash; API Credentials Guide</h3>
+      </div>
+      <button class="gm-modal-close" onclick="closeM('mPaypalSetup')" title="Close">&times;</button>
+    </div>
+    <div id="pp-chat-msgs" class="gm-chat-msgs">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#bbb;font-size:.88rem" id="pp-chat-init">
+        <span class="loader"></span>&nbsp;Initializing assistant…
+      </div>
+    </div>
+    <div class="gm-quick-acts">
+      <span style="color:var(--muted)">Quick:</span>
+      <button class="btn btn-secondary btn-sm" onclick="ppSendQuick('I have a PayPal Developer account already')">Already have an account</button>
+      <button class="btn btn-secondary btn-sm" onclick="ppSendQuick('I need to create a PayPal Developer account first')">New to PayPal Dev</button>
+      <button class="btn btn-secondary btn-sm" onclick="ppSendQuick('What is the difference between sandbox and live?')">Sandbox vs Live?</button>
+      <button class="btn btn-secondary btn-sm" onclick="ppResetChat()" style="margin-left:auto">&#8635; Restart</button>
+    </div>
+    <div class="gm-input-area">
+      <textarea id="pp-chat-input" placeholder="Ask a question or describe what you see…" rows="1" onkeydown="ppInputKeydown(event)"></textarea>
+      <button class="btn btn-primary" id="pp-send-btn" onclick="ppSendMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Entity Management ────────────────────────────────────────────────────────
+
+var _entityTree = [];
+
+async function loadEntityTree() {
+  if (document.getElementById('tab-entities').style.display === 'none') return;
+  var r = await fetch(P+'/api/entities/tree');
+  if (!r.ok) { toast('Failed to load entities','error'); return; }
+  _entityTree = await r.json();
+  // Also fetch archived for merge selects
+  renderEntityTree(_entityTree);
+}
+
+function _entityTypeLabel(t) {
+  return {person:'Person',dba:'DBA',llc:'LLC',corporation:'Corporation',
+          partnership:'Partnership',trust:'Trust/Estate',nonprofit:'Nonprofit',
+          farm:'Farm/Ranch',other:'Other',personal:'Personal',business:'Business'}[t]||t||'—';
+}
+
+function renderEntityTree(tree) {
+  var el = document.getElementById('entityTreeBody');
+  if (!tree || !tree.length) { el.innerHTML='<div class="empty">No entities yet.</div>'; return; }
+  el.innerHTML = '<ul class="ent-tree">'+tree.map(renderEntityNode).join('')+'</ul>'
+    + '<div style="margin-top:16px;display:flex;gap:8px">'
+    + '<button class="btn btn-outline btn-sm" onclick="openMergeEntity()">🔀 Merge / Acquire</button></div>';
+}
+
+function renderEntityNode(e) {
+  var children = (e.children||[]);
+  var meta = [];
+  try {
+    var md = JSON.parse(e.metadata_json||'{}');
+    if (md.ein) meta.push('EIN: '+md.ein);
+    if (md.ssn) meta.push('SSN on file');
+    if (md.state_formation) meta.push(md.state_formation);
+    if (md.phone) meta.push(md.phone);
+  } catch(_){}
+  if (e.tax_id) meta.push('Tax ID: '+e.tax_id);
+
+  return `<li>
+    <div class="ent-node" onclick="openEditEntity(${e.id})">
+      <span class="ent-node-color" style="background:${esc(e.color||'#1a3c5e')}"></span>
+      <span class="ent-node-type">${_entityTypeLabel(e.type)}</span>
+      <span class="ent-node-name">${esc(e.display_name||e.name)}</span>
+      <span class="ent-node-meta">${meta.map(esc).join(' · ')}</span>
+      <span class="ent-node-actions">
+        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openEditEntity(${e.id})" title="Edit">✏️</button>
+        <button class="btn btn-sm" style="color:#dc3545;border-color:#dc3545;background:transparent" onclick="event.stopPropagation();archiveEntity(${e.id},'${esc(e.name)}')" title="Archive">🗄️</button>
+      </span>
+    </div>`
+    + (children.length ? `<ul class="ent-tree" style="margin-left:24px;padding-left:0;border-left:2px solid var(--border)">${children.map(renderEntityNode).join('')}</ul>` : '')
+    + '</li>';
+}
+
+function _flatEntities(tree) {
+  var out = [];
+  function walk(nodes){ nodes.forEach(n=>{ out.push(n); if(n.children) walk(n.children); }); }
+  walk(tree||[]);
+  return out;
+}
+
+function openAddEntity() {
+  document.getElementById('mEntityEditTitle').textContent='Add Entity';
+  document.getElementById('ee-id').value='';
+  ['ee-name','ee-display','ee-state-tax-id','ee-filing-state','ee-ein','ee-employer-id',
+   'ee-state-form','ee-state-reg','ee-biz-addr','ee-reg-agent','ee-fiscal-year-end',
+   'ee-trade-name','ee-dba-reg','ee-dba-state','ee-addr','ee-phone','ee-email',
+   'ee-website','ee-desc','ee-ssn'].forEach(id=>{var el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('ee-dob').value='';
+  document.getElementById('ee-dba-exp').value='';
+  document.getElementById('ee-color').value='#1a3c5e';
+  document.getElementById('ee-type').value='person';
+  // Populate parent select
+  _populateParentSelect(null);
+  updateEntityTypeFields();
+  document.getElementById('mEntityEdit').classList.add('open');
+}
+
+function openEditEntity(id) {
+  var flat = _flatEntities(_entityTree);
+  var e = flat.find(x=>x.id==id);
+  if (!e) return;
+  document.getElementById('mEntityEditTitle').textContent='Edit: '+e.name;
+  document.getElementById('ee-id').value=e.id;
+  document.getElementById('ee-name').value=e.name||'';
+  document.getElementById('ee-display').value=e.display_name||'';
+  document.getElementById('ee-type').value=e.type||'person';
+  document.getElementById('ee-color').value=e.color||'#1a3c5e';
+  document.getElementById('ee-desc').value=e.description||'';
+  // Populate parent select
+  _populateParentSelect(e.parent_entity_id, e.id);
+  // Metadata: merge parent's metadata as fallback placeholders
+  var parentMd = {};
+  if (e.parent_entity_id) {
+    var parent = flat.find(x=>x.id==e.parent_entity_id);
+    if (parent) { try { parentMd = JSON.parse(parent.metadata_json||'{}'); } catch(_){} }
+  }
+  try {
+    var md = JSON.parse(e.metadata_json||'{}');
+    // setVal: use own value; if blank, show inherited value as placeholder
+    var setVal = (elId, k) => {
+      var el = document.getElementById(elId);
+      if (!el) return;
+      el.value = md[k] || '';
+      var inherited = parentMd[k] || '';
+      el.placeholder = inherited ? ('Inherited: '+inherited) : (el.dataset.defaultPlaceholder||'');
+      if (!el.dataset.defaultPlaceholder) el.dataset.defaultPlaceholder = el.placeholder;
+    };
+    setVal('ee-ssn','ssn'); setVal('ee-dob','dob'); setVal('ee-addr','address');
+    setVal('ee-state-tax-id','state_tax_id'); setVal('ee-filing-state','filing_state');
+    setVal('ee-ein','ein'); setVal('ee-employer-id','employer_id');
+    setVal('ee-state-form','state_formation'); setVal('ee-state-reg','state_reg_number');
+    setVal('ee-biz-addr','business_address'); setVal('ee-reg-agent','registered_agent');
+    setVal('ee-fiscal-year-end','fiscal_year_end'); setVal('ee-trade-name','trade_name');
+    setVal('ee-dba-reg','dba_reg_number'); setVal('ee-dba-state','dba_state');
+    setVal('ee-dba-exp','dba_expiration'); setVal('ee-phone','phone');
+    setVal('ee-email','email'); setVal('ee-website','website');
+    document.getElementById('ee-tax-id')?document.getElementById('ee-tax-id').value=e.tax_id||'':null;
+  } catch(_){}
+  // Show inherited-from-parent note
+  var noteEl = document.getElementById('ee-inherit-note');
+  if (noteEl) {
+    if (e.parent_entity_id) {
+      var pname = flat.find(x=>x.id==e.parent_entity_id);
+      noteEl.textContent = pname ? ('Fields shown as "Inherited: ..." come from parent: '+( pname.display_name||pname.name)) : '';
+      noteEl.style.display = '';
+    } else { noteEl.style.display = 'none'; }
+  }
+  updateEntityTypeFields();
+  document.getElementById('mEntityEdit').classList.add('open');
+}
+
+function _populateParentSelect(currentParentId, excludeId) {
+  var sel = document.getElementById('ee-parent');
+  sel.innerHTML = '<option value="">— none (root entity) —</option>';
+  var flat = _flatEntities(_entityTree);
+  flat.forEach(e=>{
+    if (excludeId && e.id==excludeId) return;
+    var opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = e.display_name||e.name;
+    if (e.id==currentParentId) opt.selected=true;
+    sel.appendChild(opt);
+  });
+}
+
+function updateEntityTypeFields() {
+  var type = document.getElementById('ee-type').value;
+  document.querySelectorAll('.ee-type-section').forEach(el=>el.style.display='none');
+  if (type==='person') document.getElementById('ee-person-fields').style.display='';
+  else if (['llc','corporation','partnership','nonprofit','farm','other','business'].includes(type))
+    document.getElementById('ee-biz-fields').style.display='';
+  else if (type==='dba') {
+    document.getElementById('ee-dba-fields').style.display='';
+    document.getElementById('ee-biz-fields').style.display='';
+  } else if (type==='trust')
+    document.getElementById('ee-biz-fields').style.display=''; // trust uses EIN
+}
+
+async function saveEntity() {
+  var id = document.getElementById('ee-id').value;
+  var name = document.getElementById('ee-name').value.trim();
+  if (!name) { toast('Name is required','error'); return; }
+
+  function gv(eid){ var el=document.getElementById(eid); return el?el.value.trim():''; }
+
+  var metadata = {
+    ssn: gv('ee-ssn'), dob: gv('ee-dob'), address: gv('ee-addr'),
+    state_tax_id: gv('ee-state-tax-id'), filing_state: gv('ee-filing-state'),
+    ein: gv('ee-ein'), employer_id: gv('ee-employer-id'),
+    state_formation: gv('ee-state-form'), state_reg_number: gv('ee-state-reg'),
+    business_address: gv('ee-biz-addr'), registered_agent: gv('ee-reg-agent'),
+    fiscal_year_end: gv('ee-fiscal-year-end'), trade_name: gv('ee-trade-name'),
+    dba_reg_number: gv('ee-dba-reg'), dba_state: gv('ee-dba-state'),
+    dba_expiration: gv('ee-dba-exp'), phone: gv('ee-phone'),
+    email: gv('ee-email'), website: gv('ee-website'),
+  };
+  // Strip empty strings
+  Object.keys(metadata).forEach(k=>{ if(!metadata[k]) delete metadata[k]; });
+
+  var payload = {
+    name, display_name: gv('ee-display')||name,
+    type: document.getElementById('ee-type').value,
+    color: gv('ee-color')||'#1a3c5e',
+    description: gv('ee-desc'),
+    parent_entity_id: document.getElementById('ee-parent').value||null,
+    metadata,
+  };
+
+  var url = id ? '/api/entities/'+id : '/api/entities';
+  var r = await post(url, payload);
+  if (!r || r.error) { toast((r&&r.error)||'Save failed','error'); return; }
+  toast(id?'Entity saved':'Entity created');
+  document.getElementById('mEntityEdit').classList.remove('open');
+  loadEntityTree();
+  // Reload page to refresh entity dropdowns everywhere
+  setTimeout(()=>location.reload(), 800);
+}
+
+async function archiveEntity(id, name) {
+  if (!confirm(`Archive entity "${name}"? It will be hidden from all dropdowns but records are preserved.`)) return;
+  var r = await post('/api/entities/'+id+'/archive', {});
+  if (!r || r.error) { toast((r&&r.error)||'Failed','error'); return; }
+  toast('Entity archived');
+  loadEntityTree();
+}
+
+function openMergeEntity() {
+  var flat = _flatEntities(_entityTree);
+  ['merge-source','merge-target'].forEach(selId=>{
+    var sel = document.getElementById(selId);
+    sel.innerHTML = flat.map(e=>`<option value="${e.id}">${esc(e.display_name||e.name)} (${_entityTypeLabel(e.type)})</option>`).join('');
+  });
+  document.getElementById('merge-confirm').checked=false;
+  document.getElementById('mEntityMerge').classList.add('open');
+}
+
+async function doMergeEntity() {
+  if (!document.getElementById('merge-confirm').checked) {
+    toast('Please check the confirmation box','error'); return;
+  }
+  var src = document.getElementById('merge-source').value;
+  var tgt = document.getElementById('merge-target').value;
+  if (src==tgt) { toast('Source and target must be different','error'); return; }
+  var r = await post('/api/entities/'+src+'/merge', {target_entity_id:parseInt(tgt)});
+  if (!r || r.error) { toast((r&&r.error)||'Merge failed','error'); return; }
+  toast('Entities merged successfully');
+  document.getElementById('mEntityMerge').classList.remove('open');
+  loadEntityTree();
+  setTimeout(()=>location.reload(), 800);
+}
+
+// Load entity tree when Entities tab is opened
+(function(){
+  var orig = window.sw;
+  window.sw = function(tab){
+    orig(tab);
+    if (tab==='entities') loadEntityTree();
+  };
+})();
+
+/* ---- User Profile ---- */
+async function openProfile() {
+  document.getElementById('uMenu').classList.remove('open');
+  var d = await fetch(P+'/api/user/profile').then(r=>r.json()).catch(()=>({}));
+  var p = d.profile || {};
+  document.getElementById('prof-fullname').value = p.full_name || '';
+  document.getElementById('prof-email').value = p.email || '';
+  document.getElementById('prof-phone').value = p.phone || '';
+  document.getElementById('prof-address').value = p.address || '';
+  document.getElementById('prof-city').value = p.city || '';
+  document.getElementById('prof-state').value = p.state || '';
+  document.getElementById('prof-zip').value = p.zip || '';
+  document.getElementById('prof-notify-email').checked = !!p.notify_email;
+  document.getElementById('prof-notify-import').checked = !!p.notify_import_complete;
+  document.getElementById('mUserProfile').classList.add('open');
+}
+async function saveProfile() {
+  var body = {
+    full_name: document.getElementById('prof-fullname').value.trim(),
+    email: document.getElementById('prof-email').value.trim(),
+    phone: document.getElementById('prof-phone').value.trim(),
+    address: document.getElementById('prof-address').value.trim(),
+    city: document.getElementById('prof-city').value.trim(),
+    state: document.getElementById('prof-state').value.trim(),
+    zip: document.getElementById('prof-zip').value.trim(),
+    notify_email: document.getElementById('prof-notify-email').checked,
+    notify_import_complete: document.getElementById('prof-notify-import').checked,
+  };
+  var r = await post('/api/user/profile', body);
+  if (!r || r.error) { toast((r&&r.error)||'Save failed','error'); return; }
+  toast('Profile saved');
+  document.getElementById('mUserProfile').classList.remove('open');
+}
+
+/* AI Costs */
+async function loadAiCosts() {
+  const days = document.getElementById('ac-days')?.value || 30;
+  const data = await fetch(P+'/api/ai-costs?days='+days).then(r=>r.json()).catch(()=>({}));
+  const s = data.stats || {};
+  document.getElementById('ac-calls').textContent = (s.total_calls||0).toLocaleString();
+  document.getElementById('ac-tokens').textContent = (s.total_tokens||0).toLocaleString();
+  document.getElementById('ac-cost').textContent = '$'+(s.total_cost_usd||0).toFixed(4);
+  document.getElementById('ac-success').textContent = ((s.success_rate||1)*100).toFixed(1)+'%';
+  const bm = document.getElementById('ac-by-model');
+  const byModel = s.by_model||{};
+  bm.innerHTML = Object.keys(byModel).length ? Object.entries(byModel).sort((a,b)=>b[1].cost_usd-a[1].cost_usd).map(([m,v])=>
+    `<tr><td>${esc(m)}<br><small style="color:var(--muted)">${esc(v.provider)}</small></td><td>${v.calls}</td><td>${((v.input_tokens||0)+(v.output_tokens||0)).toLocaleString()}</td><td>$${v.cost_usd.toFixed(5)}</td></tr>`
+  ).join('') : '<tr><td colspan="4"><div class="empty">No data.</div></td></tr>';
+  const bo = document.getElementById('ac-by-op');
+  const byOp = s.by_operation||{};
+  bo.innerHTML = Object.keys(byOp).length ? Object.entries(byOp).sort((a,b)=>b[1].cost_usd-a[1].cost_usd).map(([op,v])=>
+    `<tr><td>${esc(op)}</td><td>${v.calls}</td><td>${(v.tokens||0).toLocaleString()}</td><td>$${v.cost_usd.toFixed(5)}</td></tr>`
+  ).join('') : '<tr><td colspan="4"><div class="empty">No data.</div></td></tr>';
+  const bd = document.getElementById('ac-by-day');
+  const byDay = s.by_day||[];
+  bd.innerHTML = byDay.length ? [...byDay].reverse().map(d=>
+    `<tr><td>${esc(d.date)}</td><td>${d.calls}</td><td>${(d.tokens||0).toLocaleString()}</td><td>$${d.cost_usd.toFixed(5)}</td></tr>`
+  ).join('') : '<tr><td colspan="4"><div class="empty">No data for this period.</div></td></tr>';
+  const rc = await fetch(P+'/api/ai-costs/recent').then(r=>r.json()).catch(()=>({calls:[]}));
+  const tbody = document.getElementById('ac-recent');
+  tbody.innerHTML = (rc.calls||[]).length ? rc.calls.map(c=>
+    `<tr><td style="font-size:.78rem">${(c.ts||'').slice(0,16).replace('T',' ')}</td><td>${esc(c.provider)}</td><td style="font-size:.78rem">${esc(c.model)}</td><td>${esc(c.operation)}</td><td>${(c.input_tokens||0).toLocaleString()}</td><td>${(c.output_tokens||0).toLocaleString()}</td><td>$${(c.cost_usd||0).toFixed(5)}</td><td>${c.success?'<span style="color:var(--income)">✓</span>':'<span style="color:var(--expense)">✗</span>'}</td></tr>`
+  ).join('') : '<tr><td colspan="8"><div class="empty">No recent calls.</div></td></tr>';
+}
+
+/* ============================================================
+   File Organizer / Migration
+   ============================================================ */
+var _foPendingRenames = [];
+
+// Years present in the source archive (detected via scan)
+var _foArchiveYears = ["2008","2009","2010","2011","2012","2013","2014","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024","2025"];
+
+async function foLoadMigration() {
+  const body = document.getElementById('fo-migration-body');
+  const issuesCard = document.getElementById('fo-issues-card');
+  body.innerHTML = '<div class="empty" style="padding:20px">Scanning archive and Paperless index… this may take 30–60 seconds.</div>';
+
+  // Run coverage check (all years) and issues scan in parallel
+  const [covData, issueData] = await Promise.all([
+    fetch(P+'/api/folder-manager/coverage').then(r=>r.json()).catch(()=>({})),
+    fetch(P+'/api/folder-manager/scan').then(r=>r.json()).catch(()=>({issues:[]})),
+  ]);
+
+  // Build per-year rows
+  const byYear = {};
+  (covData.files||[]).forEach(f => {
+    if (!byYear[f.year]) byYear[f.year] = {total:0, in_pl:0, missing:[]};
+    byYear[f.year].total++;
+    if (f.in_paperless) byYear[f.year].in_pl++;
+    else byYear[f.year].missing.push(f.name);
+  });
+
+  const years = Object.keys(byYear).sort((a,b)=>b.localeCompare(a));
+  if (!years.length) {
+    body.innerHTML = '<div class="empty" style="padding:20px">No files found in archive. Check that /mnt/s/ is mounted.</div>';
+    return;
+  }
+
+  const totalFiles = covData.total_files||0;
+  const totalIn = covData.in_paperless||0;
+  const totalOut = covData.not_in_paperless||0;
+  const overallPct = totalFiles ? Math.round(totalIn/totalFiles*100) : 0;
+
+  body.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">Total Source PDFs</div><div class="stat-value">${totalFiles.toLocaleString()}</div></div>
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">In Paperless</div><div class="stat-value" style="color:var(--income)">${totalIn.toLocaleString()}</div></div>
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">Not Yet Imported</div><div class="stat-value" style="color:var(--expense)">${totalOut.toLocaleString()}</div></div>
+      <div class="stat-card" style="min-width:140px"><div class="stat-label">Overall Progress</div><div class="stat-value">${overallPct}%</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Year</th><th>Source PDFs</th><th>In Paperless</th><th>Not Imported</th><th>Progress</th><th></th></tr></thead>
+      <tbody>${years.map(yr => {
+        const d = byYear[yr];
+        const pct = d.total ? Math.round(d.in_pl/d.total*100) : 0;
+        const color = pct===100?'var(--income)':pct>50?'#ffc107':'var(--expense)';
+        const missing = d.total - d.in_pl;
+        return `<tr>
+          <td><strong>${esc(yr)}</strong></td>
+          <td>${d.total}</td>
+          <td style="color:var(--income)">${d.in_pl}</td>
+          <td style="color:${missing?'var(--expense)':'var(--income)'}">${missing||'✓ all'}</td>
+          <td style="min-width:140px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:8px;background:#e9ecef;border-radius:4px;overflow:hidden">
+                <div style="width:${pct}%;height:100%;background:${color};transition:width .3s"></div>
+              </div>
+              <span style="font-size:.75rem;color:var(--muted);min-width:32px">${pct}%</span>
+            </div>
+          </td>
+          <td>
+            ${missing ? `<button class="btn btn-sm btn-primary" onclick="foImportYear('${esc(yr)}')" style="white-space:nowrap">
+              Import ${missing} files
+            </button>` : '<span style="color:var(--income);font-size:.85rem">✓ Complete</span>'}
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:10px">
+      Coverage is estimated by filename similarity — some files may be in Paperless under different names.
+      "Import" copies files to the Paperless consume queue; Paperless will OCR, index, and tag them automatically.
+    </p>`;
+
+  // Show issues panel if any
+  const issues = issueData.issues||[];
+  if (issues.length) {
+    issuesCard.style.display = '';
+    const badge = document.getElementById('fo-issue-count');
+    badge.textContent = issues.length + ' issues';
+    const issuesBody = document.getElementById('fo-issues-body');
+    issuesBody.innerHTML = `<table>
+      <thead><tr><th>Current Name</th><th>Should Be</th><th>Reason</th><th>PDFs</th><th></th></tr></thead>
+      <tbody>${issues.map(item=>`<tr>
+        <td><strong style="color:var(--expense)">${esc(item.name)}</strong></td>
+        <td><strong style="color:var(--income)">${esc(item.canonical)}</strong></td>
+        <td style="font-size:.78rem;color:var(--muted)">${esc(item.issue)}</td>
+        <td>${item.pdf_count}</td>
+        <td><button class="btn btn-sm btn-outline" onclick="foRenameOne('${esc(item.path)}','${esc(item.canonical)}',this)">Fix</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  } else {
+    issuesCard.style.display = 'none';
+  }
+}
+
+async function foImportYear(year) {
+  const entity = document.getElementById('fo-entity-sel')?.value || 'personal';
+  if (!confirm(`Import all not-yet-imported PDFs for ${year} into Paperless?\n\nThis copies them to the consume queue. Paperless will OCR and index them. Your originals are not moved.`)) return;
+  const r = await post('/api/folder-manager/queue', {year, entity_slug: entity, dry_run: false});
+  if (r?.status === 'error') { toast('Error: '+r.message, 'error'); return; }
+  const queued = r?.queued?.length || 0;
+  const skipped = r?.skipped_count || 0;
+  toast(`Queued ${queued} files for ${year}. Skipped ${skipped} already present. Paperless will process them shortly.`, 'success');
+  setTimeout(foLoadMigration, 2000);
+}
+
+async function foScanIssues() {
+  // Just an alias — load migration loads both
+  foLoadMigration();
+}
+  const year = document.getElementById('fo-year')?.value || '';
+  const body = document.getElementById('fo-issues-body');
+  const badge = document.getElementById('fo-issue-count');
+  body.innerHTML = '<div class="empty" style="padding:20px">Scanning…</div>';
+  const params = year ? '?year='+year : '';
+  const data = await fetch(P+'/api/folder-manager/scan'+params).then(r=>r.json()).catch(()=>({issues:[]}));
+  const issues = data.issues || [];
+  badge.textContent = issues.length;
+  badge.style.display = issues.length ? '' : 'none';
+  if (!issues.length) {
+    body.innerHTML = '<div class="empty" style="padding:20px;color:var(--income)">✓ No naming issues found. All folders look consistent.</div>';
+    return;
+  }
+  body.innerHTML = `<table>
+    <thead><tr><th>Path</th><th>Current Name</th><th>Canonical Name</th><th>Issue</th><th>PDFs</th><th></th></tr></thead>
+    <tbody>${issues.map((item,i) => `<tr>
+      <td style="font-size:.75rem;color:var(--muted);max-width:280px;word-break:break-all">${esc(item.path.replace('/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax/','…/tax/'))}</td>
+      <td><strong style="color:var(--expense)">${esc(item.name)}</strong></td>
+      <td><strong style="color:var(--income)">${esc(item.canonical)}</strong></td>
+      <td style="font-size:.78rem;color:var(--muted)">${esc(item.issue)}</td>
+      <td>${item.pdf_count}</td>
+      <td><button class="btn btn-sm btn-outline" onclick="foRenameOne('${esc(item.path)}','${esc(item.canonical)}',this)">Fix</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+  _foPendingRenames = issues;
+}
+
+async function foRenameOne(src, newName, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  const r = await post('/api/folder-manager/rename', {src, new_name: newName, dry_run: false, merge: true});
+  btn.disabled = false;
+  if (r?.status === 'renamed' || r?.status === 'merged') {
+    toast('Renamed to '+newName, 'success');
+    btn.textContent = '✓'; btn.style.color = 'var(--income)';
+    foScanIssues();
+  } else if (r?.status === 'conflict') {
+    if (confirm('Folder "'+newName+'" already exists. Merge contents?')) {
+      const r2 = await post('/api/folder-manager/rename', {src, new_name: newName, dry_run: false, merge: true});
+      r2?.status === 'merged' ? (toast('Merged into '+newName, 'success'), foScanIssues()) : toast('Error: '+(r2?.message||'?'), 'error');
+    }
+    btn.textContent = orig; btn.disabled = false;
+  } else {
+    toast('Error: '+(r?.message||'?'), 'error');
+    btn.textContent = orig;
+  }
+}
+
+async function foDryRunAll() {
+  const year = document.getElementById('fo-year')?.value || '';
+  const card = document.getElementById('fo-preview-card');
+  const preBody = document.getElementById('fo-preview-body');
+  const modeEl = document.getElementById('fo-preview-mode');
+  const applyBtn = document.getElementById('fo-apply-btn');
+  card.style.display = '';
+  modeEl.textContent = 'DRY RUN';
+  modeEl.className = 'badge badge-other';
+  preBody.innerHTML = '<div class="empty">Running preview…</div>';
+  applyBtn.style.display = 'none';
+  const r = await post('/api/folder-manager/rename-all', {dry_run: true, year: year||null});
+  const results = r?.results || [];
+  if (!results.length) { preBody.innerHTML = '<div class="empty" style="color:var(--income)">✓ Nothing to rename.</div>'; return; }
+  preBody.innerHTML = `<table><thead><tr><th>From</th><th>To</th><th>Action</th></tr></thead>
+    <tbody>${results.map(r=>`<tr>
+      <td style="font-size:.78rem">${esc((r.src||'').replace('/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax/','…/tax/'))}</td>
+      <td><strong>${esc(r.canonical_name||r.dst||'')}</strong></td>
+      <td><span class="badge badge-${r.status==='dry_run'?'other':'income'}">${esc(r.status)}</span></td>
+    </tr>`).join('')}</tbody></table>`;
+  applyBtn.style.display = '';
+  card.scrollIntoView({behavior:'smooth'});
+}
+
+async function foApplyAll() {
+  if (!confirm('Apply all folder renames now? This will modify the source archive. A dry-run preview will show first.')) return;
+  await foDryRunAll();
+  const applyBtn = document.getElementById('fo-apply-btn');
+  applyBtn.style.display = '';
+}
+
+async function foExecuteRename() {
+  const year = document.getElementById('fo-year')?.value || '';
+  const btn = document.getElementById('fo-apply-btn');
+  const modeEl = document.getElementById('fo-preview-mode');
+  btn.disabled = true; btn.textContent = 'Applying…';
+  const r = await post('/api/folder-manager/rename-all', {dry_run: false, year: year||null});
+  btn.disabled = false; btn.textContent = 'Execute Renames';
+  const results = r?.results || [];
+  const ok = results.filter(r=>r.status==='renamed'||r.status==='merged').length;
+  const err = results.filter(r=>r.status==='error').length;
+  modeEl.textContent = 'APPLIED'; modeEl.className = 'badge badge-income';
+  toast(`Done: ${ok} renamed${err?' ('+err+' errors)':''}`, err?'error':'success');
+  foScanIssues();
+}
+
+async function foCoverage() {
+  const year = document.getElementById('fo-year')?.value || '';
+  const body = document.getElementById('fo-coverage-body');
+  const summary = document.getElementById('fo-coverage-summary');
+  const queueBtn = document.getElementById('fo-queue-btn');
+  body.innerHTML = '<div class="empty" style="padding:20px">Checking coverage — this may take a moment…</div>';
+  summary.style.display = 'none';
+  const params = year ? '?year='+year : '';
+  const data = await fetch(P+'/api/folder-manager/coverage'+params).then(r=>r.json()).catch(()=>({}));
+  if (data.error) { body.innerHTML = `<div class="empty" style="color:var(--expense)">${esc(data.error)}</div>`; return; }
+  document.getElementById('fo-cov-total').textContent = (data.total_files||0).toLocaleString();
+  document.getElementById('fo-cov-in').textContent = (data.in_paperless||0).toLocaleString();
+  document.getElementById('fo-cov-out').textContent = (data.not_in_paperless||0).toLocaleString();
+  summary.style.display = '';
+  const missing = (data.files||[]).filter(f=>!f.in_paperless);
+  queueBtn.style.display = missing.length ? '' : 'none';
+  if (!data.files?.length) { body.innerHTML = '<div class="empty">No PDF files found.</div>'; return; }
+  // Group by year
+  const byYear = {};
+  (data.files||[]).forEach(f=>{ (byYear[f.year]||(byYear[f.year]=[])).push(f); });
+  body.innerHTML = Object.entries(byYear).sort((a,b)=>b[0].localeCompare(a[0])).map(([yr, files]) => {
+    const inPl = files.filter(f=>f.in_paperless).length;
+    const pct = Math.round(inPl/files.length*100);
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <strong>${esc(yr)}</strong>
+        <div style="flex:1;height:8px;background:#e9ecef;border-radius:4px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${pct>80?'var(--income)':pct>40?'#ffc107':'var(--expense)'}"></div>
+        </div>
+        <span style="font-size:.8rem;color:var(--muted)">${inPl}/${files.length} (${pct}%)</span>
+        <button class="btn btn-sm btn-outline" onclick="foQueueYear(false,'${esc(yr)}')" style="font-size:.75rem">Queue Missing</button>
+      </div>
+      ${files.filter(f=>!f.in_paperless).slice(0,20).map(f=>`<div style="font-size:.75rem;color:var(--muted);padding:2px 0 2px 16px">
+        ✗ ${esc(f.name)}
+      </div>`).join('')}
+      ${files.filter(f=>!f.in_paperless).length > 20 ? `<div style="font-size:.75rem;color:var(--muted);padding:2px 0 2px 16px">…and ${files.filter(f=>!f.in_paperless).length-20} more not in Paperless</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function foQueueYear(dryRun=true, year=null) {
+  const yr = year || document.getElementById('fo-year')?.value;
+  if (!yr) { toast('Select a year to queue', 'error'); return; }
+  const entity = '{% if entities %}{{ entities[0].slug }}{% else %}personal{% endif %}';
+  if (!dryRun && !confirm(`Copy all PDFs for ${yr} to the Paperless consume queue?\nThis will NOT move the originals — it copies them.`)) return;
+  const r = await post('/api/folder-manager/queue', {year: yr, entity_slug: entity, dry_run: dryRun});
+  if (r?.status === 'error') { toast('Error: '+r.message, 'error'); return; }
+  const queued = r?.queued?.length || 0;
+  const skipped = r?.skipped_count || 0;
+  if (dryRun) {
+    toast(`Preview: ${queued} files would be queued, ${skipped} already present`, '');
+    if (queued && confirm(`Queue ${queued} files for Paperless ingestion?`)) foQueueYear(false, yr);
+  } else {
+    toast(`Queued ${queued} files for Paperless. Skipped ${skipped} already present.`, 'success');
+    foCoverage();
+  }
+}
+
+/* Import Filed Return from Tax Folder */
+async function importFiledReturnFromFolder() {
+  const year = document.getElementById('tr-year').value;
+  const eid = document.getElementById('tr-entity').value;
+  if (!year) { toast('Select a year first.', 'error'); return; }
+  const btn = document.getElementById('tr-import-folder-btn');
+  const origText = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Importing…';
+  const r = await post('/api/filed-returns/import-from-folder', {year, entity_id: eid ? parseInt(eid) : null});
+  btn.disabled = false; btn.textContent = origText;
+  if (r?.status === 'ok') {
+    toast('Imported from: '+r.source_name, 'success');
+    if (r.all_pdfs_found?.length > 1) {
+      console.log('Other PDFs in folder (not selected):', r.all_pdfs_found.filter(n=>n!==r.source_name));
+    }
+    loadFiledReturns();
+    loadTaxReviewYears();
+  } else {
+    toast('Import failed: '+(r?.error||'?'), 'error');
+  }
+}
+
+/* ---- Help / About ---- */
+function openHelp() {
+  document.getElementById('uMenu').classList.remove('open');
+  document.getElementById('mHelp').classList.add('open');
+}
+function openAbout() {
+  document.getElementById('uMenu').classList.remove('open');
+  document.getElementById('mAbout').classList.add('open');
+}
+function showHelpSection(id, btn) {
+  document.querySelectorAll('.help-section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.help-nav button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('help-'+id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+

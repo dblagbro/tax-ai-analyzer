@@ -1,0 +1,52 @@
+<!-- DOCUMENTS -->
+<div id="tab-documents" class="tab-panel {% if active_tab == 'documents' %}active{% endif %}">
+  <div class="page-header">
+    <div><div class="page-title">Documents</div><div class="page-sub">AI-categorized tax documents from Paperless</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline" onclick="backfillTitles()" id="backfill-btn" title="Populate missing titles from Paperless + analyzed fields">&#128196; Populate Titles</button>
+      <button class="btn btn-primary" onclick="triggerAnalysis()">
+        <svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+        Run Analysis
+      </button>
+    </div>
+  </div>
+  <!-- View toggle -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+    <div class="doc-view-toggle">
+      <button id="doc-view-table-btn" class="doc-view-btn active" onclick="docSetView('table')">&#128203; Table</button>
+      <button id="doc-view-fb-btn" class="doc-view-btn" onclick="docSetView('filebrowser')">&#128193; File Browser</button>
+    </div>
+    <div id="doc-fb-info" style="font-size:.8rem;color:var(--muted);display:none"></div>
+  </div>
+  <!-- Shared filters -->
+  <div class="filter-bar">
+    <select id="df-entity" class="form-control" onchange="docReload()">
+      <option value="">All Entities</option>
+      {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+    </select>
+    <select id="df-year" class="form-control" onchange="docReload()">
+      <option value="">All Years</option>
+      {% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}
+    </select>
+    <select id="df-cat" class="form-control" onchange="docReload()">
+      <option value="">All Categories</option>
+      <option value="income">Income</option><option value="expense">Expense</option>
+      <option value="deduction">Deduction</option>
+    </select>
+  </div>
+  <!-- Table view -->
+  <div id="doc-view-table">
+    <div class="card">
+      <div class="tbl-wrap">
+        <table id="doc-table"></table>
+      </div>
+    </div>
+  </div>
+  <!-- File browser view -->
+  <div id="doc-view-fb" style="display:none">
+    <div id="doc-fb-tree" class="fb-tree">
+      <div class="fb-empty"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+

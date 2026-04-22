@@ -1,0 +1,83 @@
+<!-- TAX REVIEW -->
+<div id="tab-tax_review" class="tab-panel {% if active_tab == 'tax_review' %}active{% endif %}">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Tax Review &amp; Planner</div>
+      <div class="page-sub">AI acts as your accountant — reviews all documents and generates questions to clarify</div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">Select Year to Review</div>
+    <div class="form-row" style="align-items:flex-end">
+      <div class="form-group" style="max-width:180px">
+        <label>Tax Year</label>
+        <select id="tr-year" class="form-control">
+          <option value="">— select —</option>
+        </select>
+      </div>
+      <div class="form-group" style="max-width:220px">
+        <label>Entity</label>
+        <select id="tr-entity" class="form-control">
+          <option value="">All Entities</option>
+          {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="runTaxReview()" id="tr-run-btn">
+          <svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          Run AI Review
+        </button>
+        <button class="btn btn-danger" id="tr-stop-btn" style="display:none" onclick="stopTaxReview()">&#9632; Stop</button>
+      </div>
+    </div>
+    <p style="font-size:.8rem;color:var(--muted);margin-top:8px">The AI will review all documents for the selected year, identify unclear items, missing documents, capital improvement depreciation needs, and generate specific questions for your accountant.</p>
+  </div>
+
+  <!-- Filed Return Entry -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">Filed Tax Return Data</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-outline" id="tr-import-folder-btn" onclick="importFiledReturnFromFolder()">&#128196; Import from Tax Folder</button>
+        <button class="btn btn-sm btn-outline" onclick="openFiledReturnModal()">&#43; Enter / Update Return Data</button>
+      </div>
+    </div>
+    <div id="tr-filed-returns-list">
+      <div class="empty" style="padding:20px">No filed return data entered yet. Click "Enter / Update Return Data" to add actual filed return numbers for comparison.</div>
+    </div>
+  </div>
+
+  <!-- AI Review Output + Q&A Thread -->
+  <div id="tr-review-output" style="display:none">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:0">AI Tax Review — <span id="tr-review-year"></span></div>
+        <div id="tr-review-status" style="font-size:.8rem;color:var(--muted)"></div>
+      </div>
+      <!-- Initial review content -->
+      <div id="tr-review-content" style="font-size:.875rem;line-height:1.65;white-space:pre-wrap;background:#f8f9fb;border-radius:8px;padding:16px;font-family:inherit;max-height:60vh;overflow-y:auto"></div>
+    </div>
+
+    <!-- Follow-up Q&A thread -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="margin-bottom:12px">Ask Follow-up Questions</div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:14px">Answer the AI's questions above, ask for clarification, or provide additional context. The AI remembers the full review above.</p>
+      <!-- Q&A messages thread -->
+      <div id="tr-qa-thread" style="margin-bottom:14px"></div>
+      <!-- Input area -->
+      <div style="display:flex;gap:8px;align-items:flex-end" id="tr-qa-input-area">
+        <textarea id="tr-qa-input" class="form-control" rows="3"
+          placeholder="Type your answer or question here… e.g. 'The WiFi APs were for VoIPGuru home office, not personal' or 'Can you explain the capital improvement rule for the roof?'"
+          style="flex:1;resize:vertical"
+          onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){trSendFollowup();event.preventDefault();}"></textarea>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="btn btn-primary" id="tr-qa-send-btn" onclick="trSendFollowup()" style="white-space:nowrap">
+            Send <small style="opacity:.7">(Ctrl+↵)</small>
+          </button>
+          <button class="btn btn-outline" id="tr-qa-stop-btn" style="display:none;white-space:nowrap" onclick="trStopFollowup()">&#9632; Stop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+

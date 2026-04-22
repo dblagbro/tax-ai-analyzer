@@ -1,0 +1,70 @@
+<!-- SETTINGS -->
+<div id="tab-settings" class="tab-panel {% if active_tab == 'settings' %}active{% endif %}">
+  <div class="page-header">
+    <div class="page-title">Settings</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline" onclick="loadSettings()">Reload</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save All</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="stt-section">
+      <div class="stt-title">AI / LLM</div>
+      <div class="stt-grid">
+        <div class="form-group"><label>LLM Provider</label>
+          <select id="s-prov" class="form-control" onchange="updateModelDropdown()">
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Model</label>
+          <select id="s-model" class="form-control"></select>
+        </div>
+        <div class="form-group" style="grid-column:1/-1"><label>API Key</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="pw-wrap">
+              <input id="s-key" class="form-control" type="password">
+              <span class="pw-eye" onclick="togglePw('s-key',this)" title="Show/hide">&#128065;</span>
+            </div>
+            <button class="btn btn-outline" onclick="testLlm()">Test</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stt-section">
+      <div class="stt-title">Paperless-ngx</div>
+      <div class="stt-grid">
+        <div class="form-group"><label>API URL</label><input id="s-purl" class="form-control" placeholder="http://paperless-web:8000"></div>
+        <div class="form-group"><label>API Token</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="pw-wrap">
+              <input id="s-ptok" class="form-control" type="password">
+              <span class="pw-eye" onclick="togglePw('s-ptok',this)" title="Show/hide">&#128065;</span>
+            </div>
+            <button class="btn btn-outline" onclick="testPaperless()">Test</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stt-section">
+      <div class="stt-title">SMTP (optional)</div>
+      <div class="stt-grid">
+        <div class="form-group"><label>Host</label><input id="s-smh" class="form-control" placeholder="smtp.gmail.com"></div>
+        <div class="form-group"><label>Port</label><input id="s-smp" class="form-control" placeholder="587"></div>
+        <div class="form-group"><label>Username</label><input id="s-smu" class="form-control"></div>
+        <div class="form-group"><label>Password</label><input id="s-smw" class="form-control" type="password"></div>
+        <div class="form-group"><label>From</label><input id="s-smf" class="form-control"></div>
+      </div>
+    </div>
+    <div class="stt-section">
+      <div class="stt-title">Amazon S3 (optional)</div>
+      <div class="stt-grid">
+        <div class="form-group"><label>Bucket</label><input id="s-s3b" class="form-control"></div>
+        <div class="form-group"><label>Region</label><input id="s-s3r" class="form-control" placeholder="us-east-1"></div>
+        <div class="form-group"><label>Access Key ID</label><input id="s-s3a" class="form-control"></div>
+        <div class="form-group"><label>Secret Key</label><input id="s-s3s" class="form-control" type="password"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
