@@ -14,6 +14,7 @@ def register_blueprints(app):
     from app.routes.import_gmail import bp as import_gmail_bp
     from app.routes.import_paypal import bp as import_paypal_bp
     from app.routes.import_usalliance import bp as import_usalliance_bp
+    from app.routes.import_capitalone import bp as import_capitalone_bp
     from app.routes.export_ import bp as export_bp
     from app.routes.tax_review import bp as tax_review_bp
     from app.routes.settings import bp as settings_bp
@@ -36,6 +37,7 @@ def register_blueprints(app):
         import_gmail_bp,
         import_paypal_bp,
         import_usalliance_bp,
+        import_capitalone_bp,
         export_bp,
         tax_review_bp,
         settings_bp,
