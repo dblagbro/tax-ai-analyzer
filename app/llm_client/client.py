@@ -43,14 +43,38 @@ class LLMClient:
             self._anthropic_client = _anthropic.Anthropic(api_key=api_key)
         return self._anthropic_client
 
-    def _get_openai(self, api_key: str):
+    def _get_openai(self, api_key: str, base_url: str = None):
         try:
             import openai as _openai
         except ImportError:
             raise RuntimeError("openai package is not installed")
+        if base_url:
+            return _openai.OpenAI(api_key=api_key, base_url=base_url)
         if self._openai_client is None:
             self._openai_client = _openai.OpenAI(api_key=api_key)
         return self._openai_client
+
+    def _get_proxy_client(self):
+        """Return an OpenAI-compatible client pointed at the local llm-proxy, or None if unreachable."""
+        from app import config
+        import httpx
+        proxy_url = getattr(config, "LLM_PROXY_URL", None) or "http://localhost:8055/v1"
+        proxy_key = getattr(config, "LLM_PROXY_KEY", None) or ""
+        if not proxy_key:
+            return None, None
+        try:
+            base = proxy_url[:-3] if proxy_url.endswith("/v1") else proxy_url.rstrip("/")
+            resp = httpx.get(f"{base}/health", timeout=1.5)
+            if resp.status_code != 200:
+                return None, None
+        except Exception:
+            return None, None
+        try:
+            import openai as _openai
+            client = _openai.OpenAI(api_key=proxy_key, base_url=proxy_url)
+            return client, proxy_url
+        except Exception:
+            return None, None
 
     # ── Runtime config resolution ─────────────────────────────────────────────
 
@@ -165,6 +189,31 @@ class LLMClient:
         provider = cfg["provider"].lower()
         messages = list(history or [])
         messages.append({"role": "user", "content": user_content})
+
+        # Try llm-proxy first — gives provider redundancy and cost tracking.
+        # Falls through to direct API if proxy is unreachable or misconfigured.
+        proxy_client, proxy_url = self._get_proxy_client()
+        if proxy_client is not None:
+            try:
+                from app import llm_usage_tracker as tracker
+                proxy_model = cfg["model"] if provider != "openai" else cfg["openai_model"]
+                oai_messages = [{"role": "system", "content": system}] + messages
+                resp = proxy_client.chat.completions.create(
+                    model=proxy_model, messages=oai_messages,
+                    max_tokens=max_tokens, temperature=0.1,
+                )
+                text = resp.choices[0].message.content or ""
+                in_tok = resp.usage.prompt_tokens if resp.usage else 0
+                out_tok = resp.usage.completion_tokens if resp.usage else 0
+                cost = tracker.compute_cost(provider, proxy_model, in_tok, out_tok)
+                tracker.log_usage(
+                    provider=f"proxy:{provider}", model=proxy_model, operation=operation,
+                    input_tokens=in_tok, output_tokens=out_tok, cost=cost,
+                    success=True, doc_id=doc_id,
+                )
+                return text, in_tok, out_tok
+            except Exception as proxy_err:
+                logger.warning("llm-proxy call failed (%s), falling back to direct API", proxy_err)
 
         if provider == "openai":
             return self._call_openai(

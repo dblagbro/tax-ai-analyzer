@@ -23,6 +23,12 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "claude-sonnet-4-6")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
+# ── LLM Proxy (optional — routes calls through local proxy for redundancy) ────
+# Set LLM_PROXY_URL to the proxy's /v1 base and LLM_PROXY_KEY to its API key.
+# If reachable, all LLM calls go through the proxy with direct-API fallback.
+LLM_PROXY_URL = os.environ.get("LLM_PROXY_URL", "http://localhost:8055/v1")
+LLM_PROXY_KEY = os.environ.get("LLM_PROXY_KEY", "")
+
 # ── Elasticsearch (optional) ──────────────────────────────────────────────────
 ELASTICSEARCH_URL = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch:9200")
 ELASTICSEARCH_PASSWORD = os.environ.get("ELASTICSEARCH_PASSWORD", "")

@@ -100,7 +100,8 @@ def init_db():
             count_imported INTEGER DEFAULT 0,
             count_skipped INTEGER DEFAULT 0,
             error_msg TEXT,
-            config_json TEXT DEFAULT '{}'
+            config_json TEXT DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS importer_credentials (
@@ -278,4 +279,9 @@ def _migrate(conn):
     ad_cols = {r[1] for r in conn.execute("PRAGMA table_info(analyzed_documents)").fetchall()}
     if "is_duplicate" not in ad_cols:
         conn.execute("ALTER TABLE analyzed_documents ADD COLUMN is_duplicate INTEGER DEFAULT 0")
+        conn.commit()
+
+    ij_cols = {r[1] for r in conn.execute("PRAGMA table_info(import_jobs)").fetchall()}
+    if "created_at" not in ij_cols:
+        conn.execute("ALTER TABLE import_jobs ADD COLUMN created_at TEXT DEFAULT NULL")
         conn.commit()

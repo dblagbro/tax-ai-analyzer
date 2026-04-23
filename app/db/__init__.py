@@ -84,6 +84,7 @@ from app.db.import_jobs import (
     list_url_pollers,
     record_gmail_message,
     save_credential,
+    prune_old_import_jobs,
     update_import_job,
     update_url_poller_poll,
 )
