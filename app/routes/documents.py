@@ -37,6 +37,71 @@ def api_documents_list():
     return jsonify({"total": len(docs), "documents": docs})
 
 
+_DOC_BULK_ALLOWED_FIELDS = {
+    "entity_id", "tax_year", "category", "doc_type",
+    "vendor", "is_duplicate",
+}
+
+
+@bp.route(URL_PREFIX + "/api/documents/bulk", methods=["POST"])
+@login_required
+def api_documents_bulk():
+    """Bulk update or delete analyzed_documents.
+
+    Body: {"action": "update", "ids":[1,2,3], "changes":{"category":"expense"}}
+          {"action": "delete", "ids":[1,2,3]}
+    """
+    data = request.get_json() or {}
+    action = (data.get("action") or "").lower()
+    raw_ids = data.get("ids") or []
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify({"error": "ids (non-empty list) required"}), 400
+    try:
+        ids = [int(i) for i in raw_ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "ids must be integers"}), 400
+    if len(ids) > 2000:
+        return jsonify({"error": "too many ids (max 2000)"}), 400
+
+    if action == "update":
+        changes = data.get("changes") or {}
+        if not isinstance(changes, dict):
+            return jsonify({"error": "changes must be an object"}), 400
+        clean = {k: v for k, v in changes.items() if k in _DOC_BULK_ALLOWED_FIELDS}
+        if not clean:
+            return jsonify({"error": f"no editable fields (allowed: {sorted(_DOC_BULK_ALLOWED_FIELDS)})"}), 400
+        if "entity_id" in clean and clean["entity_id"] not in (None, ""):
+            try:
+                clean["entity_id"] = int(clean["entity_id"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "entity_id must be int or null"}), 400
+        if clean.get("entity_id") == "":
+            clean["entity_id"] = None
+        if "is_duplicate" in clean:
+            clean["is_duplicate"] = 1 if clean["is_duplicate"] else 0
+        try:
+            updated = db.update_many_analyzed_documents(ids, **clean)
+            db.log_activity(
+                "doc_bulk_update",
+                f"{updated} rows, changes={sorted(clean.keys())}",
+                user_id=current_user.id,
+            )
+            return jsonify({"status": "updated", "count": updated, "changes": clean})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    if action == "delete":
+        try:
+            removed = db.delete_many_analyzed_documents(ids)
+            db.log_activity("doc_bulk_delete", f"{removed} rows",
+                            user_id=current_user.id)
+            return jsonify({"status": "deleted", "count": removed})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    return jsonify({"error": "action must be 'update' or 'delete'"}), 400
+
+
 @bp.route(URL_PREFIX + "/api/documents/dedup", methods=["POST"])
 @login_required
 @admin_required

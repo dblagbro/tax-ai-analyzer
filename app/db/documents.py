@@ -244,6 +244,57 @@ def list_filed_returns(entity_id: int = None) -> list:
 
 # ── Duplicate detection ───────────────────────────────────────────────────────
 
+def update_many_analyzed_documents(ids: list[int], **changes) -> int:
+    """Bulk update analyzed_documents. Whitelisted fields only.
+
+    Returns rows_updated.
+    """
+    if not ids:
+        return 0
+    allowed = {
+        "entity_id", "tax_year", "category", "doc_type",
+        "vendor", "is_duplicate", "cross_source_duplicate",
+    }
+    fields = {k: v for k, v in changes.items() if k in allowed}
+    if not fields:
+        return 0
+    safe_ids = [int(i) for i in ids]
+    placeholders = ",".join("?" for _ in safe_ids)
+    sets = ", ".join(f"{k}=?" for k in fields)
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            f"UPDATE analyzed_documents SET {sets} WHERE id IN ({placeholders})",
+            (*fields.values(), *safe_ids),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def delete_many_analyzed_documents(ids: list[int]) -> int:
+    """Delete analyzed_documents rows (and their transaction_links). Returns rowcount."""
+    if not ids:
+        return 0
+    safe_ids = [int(i) for i in ids]
+    placeholders = ",".join("?" for _ in safe_ids)
+    conn = get_connection()
+    try:
+        conn.execute(
+            f"DELETE FROM transaction_links WHERE doc_id IN ({placeholders})",
+            safe_ids,
+        )
+        cur = conn.execute(
+            f"DELETE FROM analyzed_documents WHERE id IN ({placeholders})",
+            safe_ids,
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def find_duplicate_analyzed_docs() -> list:
     conn = get_connection()
     try:

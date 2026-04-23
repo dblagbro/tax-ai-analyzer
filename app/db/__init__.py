@@ -39,6 +39,7 @@ from app.db.entities import (
 )
 
 from app.db.documents import (
+    delete_many_analyzed_documents,
     find_duplicate_analyzed_docs,
     flag_duplicate_analyzed_docs,
     get_analyzed_doc_ids,
@@ -52,18 +53,32 @@ from app.db.documents import (
     pdf_hash_stats,
     record_pdf_hash,
     set_paperless_tags_applied,
+    update_many_analyzed_documents,
     upsert_filed_return,
 )
 
 from app.db.transactions import (
     add_transaction,
     count_transactions,
+    delete_many_transactions,
     get_transaction,
     get_transaction_summary,
     get_transactions,
     list_transactions,
+    update_many_transactions,
     update_transaction,
     upsert_transaction,
+)
+
+from app.db.mileage import (
+    IRS_MILEAGE_RATES,
+    add_mileage,
+    delete_mileage,
+    get_mileage,
+    irs_rate_for_year,
+    list_mileage,
+    mileage_summary,
+    update_mileage,
 )
 
 from app.db.import_jobs import (
@@ -116,8 +131,10 @@ from app.db.settings import (
 )
 
 from app.db.activity import (
+    distinct_activity_actions,
     ensure_default_data,
     get_activity_log,
     get_recent_activity,
     log_activity,
+    search_activity,
 )

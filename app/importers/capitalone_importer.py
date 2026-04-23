@@ -1,71 +1,53 @@
-"""Capital One — Playwright-based statement downloader.
+"""Capital One — Playwright-based transaction downloader.
 
-Logs into Capital One online banking, navigates to eStatements for each
-account, and downloads monthly PDF statements for the requested years.
+Uses Capital One's native "Download Transactions" UI to export CSV files
+(not PDF statement scraping, which is blocked by bot detection).
 
-Each statement is saved to:
-  <consume_path>/<entity_slug>/<year>/YYYY_MM_01_capitalone_<account>_statement.pdf
+Flow per account per year:
+  1. Login → accounts dashboard (myaccounts.capitalone.com)
+  2. Navigate into each account
+  3. Click "I Want To…" dropdown → "Download Transactions"
+  4. Set 90-day date range chunks to cover the full year
+  5. Download CSV → parse → upsert transactions into DB
+  6. Save CSV files to consume_path for archival
 
-MFA handling: Capital One typically sends an SMS OTP.  The job enters
-`mfa_pending` state and polls for a code via the in-memory MFA registry
-(fed by the /api/import/capitalone/mfa endpoint).
+Persistent Chrome profile (/app/data/chrome_profiles/capitalone/) means
+MFA only fires once per session lifetime.
+
+MFA: Capital One sends SMS OTP. Job enters mfa_pending state and polls the
+shared MFA registry until the user submits a code via the import page.
 """
 from __future__ import annotations
 
+import csv
 import io
+import json
 import logging
-import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
+from app.importers.base_bank_importer import (
+    find_element, find_in_frames, find_all_in_frames,
+    human_click, human_type,
+    launch_browser, save_debug_screenshot,
+    wait_for_element, wait_for_mfa_code,
+)
+
 logger = logging.getLogger(__name__)
 
-# ── in-memory MFA exchange ────────────────────────────────────────────────────
-_mfa_registry: dict[int, dict] = {}
-
-def set_mfa_code(job_id: int, code: str):
-    _mfa_registry[job_id] = {"code": code, "expires": time.time() + 300}
-
-def _wait_for_mfa(job_id: int, log: Callable, timeout: int = 300) -> Optional[str]:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        entry = _mfa_registry.get(job_id)
-        if entry and entry.get("code") and time.time() < entry["expires"]:
-            code = entry["code"]
-            _mfa_registry.pop(job_id, None)
-            return code
-        time.sleep(2)
-    return None
+LOGIN_URL = "https://verified.capitalone.com/auth/signin"
+ACCOUNTS_URL = "https://myaccounts.capitalone.com"
+SOURCE = "capitalone"
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# Keep wrapper for backward-compatibility with route
+def set_mfa_code(job_id: int, code: str) -> None:
+    from app.importers.mfa_registry import set_code
+    set_code(job_id, code)
 
-MONTH_NAMES = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-]
-
-def _month_num(text: str) -> str:
-    for i, name in enumerate(MONTH_NAMES, 1):
-        if name.lower() in text.lower():
-            return f"{i:02d}"
-    return "01"
-
-def _safe_filename(year: str, month: str, account_suffix: str = "") -> str:
-    suffix = f"_{account_suffix}" if account_suffix else ""
-    return f"{year}_{month:>02}_01_capitalone{suffix}_statement.pdf"
-
-def _months_for_year(year: str) -> list[str]:
-    now = datetime.now()
-    if year == str(now.year):
-        return [f"{m:02d}" for m in range(1, now.month + 1)]
-    return [f"{m:02d}" for m in range(1, 13)]
-
-
-# ── main importer ─────────────────────────────────────────────────────────────
 
 def run_import(
     username: str,
@@ -76,451 +58,300 @@ def run_import(
     job_id: int,
     log: Callable[[str], None] = logger.info,
     cookies: Optional[list] = None,
+    entity_id: Optional[int] = None,
 ) -> dict:
     """
-    Drive the Capital One portal with Playwright.
-
-    If `cookies` is provided they are injected and login is skipped,
-    bypassing bot detection.
+    Download Capital One transaction CSVs and import to DB.
 
     Returns {"imported": int, "skipped": int, "errors": int}.
     """
-    try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-    except ImportError:
-        raise RuntimeError(
-            "playwright is not installed. Add it to requirements.txt and rebuild."
-        )
-
     imported = skipped = errors = 0
+    pw = context = page = None
 
     try:
-        from playwright_stealth import Stealth
-        _stealth = Stealth(
-            navigator_webdriver=True,
-            navigator_plugins=True,
-            navigator_languages=True,
-            navigator_platform=True,
-            navigator_user_agent=True,
-            navigator_vendor=True,
-            chrome_app=True,
-            chrome_csi=True,
-            chrome_load_times=True,
-            webgl_vendor=True,
-            hairline=True,
-            media_codecs=True,
-            navigator_hardware_concurrency=True,
-            navigator_permissions=True,
-            error_prototype=True,
-            sec_ch_ua=True,
-            iframe_content_window=True,
-            navigator_platform_override="Win32",
-            navigator_languages_override=("en-US", "en"),
-        )
-        log("Stealth mode enabled.")
-    except ImportError:
-        _stealth = None
-        log("Warning: playwright-stealth not available — bot detection risk.")
-
-    with sync_playwright() as pw:
-        if _stealth is not None:
-            _stealth.hook_playwright_context(pw)
-        log("Launching headless Chromium…")
-        browser = pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--headless=new",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--disable-extensions",
-                "--disable-default-apps",
-                "--disable-component-extensions-with-background-pages",
-                "--disable-background-networking",
-                "--disable-sync",
-                "--metrics-recording-only",
-                "--no-first-run",
-                "--password-store=basic",
-                "--use-mock-keychain",
-                "--window-size=1280,900",
-                "--lang=en-US",
-            ],
-        )
-        context = browser.new_context(
-            accept_downloads=True,
-            viewport={"width": 1280, "height": 900},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            ),
-            locale="en-US",
-            timezone_id="America/New_York",
-            color_scheme="light",
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Windows"',
-            },
-        )
+        pw, context, page = launch_browser("capitalone", headless=True, log=log)
 
         if cookies:
-            log(f"Injecting {len(cookies)} browser cookies…")
+            log(f"Injecting {len(cookies)} saved cookies…")
             context.add_cookies(cookies)
 
-        page = context.new_page()
-        if _stealth is not None:
-            _stealth.apply_stealth_sync(page)
+        _login(page, username, password, log, cookies, job_id)
 
-        try:
-            _login(page, username, password, log, cookies, job_id)
+        accounts = _discover_accounts(page, log)
+        if not accounts:
+            log("No accounts found — attempting generic download from dashboard.")
+            accounts = [{"name": "account", "url": ACCOUNTS_URL, "id": ""}]
 
-            # Global PDF interceptor
-            session_pdf_cache: list[bytes] = []
-
-            def _on_response(resp):
+        for acct in accounts:
+            log(f"── Account: {acct['name']} ──")
+            for year in years:
                 try:
-                    ct = resp.headers.get("content-type", "")
-                    url_l = resp.url.lower()
-                    if ("pdf" in ct or "octet-stream" in ct
-                            or url_l.endswith(".pdf") or "/pdf" in url_l):
-                        data = resp.body()
-                        if data and len(data) > 500:
-                            log(f"  [intercept] {resp.status} {resp.url[:80]} ({len(data):,}B)")
-                            session_pdf_cache.append(data)
-                except Exception:
-                    pass
+                    yi, ys, ye = _download_year(
+                        page, context, acct, year,
+                        consume_path, entity_slug, log, job_id, entity_id,
+                    )
+                    imported += yi
+                    skipped += ys
+                    errors += ye
+                except Exception as e:
+                    import traceback
+                    log(f"Error on {acct['name']} / {year}: {e}")
+                    log(traceback.format_exc()[:400])
+                    errors += 1
 
-            page.on("response", _on_response)
-
-            # Discover accounts then download statements for each
-            accounts = _discover_accounts(page, log)
-            if not accounts:
-                log("No accounts found — attempting generic statement navigation.")
-                accounts = [{"name": "account", "url": None}]
-
-            for acct in accounts:
-                acct_slug = re.sub(r"[^a-z0-9]", "_", acct["name"].lower()).strip("_")
-                log(f"── Account: {acct['name']} ──")
-                for year in years:
-                    try:
-                        yi, ys, ye = _download_statements_for_account(
-                            page, context, acct, acct_slug, year,
-                            consume_path, entity_slug, log, session_pdf_cache,
-                        )
-                        imported += yi
-                        skipped += ys
-                        errors += ye
-                    except Exception as e:
-                        log(f"Error on {acct['name']} / {year}: {e}")
-                        errors += 1
-
-        finally:
+    finally:
+        if context:
             try:
                 context.close()
             except Exception:
                 pass
+        if pw:
             try:
-                browser.close()
+                pw.stop()
             except Exception:
                 pass
 
-    log(f"Done — imported: {imported}, skipped: {skipped}, errors: {errors}")
+    log(f"Capital One done — imported: {imported}, skipped: {skipped}, errors: {errors}")
     return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
 # ── login ─────────────────────────────────────────────────────────────────────
 
-LOGIN_URL = "https://verified.capitalone.com/auth/signin"
-ACCOUNTS_URL = "https://myaccounts.capitalone.com"
-
 def _login(page, username: str, password: str, log: Callable,
-           cookies: Optional[list], job_id: int):
+           cookies: Optional[list], job_id: int) -> None:
     if cookies:
-        log("Navigating to Capital One with injected cookies…")
+        log("Navigating with saved cookies…")
         page.goto(ACCOUNTS_URL, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
         if "signin" not in page.url and "login" not in page.url:
-            log(f"Authenticated via cookies — at {page.url}")
+            log(f"Authenticated via cookies at {page.url}")
             return
-        log("Cookies expired — falling back to credential login…")
+        log("Cookies expired — using credential login.")
 
     log(f"Navigating to {LOGIN_URL}")
     page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(2000)
+    save_debug_screenshot(page, "co_login")
 
-    _fill_login(page, username, password, log)
-    _handle_mfa(page, log, job_id)
-    _verify_logged_in(page, log)
-
-
-def _fill_login(page, username: str, password: str, log: Callable):
-    import random
-
-    # Capital One uses a two-step login: username first, then password page
-    user_selectors = [
-        '#ods-input-0',
-        'input[name="username"]',
-        'input[id*="username" i]',
-        'input[placeholder*="username" i]',
-        'input[type="text"]:visible',
-    ]
-    user_field = _find_element(page, user_selectors)
+    # Capital One two-step login: username page → password page
+    user_field = wait_for_element(page, [
+        '#ods-input-0', 'input[name="username"]',
+        'input[id*="username" i]', 'input[type="text"]:visible',
+    ], timeout_ms=15000)
     if not user_field:
-        _save_debug_screenshot(page, "co_login_no_user")
+        save_debug_screenshot(page, "co_no_user")
         raise RuntimeError("Could not find Capital One username field")
 
-    log("Typing username…")
-    user_field.click()
-    page.wait_for_timeout(300)
-    for ch in username:
-        user_field.press(ch)
-        page.wait_for_timeout(random.randint(50, 150))
+    log("Entering username…")
+    human_click(page, user_field)
+    human_type(user_field, username)
+    page.wait_for_timeout(400)
 
-    # Click Continue to advance to password step
-    continue_selectors = [
-        'button:has-text("Continue")',
-        'button:has-text("Next")',
-        'button[type="submit"]',
-        'input[type="submit"]',
-    ]
-    btn = _find_element(page, continue_selectors)
+    btn = find_element(page, [
+        'button:has-text("Continue")', 'button:has-text("Next")',
+        'button[type="submit"]', 'input[type="submit"]',
+    ])
     if btn:
         log("Clicking Continue…")
-        btn.click()
+        human_click(page, btn)
         page.wait_for_load_state("domcontentloaded", timeout=20000)
         page.wait_for_timeout(1500)
 
-    # Password field (may be on same page or new page after Continue)
-    pw_selectors = [
-        '#ods-input-1',
-        'input[name="password"]',
-        'input[id*="password" i]',
+    pw_field = wait_for_element(page, [
+        '#ods-input-1', 'input[name="password"]',
         'input[type="password"]:visible',
-    ]
-    pw_field = _find_element(page, pw_selectors)
+    ], timeout_ms=10000)
     if not pw_field:
-        _save_debug_screenshot(page, "co_login_no_pw")
+        save_debug_screenshot(page, "co_no_pw")
         raise RuntimeError("Could not find Capital One password field")
 
-    log("Typing password…")
-    pw_field.click()
-    page.wait_for_timeout(300)
-    for ch in password:
-        pw_field.press(ch)
-        page.wait_for_timeout(random.randint(50, 150))
-    page.wait_for_timeout(500)
+    log("Entering password…")
+    human_click(page, pw_field)
+    human_type(pw_field, password)
+    page.wait_for_timeout(400)
 
-    submit = _find_element(page, [
-        'button:has-text("Sign In")',
-        'button:has-text("Log In")',
-        'button:has-text("Continue")',
-        'button[type="submit"]',
+    submit = find_element(page, [
+        'button:has-text("Sign In")', 'button:has-text("Log In")',
+        'button:has-text("Continue")', 'button[type="submit"]',
         'input[type="submit"]',
     ])
     if submit:
-        log("Submitting login…")
-        submit.scroll_into_view_if_needed()
-        page.wait_for_timeout(300)
-        submit.click()
+        human_click(page, submit)
     else:
-        log("Pressing Enter to submit…")
         pw_field.press("Enter")
 
     page.wait_for_load_state("networkidle", timeout=30000)
     page.wait_for_timeout(2000)
+    save_debug_screenshot(page, "co_post_login")
+
+    if _is_mfa_page(page):
+        _handle_mfa(page, log, job_id)
+
+    url = page.url
+    if "signin" in url or "login" in url:
+        content = page.content().lower()
+        if "incorrect" in content or "invalid" in content:
+            raise RuntimeError("Capital One credentials rejected.")
+        raise RuntimeError(f"Still on sign-in page ({url}). Try cookie-based auth.")
+
+    log(f"Logged in — at {page.url}")
 
 
-def _handle_mfa(page, log: Callable, job_id: int):
-    """Handle Capital One OTP / device trust prompts."""
-    content = page.content().lower()
-    url = page.url.lower()
+def _is_mfa_page(page) -> bool:
+    try:
+        content = page.content().lower()
+        return any(t in content for t in [
+            "verification code", "one-time", "security code",
+            "we sent a code", "sent a text", "check your phone",
+            "enter the code", "two-step", "2-step",
+        ])
+    except Exception:
+        return False
 
-    otp_indicators = [
-        'input[placeholder*="code" i]',
-        'input[placeholder*="verification" i]',
-        'input[name*="otp" i]',
-        'input[id*="otp" i]',
-        '#ods-input-0',   # Capital One reuses this id on the OTP page too
-    ]
-    text_indicators = [
-        "verification code", "one-time", "security code",
-        "we sent a code", "sent a text", "check your phone",
-        "enter the code", "two-step", "2-step",
-    ]
 
-    is_mfa = any(page.query_selector(s) for s in otp_indicators) or \
-             any(t in content for t in text_indicators)
+def _handle_mfa(page, log: Callable, job_id: int) -> None:
+    log("MFA prompt detected — waiting for OTP code (up to 5 minutes)…")
+    log("Enter the code from your phone via the MFA field on the Import page.")
+    save_debug_screenshot(page, "co_mfa")
 
-    if not is_mfa:
-        return
+    from app import db
+    db.update_import_job(job_id, status="mfa_pending")
 
-    log("🔢 MFA prompt detected — waiting for OTP code (up to 5 minutes)…")
-    log("⚠️  ENTER THE CODE from your phone/email in the MFA field on the import page.")
-    _save_debug_screenshot(page, "co_mfa")
-    code = _wait_for_mfa(job_id, log, timeout=300)
+    code = wait_for_mfa_code(job_id, log, timeout=300)
     if not code:
         raise RuntimeError("MFA timeout — no code submitted within 5 minutes.")
+
     log(f"MFA code received: {code[:2]}****")
+    otp_field = wait_for_element(page, [
+        'input[placeholder*="code" i]', 'input[name*="otp" i]',
+        'input[id*="otp" i]', '#ods-input-0',
+        'input[autocomplete="one-time-code"]', 'input[maxlength="6"]',
+    ], timeout_ms=5000)
 
-    otp_field = _find_element(page, otp_indicators)
     if not otp_field:
-        _save_debug_screenshot(page, "co_mfa_no_input")
-        raise RuntimeError("Could not find OTP input field")
+        save_debug_screenshot(page, "co_no_otp")
+        raise RuntimeError("OTP input field not found")
 
-    otp_field.fill(code)
+    human_click(page, otp_field)
+    human_type(otp_field, code, clear_first=True)
+    page.wait_for_timeout(400)
 
-    submit = _find_element(page, [
-        'button:has-text("Continue")',
-        'button:has-text("Verify")',
-        'button:has-text("Submit")',
-        'button[type="submit"]',
+    submit = find_element(page, [
+        'button:has-text("Continue")', 'button:has-text("Verify")',
+        'button:has-text("Submit")', 'button[type="submit"]',
     ])
     if submit:
-        submit.click()
+        human_click(page, submit)
     else:
         otp_field.press("Enter")
 
     page.wait_for_load_state("networkidle", timeout=20000)
     page.wait_for_timeout(1500)
+
+    from app import db
+    db.update_import_job(job_id, status="running")
     log("MFA submitted.")
-
-
-def _verify_logged_in(page, log: Callable):
-    url = page.url
-    log(f"Post-login URL: {url}")
-    if "signin" in url or "login" in url:
-        content = page.content().lower()
-        _save_debug_screenshot(page, "co_login_failed")
-        if "incorrect" in content or "invalid" in content or "try again" in content:
-            raise RuntimeError("Capital One login failed — check credentials.")
-        raise RuntimeError(
-            f"Still on login/signin page ({url}). "
-            "Try cookie-based authentication or check credentials."
-        )
-    log("Login successful.")
 
 
 # ── account discovery ─────────────────────────────────────────────────────────
 
 def _discover_accounts(page, log: Callable) -> list[dict]:
-    """Return list of {name, url} dicts for each account on the dashboard."""
-    log("Discovering accounts…")
+    log("Navigating to Capital One accounts dashboard…")
     try:
         page.goto(ACCOUNTS_URL, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
-        _save_debug_screenshot(page, "co_dashboard")
+        save_debug_screenshot(page, "co_dashboard")
     except Exception as e:
-        log(f"Dashboard navigation error: {e}")
+        log(f"Dashboard nav failed: {e}")
         return []
 
     accounts = []
-    try:
-        # Capital One account tiles are typically <a> elements with account names
-        acct_selectors = [
-            'a[href*="/account/"]',
-            'a[href*="/accounts/"]',
-            '[data-testid*="account"]',
-            '.account-tile a',
-            '.account-name',
-        ]
-        seen_hrefs = set()
-        for sel in acct_selectors:
-            els = page.query_selector_all(sel)
-            for el in els:
-                href = el.get_attribute("href") or ""
+    seen: set[str] = set()
+
+    for sel in [
+        'a[href*="/account/"]', 'a[href*="/accounts/"]',
+        '[data-testid*="account"]', '.account-tile a',
+        'a.account-card', '[class*="accountCard"] a',
+    ]:
+        for el in find_all_in_frames(page, sel):
+            try:
                 text = (el.text_content() or "").strip()
-                if not text or href in seen_hrefs:
+                href = el.get_attribute("href") or ""
+                # Skip non-account links
+                if not text or text in seen or len(text) < 3 or len(text) > 80:
                     continue
-                seen_hrefs.add(href)
+                if any(skip in text.lower() for skip in ["skip", "nav", "menu", "help"]):
+                    continue
+                seen.add(text)
                 if href and not href.startswith("http"):
                     from urllib.parse import urljoin
                     href = urljoin(ACCOUNTS_URL, href)
-                accounts.append({"name": text[:60], "url": href or None})
-                log(f"  Account: {text[:60]} → {href[:80]}")
+                accounts.append({"name": text, "url": href or None, "id": ""})
+                log(f"  Account: {text[:60]}")
+            except Exception:
+                pass
+        if accounts:
+            break
 
-        if not accounts:
-            # Fallback: JS evaluation of account card text
+    if not accounts:
+        # Fallback: JS evaluation
+        try:
             results = page.evaluate("""
                 () => {
                     const out = [];
-                    const els = document.querySelectorAll('[class*="account"], [class*="card"]');
-                    for (const el of els) {
-                        const t = (el.textContent || '').trim();
-                        const a = el.querySelector('a');
-                        if (t.length > 3 && t.length < 100)
-                            out.push({name: t.substring(0,60), href: a ? a.href : ''});
+                    const seen = new Set();
+                    for (const el of document.querySelectorAll('[class*="account"]')) {
+                        const t = (el.textContent||'').trim().split('\\n')[0].trim();
+                        const a = el.tagName === 'A' ? el : el.querySelector('a');
+                        if (t.length > 3 && t.length < 80 && !seen.has(t)) {
+                            seen.add(t);
+                            out.push({name: t, href: a ? a.href : ''});
+                        }
                     }
                     return out.slice(0, 10);
                 }
             """)
             for r in results:
-                if r["name"] not in [a["name"] for a in accounts]:
-                    accounts.append({"name": r["name"], "url": r.get("href") or None})
-                    log(f"  Account (JS): {r['name']}")
-
-    except Exception as e:
-        log(f"Account discovery error: {e}")
+                accounts.append({"name": r["name"], "url": r.get("href") or None, "id": ""})
+                log(f"  Account (JS): {r['name']}")
+        except Exception as e:
+            log(f"JS account scan failed: {e}")
 
     log(f"Found {len(accounts)} account(s).")
     return accounts
 
 
-# ── statement download per account per year ───────────────────────────────────
+# ── per-year download ─────────────────────────────────────────────────────────
 
-def _download_statements_for_account(
-    page, context, acct: dict, acct_slug: str, year: str,
-    consume_path: str, entity_slug: str, log: Callable,
-    session_pdf_cache: list,
+def _download_year(
+    page, context, acct: dict, year: str,
+    consume_path: str, entity_slug: str, log: Callable, job_id: int,
+    entity_id: Optional[int] = None,
 ) -> tuple[int, int, int]:
+    """Download CSV in 90-day chunks for one account/year. Returns (imported, skipped, errors)."""
     imported = skipped = errors = 0
+
+    acct_slug = re.sub(r"[^a-z0-9]", "_", acct["name"].lower()).strip("_") or "account"
     dest_dir = Path(consume_path) / entity_slug / year
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # Navigate to statements for this account
-    stmt_urls = _statement_urls_for_account(acct)
-    reached = False
-    for url in stmt_urls:
-        try:
-            log(f"Navigating to statements: {url}")
-            page.goto(url, wait_until="domcontentloaded", timeout=25000)
-            page.wait_for_timeout(3000)
-            if _is_statements_page(page):
-                reached = True
-                log(f"✓ Statements page at {page.url}")
-                _save_debug_screenshot(page, f"co_stmts_{acct_slug}")
-                break
-        except Exception as e:
-            log(f"  failed: {e}")
+    y = int(year)
+    today = date.today()
+    start = date(y, 1, 1)
+    end = min(date(y, 12, 31), today)
 
-    if not reached:
-        # Try clicking "Statements" link from account detail page
-        if acct.get("url"):
-            try:
-                page.goto(acct["url"], wait_until="domcontentloaded", timeout=20000)
-                page.wait_for_timeout(2000)
-                reached = _click_statements_link(page, log)
-            except Exception as e:
-                log(f"Account page navigation failed: {e}")
+    chunks: list[tuple[date, date]] = []
+    cur = start
+    while cur <= end:
+        chunk_end = min(cur + timedelta(days=89), end)
+        chunks.append((cur, chunk_end))
+        cur = chunk_end + timedelta(days=1)
 
-    if not reached:
-        log(f"Could not reach statements page for {acct['name']} — skipping.")
-        return 0, 0, 1
+    log(f"  {len(chunks)} chunk(s) for {year}")
 
-    # Find statement rows matching the requested year
-    stmts = _find_statements(page, year, log)
-    if not stmts:
-        _save_debug_screenshot(page, f"co_no_stmts_{acct_slug}_{year}")
-        log(f"No statements found for {acct['name']} / {year}")
-        return 0, 0, 0
-
-    log(f"Found {len(stmts)} statement(s) for {acct['name']} / {year}")
-
-    for stmt in stmts:
-        month = stmt["month"]
-        filename = _safe_filename(year, month, acct_slug)
+    for start_date, end_date in chunks:
+        tag = f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        filename = f"{year}_{acct_slug}_{tag}_capitalone.csv"
         dest_path = dest_dir / filename
 
         if dest_path.exists():
@@ -528,307 +359,293 @@ def _download_statements_for_account(
             skipped += 1
             continue
 
-        log(f"  Downloading: {filename}")
+        log(f"  Downloading {filename}…")
         try:
-            session_pdf_cache.clear()
-            pdf_bytes = _download_statement(page, context, stmt, log, session_pdf_cache)
-            if pdf_bytes:
-                dest_path.write_bytes(pdf_bytes)
-                log(f"  ✓ Saved {filename} ({len(pdf_bytes):,} bytes)")
-                imported += 1
+            csv_bytes = _download_chunk(
+                page, context, acct, start_date, end_date, log,
+            )
+            if csv_bytes and len(csv_bytes) > 50:
+                dest_path.write_bytes(csv_bytes)
+                log(f"  ✓ Saved {filename} ({len(csv_bytes):,}B)")
+                txn_count = _parse_and_import_csv(
+                    csv_bytes, acct["name"], entity_id=entity_id,
+                    year=year, log=log,
+                )
+                imported += txn_count
             else:
-                log(f"  ✗ Empty PDF for {filename}")
+                log(f"  No data for {tag}")
                 errors += 1
         except Exception as e:
-            log(f"  ✗ Failed {filename}: {e}")
+            log(f"  ✗ Chunk {tag} failed: {e}")
             errors += 1
 
     return imported, skipped, errors
 
 
-def _statement_urls_for_account(acct: dict) -> list[str]:
-    """Generate candidate statement URLs for a Capital One account."""
-    base = ACCOUNTS_URL
-    urls = [
-        f"{base}/accounts/",
-        f"{base}/accounts/summary/statement",
-    ]
-    if acct.get("url"):
-        acct_url = acct["url"].rstrip("/")
-        urls = [
-            f"{acct_url}/statements",
-            f"{acct_url}/activity/statements",
-            f"{acct_url}/statement",
-        ] + urls
-    return urls
+def _download_chunk(
+    page, context, acct: dict, start_date: date, end_date: date, log: Callable,
+) -> Optional[bytes]:
+    """
+    Navigate to Capital One's 'Download Transactions' UI for one account,
+    select a date range, and download the CSV.
+    """
+    from playwright.sync_api import TimeoutError as PWTimeout
 
-
-def _is_statements_page(page) -> bool:
-    try:
-        content = page.content().lower()
-        return any(p in content for p in [
-            "statement date", "statement period", "view statement",
-            "download statement", "e-statement", "estatement",
-            "account statement", "monthly statement",
-        ])
-    except Exception:
-        return False
-
-
-def _click_statements_link(page, log: Callable) -> bool:
-    """Click a Statements navigation link if found. Returns True on success."""
-    selectors = [
-        'a:has-text("Statements")',
-        'a:has-text("eStatements")',
-        'a:has-text("Account Statements")',
-        'button:has-text("Statements")',
-        '[href*="statement" i]',
-    ]
-    for sel in selectors:
+    # Navigate to account page
+    if acct.get("url") and acct["url"] != ACCOUNTS_URL:
         try:
-            el = page.query_selector(sel)
-            if el and el.is_visible():
-                log(f"Clicking statements link: {sel}")
-                el.click()
-                page.wait_for_load_state("domcontentloaded", timeout=15000)
-                page.wait_for_timeout(2000)
-                if _is_statements_page(page):
-                    return True
-        except Exception:
-            pass
+            page.goto(acct["url"], wait_until="domcontentloaded", timeout=20000)
+            page.wait_for_timeout(2000)
+        except Exception as e:
+            log(f"  Account page nav failed: {e}")
+
+    save_debug_screenshot(page, f"co_acct_{start_date}")
+
+    # Click "I Want To..." or find Download link
+    download_dialog_open = _open_download_dialog(page, log)
+    if not download_dialog_open:
+        # Try alternative: look for a direct download/export link
+        dl_link = find_element(page, [
+            'a:has-text("Download")', 'button:has-text("Download")',
+            'a:has-text("Export")', 'button:has-text("Export")',
+            '[data-testid*="download"]',
+        ])
+        if dl_link:
+            human_click(page, dl_link)
+            page.wait_for_timeout(1500)
+        else:
+            log("  Could not open download dialog")
+            save_debug_screenshot(page, f"co_no_dl_dialog_{start_date}")
+            return None
+
+    save_debug_screenshot(page, f"co_dl_dialog_{start_date}")
+
+    # Set date range in the download dialog
+    _set_date_range(page, start_date, end_date, log)
+
+    # Select CSV format
+    _select_format(page, "CSV", log)
+
+    # Trigger download
+    try:
+        with page.expect_download(timeout=25000) as dl_info:
+            dl_btn = find_element(page, [
+                'button:has-text("Download")',
+                'button:has-text("Export")',
+                '[data-testid*="download"]:has-text("Download")',
+                'a:has-text("Download")',
+            ])
+            if dl_btn:
+                human_click(page, dl_btn)
+            else:
+                log("  Download submit button not found")
+                return None
+
+        dl = dl_info.value
+        buf = io.BytesIO()
+        stream = dl.create_read_stream()
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                break
+            buf.write(chunk)
+        return buf.getvalue() if buf.tell() > 0 else None
+    except (PWTimeout, Exception) as e:
+        log(f"  Download failed: {e}")
+        save_debug_screenshot(page, f"co_dl_fail_{start_date}")
+        return None
+
+
+def _open_download_dialog(page, log: Callable) -> bool:
+    """Click 'I Want To...' or similar to open the download options dialog."""
+    # Capital One uses various UI patterns across account types
+    triggers = [
+        'button:has-text("I Want To")',
+        'button[aria-label*="more options" i]',
+        '[class*="iwantto" i]',
+        'button:has-text("Download Transactions")',
+        'a:has-text("Download Transactions")',
+        '[data-testid*="i-want-to"]',
+        'button:has-text("More")',
+        '[aria-label*="download" i]',
+    ]
+    for sel in triggers:
+        el = find_element(page, [sel])
+        if el:
+            log(f"  Opening download dialog via: {sel}")
+            human_click(page, el)
+            page.wait_for_timeout(1000)
+            # Check if a download option appeared
+            if find_element(page, [
+                'button:has-text("Download Transactions")',
+                'a:has-text("Download Transactions")',
+                '[data-testid*="download"]',
+            ]):
+                # Click the actual "Download Transactions" option
+                dl = find_element(page, [
+                    'button:has-text("Download Transactions")',
+                    'a:has-text("Download Transactions")',
+                ])
+                if dl:
+                    human_click(page, dl)
+                    page.wait_for_timeout(1500)
+            return True
+
     return False
 
 
-def _find_statements(page, year: str, log: Callable) -> list[dict]:
-    """Return list of {month, element, text} dicts for the requested year."""
-    statements = []
-    seen_months: set[str] = set()
+def _set_date_range(page, start_date: date, end_date: date, log: Callable) -> None:
+    """Fill date range inputs in the download dialog."""
+    start_str = start_date.strftime("%m/%d/%Y")
+    end_str = end_date.strftime("%m/%d/%Y")
 
-    # Strategy 1: element-based scan
+    start_field = find_element(page, [
+        'input[aria-label*="from" i]', 'input[aria-label*="start" i]',
+        'input[placeholder*="from" i]', 'input[placeholder*="start" i]',
+        'input[id*="from" i]', 'input[id*="start" i]',
+        'input[name*="from" i]', 'input[name*="start" i]',
+        'input[type="date"]:first-of-type',
+    ])
+    end_field = find_element(page, [
+        'input[aria-label*="to" i]', 'input[aria-label*="end" i]',
+        'input[placeholder*="to" i]', 'input[placeholder*="end" i]',
+        'input[id*="to" i]', 'input[id*="end" i]',
+        'input[name*="to" i]', 'input[name*="end" i]',
+        'input[type="date"]:last-of-type',
+    ])
+
+    if start_field:
+        human_click(page, start_field)
+        human_type(start_field, start_str, clear_first=True)
+        page.wait_for_timeout(200)
+    else:
+        log(f"  Warning: start date field not found")
+
+    if end_field:
+        human_click(page, end_field)
+        human_type(end_field, end_str, clear_first=True)
+        page.wait_for_timeout(200)
+    else:
+        log(f"  Warning: end date field not found")
+
+
+def _select_format(page, format_name: str, log: Callable) -> None:
+    """Select download format (CSV preferred for parsing)."""
+    fmt_sel = find_element(page, [
+        'select[aria-label*="format" i]', 'select[id*="format" i]',
+        'select[name*="format" i]',
+    ])
+    if fmt_sel:
+        try:
+            fmt_sel.select_option(label=format_name)
+            log(f"  Format set to {format_name}")
+            return
+        except Exception:
+            pass
+
+    # Try radio buttons
     for sel in [
-        f':has-text("{year}"):has-text("Statement")',
-        f'[class*="statement" i]:has-text("{year}")',
-        f'li:has-text("{year}")',
-        f'tr:has-text("{year}")',
-        f'div:has-text("{year} Statement")',
+        f'input[type="radio"][value="{format_name}"]',
+        f'label:has-text("{format_name}")',
     ]:
+        el = find_element(page, [sel])
+        if el:
+            human_click(page, el)
+            log(f"  Format selected: {format_name} via radio")
+            return
+
+
+# ── CSV parsing ───────────────────────────────────────────────────────────────
+
+def _parse_and_import_csv(
+    csv_bytes: bytes, account_name: str,
+    entity_id: Optional[int], year: str, log: Callable,
+) -> int:
+    """Parse Capital One CSV and upsert transactions. Returns count inserted."""
+    from app import db
+    import hashlib
+
+    text = csv_bytes.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+
+    # Capital One CSV columns (normalized to lowercase):
+    # "Transaction Date","Posted Date","Card No.","Description","Category","Debit","Credit"
+    # OR for checking: "Date","Description","Debit","Credit"
+    count = 0
+    for row in reader:
+        keys = {k.lower().strip() for k in row.keys()}
+        if not keys:
+            continue
+
+        # Date
+        raw_date = (row.get("Transaction Date") or row.get("Date") or
+                    row.get("transaction date") or "").strip()
+        txn_date = _parse_date_str(raw_date)
+        if not txn_date:
+            continue
+
+        txn_year = txn_date[:4]
+        if txn_year != year:
+            continue
+
+        # Amount: debit is negative, credit is positive
+        debit = _parse_csv_amount(
+            row.get("Debit") or row.get("debit") or ""
+        )
+        credit = _parse_csv_amount(
+            row.get("Credit") or row.get("credit") or ""
+        )
+        if debit is not None:
+            amount = -abs(debit)
+        elif credit is not None:
+            amount = abs(credit)
+        else:
+            amount_raw = row.get("Amount") or row.get("amount") or ""
+            amount = _parse_csv_amount(amount_raw)
+            if amount is None:
+                continue
+
+        description = (row.get("Description") or row.get("description") or "").strip()
+        category = (row.get("Category") or row.get("category") or "").strip()
+
+        # Stable source_id from date + description + amount
+        raw_id = f"{txn_date}|{description}|{amount}|{account_name}"
+        source_id = f"capitalone:{hashlib.sha1(raw_id.encode()).hexdigest()[:16]}"
+
         try:
-            els = page.query_selector_all(sel)
-            for el in els:
-                text = (el.text_content() or "").strip()
-                if year not in text or len(text) > 300:
-                    continue
-                month = _month_num(text)
-                if month in seen_months:
-                    continue
-                seen_months.add(month)
-                statements.append({"month": month, "element": el, "text": text})
-                log(f"  Stmt: {text[:80]}")
-            if statements:
-                return statements
+            db.upsert_transaction(
+                source=SOURCE,
+                source_id=source_id,
+                entity_id=entity_id,
+                tax_year=txn_year,
+                date=txn_date,
+                amount=amount,
+                vendor=description[:60],
+                description=description[:500],
+                category=category,
+                metadata_json=json.dumps({"account": account_name}),
+            )
+            count += 1
         except Exception as e:
-            log(f"Selector '{sel}' error: {e}")
+            log(f"  DB insert error: {e}")
 
-    # Strategy 2: JS walk (same approach as US Alliance)
-    log("Element scan found nothing — trying JS walk…")
-    try:
-        results = page.evaluate(f"""
-            () => {{
-                const year = "{year}";
-                const out = [];
-                const seen = new Set();
-                for (const el of document.querySelectorAll('*')) {{
-                    const t = (el.textContent || '').trim();
-                    if (!t.includes(year)) continue;
-                    if (t.length > 300) continue;
-                    const lower = t.toLowerCase();
-                    if (!lower.includes('statement') && !lower.includes('period')) continue;
-                    const key = t.substring(0, 40);
-                    if (seen.has(key)) continue;
-                    seen.add(key);
-                    out.push({{text: t, tag: el.tagName, cls: (el.className||'').substring(0,60)}});
-                }}
-                return out.slice(0, 20);
-            }}
-        """)
-        for r in results:
-            log(f"  JS [{r['tag']}] {r['text'][:80]}")
-    except Exception as e:
-        log(f"JS walk failed: {e}")
-
-    return []
+    return count
 
 
-def _download_statement(
-    page, context, stmt: dict, log: Callable, session_pdf_cache: list,
-) -> Optional[bytes]:
-    from playwright.sync_api import TimeoutError as PWTimeout
+def _parse_date_str(raw: str) -> Optional[str]:
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y", "%d-%b-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(raw.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
 
-    el = stmt.get("element")
-    if not el:
+
+def _parse_csv_amount(raw: str) -> Optional[float]:
+    if not raw:
         return None
-
-    new_pages: list = []
-    context.on("page", lambda p: new_pages.append(p))
-    pre_url = page.url
-
+    cleaned = re.sub(r"[^\d.\-]", "", raw.replace(",", ""))
     try:
-        el.scroll_into_view_if_needed()
-        page.wait_for_timeout(500)
-        box = el.bounding_box()
-        log(f"  Element box: {box}  text: {stmt.get('text','')[:60]}")
-        _save_debug_screenshot(page, f"co_pre_click_{stmt['month']}")
-
-        # First: look for a Download/PDF link within the row
-        row_pdf = None
-        for link_sel in [
-            'a[href*=".pdf" i]', 'a:has-text("Download")', 'a:has-text("PDF")',
-            'button:has-text("Download")', 'button:has-text("PDF")',
-        ]:
-            try:
-                link = el.query_selector(link_sel)
-                if link and link.is_visible():
-                    row_pdf = link
-                    break
-            except Exception:
-                pass
-
-        if row_pdf:
-            try:
-                with page.expect_download(timeout=15000) as dl_info:
-                    row_pdf.click()
-                dl = dl_info.value
-                buf = io.BytesIO()
-                s = dl.create_read_stream()
-                while True:
-                    chunk = s.read(65536)
-                    if not chunk:
-                        break
-                    buf.write(chunk)
-                if buf.tell() > 0:
-                    log(f"  ✓ Direct download from row link")
-                    return buf.getvalue()
-            except (PWTimeout, Exception) as e:
-                log(f"  Row link download failed: {e}")
-
-        # Click the row itself
-        try:
-            if box and box["width"] > 0 and box["height"] > 0:
-                page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-            else:
-                el.click()
-        except Exception as e:
-            log(f"  Click error: {e}")
-            try:
-                el.dispatch_event("click")
-            except Exception:
-                pass
-
-        time.sleep(8)
-        _save_debug_screenshot(page, f"co_post_click_{stmt['month']}")
-
-        # Check session PDF cache
-        if session_pdf_cache:
-            data = session_pdf_cache.pop(0)
-            log(f"  ✓ PDF from session cache ({len(data):,}B)")
-            return data
-
-        # Check for download link that appeared after click
-        for dl_sel in [
-            'a[href*=".pdf" i]', 'a:has-text("Download PDF")',
-            '[download]:visible', 'button:has-text("Download PDF")',
-        ]:
-            try:
-                lnk = page.query_selector(dl_sel)
-                if lnk and lnk.is_visible():
-                    with page.expect_download(timeout=10000) as dl_info:
-                        lnk.click()
-                    dl = dl_info.value
-                    buf = io.BytesIO()
-                    s = dl.create_read_stream()
-                    while True:
-                        chunk = s.read(65536)
-                        if not chunk:
-                            break
-                        buf.write(chunk)
-                    if buf.tell() > 0:
-                        log(f"  ✓ Downloaded via appeared link ({dl_sel})")
-                        _nav_back(page, log)
-                        return buf.getvalue()
-            except (PWTimeout, Exception):
-                pass
-
-        # Check new tab
-        if new_pages:
-            np = new_pages[0]
-            try:
-                np.wait_for_load_state("domcontentloaded", timeout=10000)
-                new_url = np.url
-                log(f"  New tab: {new_url}")
-                time.sleep(3)
-                if session_pdf_cache:
-                    data = session_pdf_cache.pop(0)
-                    np.close()
-                    return data
-                if ".pdf" in new_url.lower() or "pdf" in new_url.lower():
-                    resp = np.request.get(new_url)
-                    data = resp.body()
-                    np.close()
-                    if data:
-                        return data
-                pdf_bytes = np.pdf()
-                np.close()
-                if pdf_bytes:
-                    return pdf_bytes
-            except Exception as e:
-                log(f"  New tab failed: {e}")
-                try:
-                    new_pages[0].close()
-                except Exception:
-                    pass
-
-        if page.url != pre_url:
-            _nav_back(page, log)
-
-    finally:
-        try:
-            context.remove_listener("page", lambda p: new_pages.append(p))
-        except Exception:
-            pass
-
-    log("  ✗ All download attempts failed")
-    return None
-
-
-def _nav_back(page, log: Callable):
-    try:
-        page.go_back(wait_until="domcontentloaded", timeout=10000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        try:
-            page.goto(ACCOUNTS_URL, wait_until="domcontentloaded", timeout=15000)
-        except Exception:
-            pass
-
-
-# ── utility helpers ───────────────────────────────────────────────────────────
-
-def _find_element(page, selectors: list[str]):
-    for sel in selectors:
-        try:
-            el = page.query_selector(sel)
-            if el and el.is_visible():
-                return el
-        except Exception:
-            pass
-    return None
-
-
-def _save_debug_screenshot(page, label: str):
-    try:
-        ts = datetime.now().strftime("%H%M%S")
-        path = f"/tmp/capitalone_debug_{label}_{ts}.png"
-        page.screenshot(path=path)
-        logger.info(f"Debug screenshot: {path}")
-    except Exception as e:
-        logger.warning(f"Screenshot failed: {e}")
+        return float(cleaned) if cleaned else None
+    except ValueError:
+        return None

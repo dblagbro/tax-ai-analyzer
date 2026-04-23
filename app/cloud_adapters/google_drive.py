@@ -375,3 +375,93 @@ class GoogleDriveAdapter(CloudAdapter):
         while not done:
             _, done = downloader.next_chunk()
         return buf.getvalue()
+
+
+# ── Module-level convenience API (used by routes/import_cloud.py) ──────────────
+
+_adapter: Optional["GoogleDriveAdapter"] = None
+
+
+def _get_adapter() -> "GoogleDriveAdapter":
+    global _adapter
+    if _adapter is None:
+        _adapter = GoogleDriveAdapter()
+    return _adapter
+
+
+def is_authenticated() -> bool:
+    return _get_adapter().is_authenticated()
+
+
+def get_auth_url(redirect_uri: str) -> str:
+    return _get_adapter().get_auth_url(redirect_uri)
+
+
+def handle_callback(args) -> bool:
+    """Accepts Flask request.args (a MultiDict) or a plain dict with 'code'."""
+    from flask import session as flask_session
+    code = args.get("code", "") if hasattr(args, "get") else args["code"]
+    redirect_uri = flask_session.get("gdrive_redirect_uri") or ""
+    if not redirect_uri:
+        # Best effort: reconstruct from the callback URL if stored elsewhere
+        redirect_uri = flask_session.get("oauth_redirect_uri", "")
+    return _get_adapter().complete_auth(code, redirect_uri)
+
+
+def list_files(folder_id: str = "", page_size: int = 100) -> list[dict]:
+    """Return a JSON-serializable list of files (for the /files endpoint)."""
+    files = _get_adapter().list_files(folder_id=folder_id, page_size=page_size)
+    out = []
+    for f in files:
+        out.append({
+            "id": getattr(f, "id", None),
+            "name": getattr(f, "name", ""),
+            "mime_type": getattr(f, "mime_type", ""),
+            "size": getattr(f, "size", 0),
+            "modified": getattr(f, "modified", ""),
+        })
+    return out
+
+
+def import_files(file_ids: list[str], entity_id: Optional[int] = None,
+                 log_fn=None) -> int:
+    """Download each file_id to CONSUME_PATH (so Paperless ingests it).
+
+    Returns the number of files successfully written.
+    """
+    import os
+    import re as _re
+    from app.config import CONSUME_PATH
+
+    _log = log_fn or logger.info
+    adapter = _get_adapter()
+
+    from app import db
+    entity_slug = "personal"
+    if entity_id:
+        ent = db.get_entity(entity_id=entity_id)
+        if ent:
+            entity_slug = ent.get("slug") or "personal"
+
+    dest_dir = os.path.join(CONSUME_PATH, entity_slug, "gdrive")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    written = 0
+    for fid in file_ids:
+        try:
+            data, name = adapter.download_file(fid)
+            if not data:
+                _log(f"  skip (empty): {fid}")
+                continue
+            safe_name = _re.sub(r"[^A-Za-z0-9._\- ]", "_", name or fid)[:200]
+            path = os.path.join(dest_dir, safe_name)
+            if os.path.exists(path):
+                base, ext = os.path.splitext(safe_name)
+                path = os.path.join(dest_dir, f"{base}_{secrets.token_hex(3)}{ext}")
+            with open(path, "wb") as f:
+                f.write(data)
+            _log(f"  wrote {os.path.basename(path)} ({len(data):,}B)")
+            written += 1
+        except Exception as e:
+            _log(f"  error downloading {fid}: {e}")
+    return written

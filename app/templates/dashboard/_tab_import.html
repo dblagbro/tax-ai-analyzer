@@ -6,9 +6,17 @@
   </div>
   <div class="imp-tabs">
     <button class="imp-tab active" onclick="impTab('gmail',this)">Gmail</button>
+    <button class="imp-tab" onclick="impTab('imap',this)">IMAP (Outlook/Yahoo/iCloud)</button>
     <button class="imp-tab" onclick="impTab('paypal',this)">PayPal</button>
     <button class="imp-tab" onclick="impTab('venmo',this)">Venmo</button>
     <button class="imp-tab" onclick="impTab('usalliance',this)">US Alliance FCU</button>
+    <button class="imp-tab" onclick="impTab('capitalone',this)">Capital One</button>
+    <button class="imp-tab" onclick="impTab('usbank',this)">US Bank</button>
+    <button class="imp-tab" onclick="impTab('merrick',this)">Merrick Bank</button>
+    <button class="imp-tab" onclick="impTab('chime',this)">Chime</button>
+    <button class="imp-tab" onclick="impTab('verizon',this)">Verizon</button>
+    <button class="imp-tab" onclick="impTab('simplefin',this)">SimpleFIN</button>
+    <button class="imp-tab" onclick="impTab('plaid',this)">Plaid</button>
     <button class="imp-tab" onclick="impTab('bank',this)">Bank / OFX</button>
     <button class="imp-tab" onclick="impTab('localfs',this)">Local Folder</button>
     <button class="imp-tab" onclick="impTab('url',this)">URL</button>
@@ -63,6 +71,98 @@
       </div>
     </div>
   </div>
+
+  <!-- IMAP (Outlook / Yahoo / iCloud / generic) -->
+  <div id="ip-imap" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">&#128231; IMAP Email</div>
+        <div id="imap-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Pull tax-relevant emails from <strong>any IMAP provider</strong> — Outlook, Yahoo, iCloud, AOL, or any custom server.
+          Use an <strong>app password</strong> (not your regular password). All major providers support this.
+        </p>
+        <div class="form-group">
+          <label>Provider</label>
+          <select id="imap-provider" class="form-control" onchange="imapApplyPreset()">
+            <option value="generic">Generic IMAP</option>
+            <option value="yahoo">Yahoo Mail</option>
+            <option value="icloud">iCloud Mail</option>
+            <option value="outlook">Outlook.com / Office 365</option>
+            <option value="aol">AOL Mail</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>IMAP Host</label>
+            <input id="imap-host" class="form-control" type="text" placeholder="imap.mail.yahoo.com">
+          </div>
+          <div class="form-group" style="max-width:100px">
+            <label>Port</label>
+            <input id="imap-port" class="form-control" type="number" value="993">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Username (full email address)</label>
+          <input id="imap-username" class="form-control" type="email" autocomplete="off" placeholder="you@yahoo.com">
+        </div>
+        <div class="form-group">
+          <label>App Password <span style="font-size:.72rem;color:var(--muted)">(leave blank to keep existing)</span></label>
+          <input id="imap-password" class="form-control" type="password" autocomplete="new-password" placeholder="generated app password">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Folder</label>
+            <input id="imap-folder" class="form-control" type="text" value="INBOX">
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;padding-top:24px">
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+              <input id="imap-use-ssl" type="checkbox" checked> Use SSL (IMAPS)
+            </label>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="imapSaveSettings()">&#128274; Save Settings</button>
+          <button class="btn btn-outline btn-sm" onclick="imapTestConnection()">&#128279; Test Connection</button>
+        </div>
+        <div id="imap-test-result" style="margin-top:10px;font-size:.82rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Run IMAP Import</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="imap-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="imap-years" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Search Terms <span style="font-size:.72rem;color:var(--muted)">(space-separated; defaults used if blank)</span></label>
+          <input id="imap-search-terms" class="form-control" type="text" placeholder="receipt invoice statement 1099 W-2 tax billing">
+        </div>
+        <button class="btn btn-primary" id="imap-start-btn" onclick="startImapImport()">&#9654; Start Import</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Scans each year's matching emails, downloads PDF attachments to the consume path,
+          and runs the same AI review pipeline as Gmail. Transactions land in the transactions table with source=<code>imap:&lt;provider&gt;</code>.
+        </p>
+      </div>
+    </div>
+    <div id="imap-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a1a2e;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; IMAP Import Log — <span id="imap-log-status">running</span></span>
+          <button onclick="document.getElementById('imap-log-panel').style.display='none'" style="background:none;border:none;color:#888;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="imap-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- PayPal API -->
   <div id="ip-paypal" class="imp-panel">
     <div class="two-col">
@@ -312,6 +412,486 @@
       <div class="card"><div class="card-title">Amazon S3</div><p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Configure bucket in Settings.</p><button class="btn btn-outline" onclick="toast('Configure S3 in Settings first.')">Browse S3</button></div>
     </div>
   </div>
+  <!-- Capital One -->
+  <div id="ip-capitalone" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#d03027">&#128179; Capital One</div>
+        <div id="co-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Enter your Capital One online banking credentials. Downloads transaction CSVs
+          via the native "Download Transactions" UI — no PDF scraping.
+        </p>
+        <div class="form-group">
+          <label>Username</label>
+          <input id="co-username" class="form-control" type="text" autocomplete="off" placeholder="Your username or email">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input id="co-password" class="form-control" type="password" autocomplete="new-password" placeholder="Your password">
+            <span class="pw-eye" onclick="togglePw('co-password',this)" title="Show/hide">&#128065;</span>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="saveCoOneCreds()">Save Credentials</button>
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">&#127850; Cookie Auth <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(bypasses bot detection)</span></div>
+        <div id="co-cookie-status" style="margin-bottom:8px;font-size:.8rem;color:var(--muted)"></div>
+        <p style="font-size:.79rem;color:var(--muted);margin-bottom:8px">Log in to Capital One in your real browser, export cookies with Cookie-Editor extension, paste below.</p>
+        <div class="form-group">
+          <textarea id="co-cookies-input" class="form-control" rows="3" style="font-family:monospace;font-size:.72rem" placeholder='[{"name":"...","value":"...","domain":"capitalone.com",...}]'></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveCoCookies()">&#128190; Save Cookies</button>
+          <button class="btn btn-outline btn-sm" onclick="clearCoCookies()" style="color:#d32f2f">&#128465; Clear</button>
+        </div>
+        <div id="co-cookie-result" style="margin-top:6px;font-size:.8rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Download Transactions</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="co-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated)</span></label>
+            <input id="co-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="co-start-btn" onclick="startCoOneImport()">&#9654; Download Transactions</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Downloads CSV exports in 90-day chunks, parses and imports all transactions to the database.
+          MFA prompt appears below if triggered.
+        </p>
+        <div id="co-mfa-box" style="display:none;margin-top:12px;background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0">
+          <strong style="font-size:.85rem">&#128274; MFA Required</strong>
+          <p style="font-size:.82rem;margin:4px 0 8px">Check your phone for a code from Capital One.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="co-mfa-code" class="form-control" type="text" placeholder="6-digit code" style="max-width:160px;font-family:monospace;letter-spacing:.1em">
+            <button class="btn btn-primary btn-sm" onclick="submitCoMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="co-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#8b0000;color:#ffcdd2;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Capital One Import Log — <span id="co-log-status">running</span></span>
+          <button onclick="document.getElementById('co-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="co-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- US Bank -->
+  <div id="ip-usbank" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#00538f">&#127968; US Bank</div>
+        <div id="usb-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Downloads QFX (OFX) transaction files directly from US Bank's portal.
+          Session persists between runs so MFA only fires once.
+        </p>
+        <div class="form-group">
+          <label>Username (Personal ID)</label>
+          <input id="usb-username" class="form-control" type="text" autocomplete="off" placeholder="Your US Bank Personal ID">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input id="usb-password" class="form-control" type="password" autocomplete="new-password" placeholder="Your password">
+            <span class="pw-eye" onclick="togglePw('usb-password',this)" title="Show/hide">&#128065;</span>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="saveUsbCreds()">Save Credentials</button>
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">&#127850; Cookie Auth</div>
+        <div id="usb-cookie-status" style="margin-bottom:8px;font-size:.8rem;color:var(--muted)"></div>
+        <div class="form-group">
+          <textarea id="usb-cookies-input" class="form-control" rows="3" style="font-family:monospace;font-size:.72rem" placeholder='[{"name":"...","value":"...","domain":"usbank.com",...}]'></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveUsbCookies()">&#128190; Save Cookies</button>
+          <button class="btn btn-outline btn-sm" onclick="clearUsbCookies()" style="color:#d32f2f">&#128465; Clear</button>
+        </div>
+        <div id="usb-cookie-result" style="margin-top:6px;font-size:.8rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Download Transactions</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="usb-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="usb-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="usb-start-btn" onclick="startUsbImport()">&#9654; Download Transactions</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Downloads QFX files in 90-day chunks using the confirmed download selectors from finance-dl.
+          Files are saved to the consume path and transactions are parsed into the database.
+        </p>
+        <div id="usb-mfa-box" style="display:none;margin-top:12px;background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0">
+          <strong style="font-size:.85rem">&#128274; MFA Required</strong>
+          <p style="font-size:.82rem;margin:4px 0 8px">Check your phone/email for a code from US Bank.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="usb-mfa-code" class="form-control" type="text" placeholder="6-digit code" style="max-width:160px;font-family:monospace;letter-spacing:.1em">
+            <button class="btn btn-primary btn-sm" onclick="submitUsbMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="usb-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#00538f;color:#b3d9f7;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; US Bank Import Log — <span id="usb-log-status">running</span></span>
+          <button onclick="document.getElementById('usb-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="usb-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Merrick Bank -->
+  <div id="ip-merrick" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#2e5c8a">&#127968; Merrick Bank</div>
+        <div id="mrk-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Traditional ASP.NET login portal — simpler to automate than Capital One.
+          Downloads CSV transaction exports. MFA via SMS OTP.
+        </p>
+        <div class="form-group">
+          <label>Username</label>
+          <input id="mrk-username" class="form-control" type="text" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input id="mrk-password" class="form-control" type="password" autocomplete="new-password">
+            <span class="pw-eye" onclick="togglePw('mrk-password',this)" title="Show/hide">&#128065;</span>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="saveMrkCreds()">Save Credentials</button>
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">&#127850; Cookie Auth</div>
+        <div id="mrk-cookie-status" style="margin-bottom:8px;font-size:.8rem;color:var(--muted)"></div>
+        <div class="form-group">
+          <textarea id="mrk-cookies-input" class="form-control" rows="3" style="font-family:monospace;font-size:.72rem" placeholder='[{"name":"...","value":"...","domain":"merrickbank.com",...}]'></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveMrkCookies()">&#128190; Save Cookies</button>
+          <button class="btn btn-outline btn-sm" onclick="clearMrkCookies()" style="color:#d32f2f">&#128465; Clear</button>
+        </div>
+        <div id="mrk-cookie-result" style="margin-top:6px;font-size:.8rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Download Transactions</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="mrk-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="mrk-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="mrk-start-btn" onclick="startMrkImport()">&#9654; Download Transactions</button>
+        <div id="mrk-mfa-box" style="display:none;margin-top:12px;background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0">
+          <strong style="font-size:.85rem">&#128274; MFA Required</strong>
+          <p style="font-size:.82rem;margin:4px 0 8px">Check your phone for a code from Merrick Bank.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="mrk-mfa-code" class="form-control" type="text" placeholder="6-digit code" style="max-width:160px;font-family:monospace;letter-spacing:.1em">
+            <button class="btn btn-primary btn-sm" onclick="submitMrkMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="mrk-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#2e5c8a;color:#b3d9f7;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Merrick Bank Import Log — <span id="mrk-log-status">running</span></span>
+          <button onclick="document.getElementById('mrk-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="mrk-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chime Playwright Importer -->
+  <div id="ip-chime" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#00c08b">&#128178; Chime Credentials</div>
+        <div id="chm-status" style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Checking…</div>
+        <div class="form-group">
+          <label>Email</label>
+          <input id="chm-email" class="form-control" type="email" autocomplete="off" placeholder="your@email.com">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input id="chm-password" class="form-control" type="password" autocomplete="new-password" placeholder="Chime password">
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-primary btn-sm" onclick="window.chmSaveCreds()">&#128274; Save Credentials</button>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+          <div style="font-size:.78rem;font-weight:600;color:#555;margin-bottom:6px">Cookie Injection (optional)</div>
+          <textarea id="chm-cookies" class="form-control" rows="2" style="font-family:monospace;font-size:.74rem" placeholder='[{"name":"session","value":"abc","domain":".chime.com"}]'></textarea>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-outline btn-sm" onclick="window.chmSaveCookies()">&#128190; Save Cookies</button>
+            <button class="btn btn-outline btn-sm" onclick="window.chmClearCookies()">&#128465; Clear</button>
+          </div>
+        </div>
+        <div id="chm-mfa-box" style="display:none;margin-top:10px;background:#fff3cd;border:1px solid #ffca28;border-radius:7px;padding:12px">
+          <div style="font-weight:600;font-size:.84rem;margin-bottom:6px">&#128241; MFA Code Required</div>
+          <div style="font-size:.79rem;color:#555;margin-bottom:8px">Enter the code Chime texted you:</div>
+          <div style="display:flex;gap:6px">
+            <input id="chm-mfa-code" class="form-control" type="tel" maxlength="6" placeholder="123456" style="max-width:120px">
+            <button class="btn btn-primary btn-sm" onclick="window.chmSubmitMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Run Chime Import</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="chm-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="chm-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="chm-start-btn" onclick="window.startChime()">&#9654; Start Import</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Uses Playwright browser automation to log in and export transactions.
+          MFA code prompt appears below if 2FA is required.
+        </p>
+      </div>
+    </div>
+    <div id="chm-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#00704a;color:#b2dfdb;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Chime Import Log — <span id="chm-log-status">running</span></span>
+          <button onclick="document.getElementById('chm-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="chm-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verizon Playwright Importer -->
+  <div id="ip-verizon" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#cd040b">&#128225; Verizon Credentials</div>
+        <div id="vzn-status" style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Checking…</div>
+        <div class="form-group">
+          <label>My Verizon Username / Phone</label>
+          <input id="vzn-username" class="form-control" type="text" autocomplete="off" placeholder="Phone number or email">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input id="vzn-password" class="form-control" type="password" autocomplete="new-password" placeholder="My Verizon password">
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-primary btn-sm" onclick="window.vznSaveCreds()">&#128274; Save Credentials</button>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+          <div style="font-size:.78rem;font-weight:600;color:#555;margin-bottom:6px">Cookie Injection (optional)</div>
+          <textarea id="vzn-cookies" class="form-control" rows="2" style="font-family:monospace;font-size:.74rem" placeholder='[{"name":"session","value":"abc","domain":".verizon.com"}]'></textarea>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-outline btn-sm" onclick="window.vznSaveCookies()">&#128190; Save Cookies</button>
+            <button class="btn btn-outline btn-sm" onclick="window.vznClearCookies()">&#128465; Clear</button>
+          </div>
+        </div>
+        <div id="vzn-mfa-box" style="display:none;margin-top:10px;background:#fff3cd;border:1px solid #ffca28;border-radius:7px;padding:12px">
+          <div style="font-weight:600;font-size:.84rem;margin-bottom:6px">&#128241; MFA Required</div>
+          <div style="font-size:.79rem;color:#555;margin-bottom:8px">Enter the code Verizon sent, or type any value after approving in the Verizon app:</div>
+          <div style="display:flex;gap:6px">
+            <input id="vzn-mfa-code" class="form-control" type="tel" maxlength="6" placeholder="123456" style="max-width:120px">
+            <button class="btn btn-primary btn-sm" onclick="window.vznSubmitMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Run Verizon Import</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
+          Downloads bill PDFs from My Verizon and extracts <strong>individual line items</strong>
+          (base plan, device payments, taxes per line) as separate transactions — not just the monthly total.
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="vzn-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="vzn-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="vzn-start-btn" onclick="window.startVerizon()">&#9654; Start Import</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          MFA code or app-approval prompt appears in the credentials panel if 2FA is triggered.
+        </p>
+      </div>
+    </div>
+    <div id="vzn-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#8b0000;color:#ffcdd2;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Verizon Import Log — <span id="vzn-log-status">running</span></span>
+          <button onclick="document.getElementById('vzn-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="vzn-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SimpleFIN Bridge -->
+  <div id="ip-simplefin" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">&#127760; SimpleFIN Bridge</div>
+        <div id="sfin-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          SimpleFIN Bridge connects to <strong>16,000+ financial institutions</strong> via MX Financial's data network.
+          No credentials stored here — you authenticate directly with your bank.
+        </p>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:8px"><strong>How to connect:</strong></p>
+        <ol style="font-size:.82rem;color:var(--muted);padding-left:18px;line-height:1.9;margin-bottom:14px">
+          <li>Go to <a href="https://beta-bridge.simplefin.org/auth" target="_blank" style="color:var(--accent)">beta-bridge.simplefin.org</a></li>
+          <li>Sign in or create a free account</li>
+          <li>Click <strong>+ Connect an Account</strong> and link your bank</li>
+          <li>Click <strong>Get API Token</strong> → copy the token URL</li>
+          <li>Paste it below and click <strong>Claim Token</strong></li>
+        </ol>
+        <div class="form-group">
+          <label>Setup Token or URL</label>
+          <input id="sfin-token" class="form-control" type="text" autocomplete="off"
+                 placeholder="https://beta-bridge.simplefin.org/simplefin/claim/…">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Paste the full claim URL or just the token portion</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="claimSimpleFin()">&#128279; Claim Token</button>
+        <div id="sfin-claim-result" style="margin-top:8px;font-size:.8rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pull Transactions</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="sfin-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="sfin-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Account Filter <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(optional — leave blank for all)</span></label>
+          <input id="sfin-account-filter" class="form-control" type="text" placeholder="e.g. Checking, Savings">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Comma-separated partial account name matches</div>
+        </div>
+        <button class="btn btn-primary" id="sfin-start-btn" onclick="startSfinImport()">&#9654; Pull Transactions</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Fetches transactions in 90-day chunks (API limit). Deduplicates automatically by transaction ID.
+          Rate limit: 24 requests/day.
+        </p>
+      </div>
+    </div>
+    <div id="sfin-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a3c5e;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; SimpleFIN Import Log — <span id="sfin-log-status">running</span></span>
+          <button onclick="document.getElementById('sfin-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="sfin-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plaid -->
+  <div id="ip-plaid" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#00a651">&#127974; Plaid</div>
+        <div id="plaid-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
+          Plaid covers <strong>12,000+ US &amp; Canadian institutions</strong> with OAuth-based access.
+          Credentials go directly to the bank — we store only the access token.
+        </p>
+        <div style="border:1px solid #e0e4ea;border-radius:7px;padding:12px;background:#f8f9fb;margin-bottom:10px">
+          <div style="font-size:.78rem;font-weight:600;color:#555;margin-bottom:6px">API Credentials (from dashboard.plaid.com)</div>
+          <div class="form-group">
+            <label>Client ID</label>
+            <input id="plaid-client-id" class="form-control" type="text" autocomplete="off" placeholder="65abc…">
+          </div>
+          <div class="form-group">
+            <label>Secret</label>
+            <input id="plaid-secret" class="form-control" type="password" autocomplete="new-password" placeholder="secret…">
+          </div>
+          <div class="form-group">
+            <label>Environment</label>
+            <select id="plaid-env" class="form-control">
+              <option value="sandbox">Sandbox (test data)</option>
+              <option value="development">Development</option>
+              <option value="production">Production</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="savePlaidSettings()">&#128274; Save Credentials</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Connect a Bank</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Click below to open the Plaid Link widget and authenticate with your bank.
+        </p>
+        <div class="form-group">
+          <label>Entity</label>
+          <select id="plaid-entity" class="form-control">
+            {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <button class="btn btn-primary" id="plaid-connect-btn" onclick="openPlaidLink()">&#128279; Connect Bank</button>
+        <div id="plaid-connect-msg" style="font-size:.79rem;color:var(--muted);margin-top:8px"></div>
+
+        <div style="border-top:1px solid var(--border);margin:16px 0 10px"></div>
+        <div style="font-size:.84rem;font-weight:600;margin-bottom:8px">Connected Institutions</div>
+        <div id="plaid-items-list" style="font-size:.82rem">Loading…</div>
+        <button class="btn btn-primary" id="plaid-sync-btn" onclick="syncAllPlaid()" style="margin-top:10px">&#128260; Sync All Transactions</button>
+      </div>
+    </div>
+    <div id="plaid-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#003d1f;color:#a8e6cf;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Plaid Import Log — <span id="plaid-log-status">running</span></span>
+          <button onclick="document.getElementById('plaid-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="plaid-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
   <br>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">

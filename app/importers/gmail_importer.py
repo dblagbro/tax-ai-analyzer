@@ -420,6 +420,36 @@ def _ai_review_email(subject: str, sender: str, body_snippet: str,
                 "amount": None, "description": subject[:60], "reason": "error"}
 
 
+def _normalize_gmail_date(date_str: str) -> tuple[str, str]:
+    """Convert a Gmail Date header (RFC 2822 or already-ISO) to (iso_date, year_str).
+
+    Returns ("", "") if the input can't be parsed.
+    """
+    if not date_str:
+        return "", ""
+    s = date_str.strip()
+    # Already ISO?
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        iso = s[:10]
+        return iso, iso[:4]
+    try:
+        dt = parsedate_to_datetime(s)
+        return dt.strftime("%Y-%m-%d"), str(dt.year)
+    except Exception:
+        return "", ""
+
+
+def _coerce_amount(value) -> Optional[float]:
+    """Return a float for valid amounts, None otherwise."""
+    if value is None or value == "":
+        return None
+    try:
+        f = float(value)
+        return f
+    except (TypeError, ValueError):
+        return None
+
+
 def upsert_transaction(txn: dict) -> dict:
     """Insert transaction, skipping if source_id already exists OR if a
     near-duplicate (same vendor + amount within 7 days) is already present.
@@ -427,25 +457,30 @@ def upsert_transaction(txn: dict) -> dict:
     from each creating a separate transaction record.
     """
     from app import db
-    from email.utils import parsedate_to_datetime
 
     vendor = txn.get("vendor", "")
-    amount = txn.get("amount")
-    date_str = txn.get("date", "")
+    amount = _coerce_amount(txn.get("amount"))
+    raw_date = txn.get("date", "")
+    iso_date, year_from_date = _normalize_gmail_date(raw_date)
+    tax_year = txn.get("year") or year_from_date
 
-    # Near-duplicate check: same vendor + amount within 7 days
-    if vendor and amount is not None:
+    # Near-duplicate check: same vendor + amount within 7 days (uses ISO dates)
+    if vendor and amount is not None and iso_date:
         try:
-            new_dt = parsedate_to_datetime(date_str)
+            from datetime import datetime as _dt
+            new_dt = _dt.strptime(iso_date, "%Y-%m-%d")
             conn = db.get_connection()
             try:
                 existing = conn.execute(
                     "SELECT id, date FROM transactions WHERE source='gmail' AND vendor=? AND amount=?",
-                    (vendor, float(amount)),
+                    (vendor, amount),
                 ).fetchall()
                 for row in existing:
                     try:
-                        existing_dt = parsedate_to_datetime(row["date"])
+                        existing_iso, _ = _normalize_gmail_date(row["date"])
+                        if not existing_iso:
+                            continue
+                        existing_dt = _dt.strptime(existing_iso, "%Y-%m-%d")
                         if abs((new_dt - existing_dt).days) <= 7:
                             return {"id": row["id"], "skipped": "near_duplicate"}
                     except Exception:
@@ -453,24 +488,30 @@ def upsert_transaction(txn: dict) -> dict:
             finally:
                 conn.close()
         except Exception:
-            pass  # date parse failed — fall through to normal insert
+            pass
 
     try:
         txn_id = db.upsert_transaction(
             source=txn.get("source", "gmail"),
             source_id=txn.get("source_id", ""),
             entity_id=txn.get("entity_id"),
-            tax_year=txn.get("year", ""),
-            date=txn.get("date", ""),
-            amount=txn.get("amount"),
-            vendor=txn.get("vendor", ""),
+            tax_year=tax_year,
+            date=iso_date or raw_date,
+            amount=amount,
+            vendor=vendor,
             description=txn.get("description", ""),
             category=txn.get("category", "imported"),
             doc_type=txn.get("doc_type", "email"),
         )
         return {"id": txn_id}
     except Exception:
-        return db.add_transaction(txn)
+        # Normalize the fallback payload too so add_transaction doesn't reintroduce bad data
+        fallback = dict(txn)
+        fallback["date"] = iso_date or raw_date
+        fallback["amount"] = amount
+        fallback["year"] = tax_year
+        fallback["tax_year"] = tax_year
+        return db.add_transaction(fallback)
 
 
 # ── per-month worker ───────────────────────────────────────────────────────────

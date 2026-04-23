@@ -24,6 +24,10 @@
       <div class="stat-icon" style="background:#6f42c1"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zm-7-2l5-5-1.41-1.41L12 14.17l-2.59-2.58L8 13z"/></svg></div>
       <div><div class="stat-num" id="s-net">—</div><div class="stat-lbl">Net Income / Loss <span style="font-size:.7rem;color:#6f42c1">&#8594; view</span></div></div>
     </div>
+    <div class="stat-card" onclick="jumpToAuditRisk()" title="Expenses ≥$75 without receipts — IRS audit risk" style="cursor:pointer" onmouseover="this.style.boxShadow='0 4px 16px rgba(192,98,28,.2)'" onmouseout="this.style.boxShadow=''">
+      <div class="stat-icon" style="background:#c0621c"><svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg></div>
+      <div><div class="stat-num" id="s-audit-risk" style="color:#c0621c">—</div><div class="stat-lbl">Audit Risk (≥$75) <span style="font-size:.7rem;color:#c0621c">&#8594; review</span></div></div>
+    </div>
   </div>
   <div class="two-col">
     <div class="card"><div class="card-title">Entities</div><div class="entity-grid" id="entityGrid"><div class="empty"><div class="spinner"></div></div></div></div>

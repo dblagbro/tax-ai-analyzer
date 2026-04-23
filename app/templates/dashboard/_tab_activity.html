@@ -1,0 +1,65 @@
+<!-- ACTIVITY LOG -->
+<div id="tab-activity" class="tab-panel {% if active_tab == 'activity' %}active{% endif %}">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Activity Log</div>
+      <div class="page-sub">Audit trail of actions taken in the app</div>
+    </div>
+    <button class="btn btn-outline" onclick="loadActivity()">Refresh</button>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+      <div>
+        <label style="font-size:.75rem;color:var(--muted)">Search</label>
+        <input id="act-search" type="text" class="form-control" placeholder="action or detail…" oninput="debouncedLoadActivity()">
+      </div>
+      <div>
+        <label style="font-size:.75rem;color:var(--muted)">Action</label>
+        <select id="act-action" class="form-control" onchange="loadActivity()">
+          <option value="">All actions</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:.75rem;color:var(--muted)">User</label>
+        <select id="act-user" class="form-control" onchange="loadActivity()">
+          <option value="">All users</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:.75rem;color:var(--muted)">Since</label>
+        <input id="act-since" type="date" class="form-control" onchange="loadActivity()">
+      </div>
+      <div>
+        <label style="font-size:.75rem;color:var(--muted)">Until</label>
+        <input id="act-until" type="date" class="form-control" onchange="loadActivity()">
+      </div>
+      <div style="align-self:end">
+        <button class="btn btn-outline btn-sm" onclick="clearActivityFilters()" style="width:100%">Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="act-meta" style="display:flex;justify-content:space-between;font-size:.82rem;color:var(--muted);margin-bottom:10px">
+      <span id="act-count">—</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="actPagePrev()" id="act-prev-btn">&larr; Prev</button>
+        <span id="act-page-label" style="align-self:center;padding:0 8px">Page 1</span>
+        <button class="btn btn-outline btn-sm" onclick="actPageNext()" id="act-next-btn">Next &rarr;</button>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table id="act-table" style="width:100%;font-size:.84rem">
+        <thead><tr>
+          <th style="width:160px">When</th>
+          <th>Action</th>
+          <th>Detail</th>
+          <th>User</th>
+          <th>Entity</th>
+        </tr></thead>
+        <tbody id="act-body"><tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>

@@ -99,8 +99,40 @@ def api_years():
 @bp.route(URL_PREFIX + "/api/activity")
 @login_required
 def api_activity():
-    limit = min(int(request.args.get("limit", 50)), 200)
-    return jsonify(_row_list(db.get_recent_activity(limit)))
+    """Activity log. Without filter params, returns recent rows (flat list for backwards compat).
+    With any of action/search/user_id/entity_id/since/until/offset params, returns
+    {'rows': [...], 'total': N} so callers can paginate.
+    """
+    limit = min(int(request.args.get("limit", 50)), 1000)
+    has_filters = any(
+        request.args.get(k) for k in
+        ("action", "search", "user_id", "entity_id", "since", "until", "offset")
+    )
+    if not has_filters:
+        return jsonify(_row_list(db.get_recent_activity(limit)))
+    action = request.args.get("action") or None
+    search = request.args.get("search") or None
+    since = request.args.get("since") or None
+    until = request.args.get("until") or None
+    try:
+        user_id = int(request.args["user_id"]) if request.args.get("user_id") else None
+        entity_id = int(request.args["entity_id"]) if request.args.get("entity_id") else None
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        return jsonify({"error": "numeric filter must be integer"}), 400
+    rows, total = db.search_activity(
+        action=action, user_id=user_id, entity_id=entity_id,
+        search=search, since=since, until=until,
+        limit=limit, offset=offset,
+    )
+    return jsonify({"rows": rows, "total": total, "limit": limit, "offset": offset})
+
+
+@bp.route(URL_PREFIX + "/api/activity/actions")
+@login_required
+def api_activity_actions():
+    """Distinct action values + counts for filter dropdown."""
+    return jsonify(db.distinct_activity_actions())
 
 
 @bp.route(URL_PREFIX + "/api/filed-returns", methods=["GET"])
@@ -183,3 +215,125 @@ def api_health():
     _check("tax-paperless-postgres", _postgres)
 
     return jsonify(results)
+
+
+@bp.route(URL_PREFIX + "/api/health/extended")
+@login_required
+def api_health_extended():
+    """One-shot 'is anything broken?' — row counts, threads, disk, feature activity.
+
+    Non-fatal: each section is wrapped so a failure in one doesn't taint others.
+    """
+    import os
+    import shutil
+    import threading
+
+    out: dict = {}
+
+    # ── row counts (all critical tables) ────────────────────────────────
+    try:
+        conn = db.get_connection()
+        tables = ["users", "entities", "analyzed_documents", "transactions",
+                  "transaction_links", "import_jobs", "activity_log",
+                  "pdf_content_hashes", "mileage_log", "plaid_items"]
+        counts = {}
+        for t in tables:
+            try:
+                counts[t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except Exception as e:
+                counts[t] = {"error": str(e)[:80]}
+        # Sub-metrics
+        counts["transactions_with_vendor"] = conn.execute(
+            "SELECT COUNT(*) FROM transactions WHERE vendor IS NOT NULL AND vendor != ''"
+        ).fetchone()[0]
+        counts["transactions_missing_normalized"] = conn.execute(
+            "SELECT COUNT(*) FROM transactions WHERE (vendor_normalized IS NULL OR vendor_normalized='') AND vendor IS NOT NULL"
+        ).fetchone()[0]
+        counts["documents_duplicate"] = conn.execute(
+            "SELECT COUNT(*) FROM analyzed_documents WHERE is_duplicate=1"
+        ).fetchone()[0]
+        conn.close()
+        out["row_counts"] = counts
+    except Exception as e:
+        out["row_counts"] = {"error": str(e)[:120]}
+
+    # ── background threads ──────────────────────────────────────────────
+    try:
+        threads = {t.name: {"alive": t.is_alive(), "daemon": t.daemon}
+                   for t in threading.enumerate()}
+        expected = {"analysis-daemon", "dedup-scheduler"}
+        out["threads"] = {
+            "alive": threads,
+            "count": len(threads),
+            "expected_present": {n: (n in threads and threads[n]["alive"])
+                                 for n in expected},
+        }
+    except Exception as e:
+        out["threads"] = {"error": str(e)[:120]}
+
+    # ── disk usage (consume + data) ─────────────────────────────────────
+    try:
+        disks = {}
+        for path in ("/consume", "/app/data", "/app/export"):
+            if os.path.exists(path):
+                total, used, free = shutil.disk_usage(path)
+                disks[path] = {
+                    "total_gb":  round(total / 1_073_741_824, 2),
+                    "used_gb":   round(used  / 1_073_741_824, 2),
+                    "free_gb":   round(free  / 1_073_741_824, 2),
+                    "pct_used":  round(used * 100.0 / total, 1) if total else None,
+                }
+            else:
+                disks[path] = {"exists": False}
+        out["disk"] = disks
+    except Exception as e:
+        out["disk"] = {"error": str(e)[:120]}
+
+    # ── recent activity per major action type ───────────────────────────
+    try:
+        conn = db.get_connection()
+        rows = conn.execute(
+            """SELECT action, MAX(created_at) as last_seen, COUNT(*) as total
+               FROM activity_log
+               WHERE action IN ('import_complete','dedup_scan','login',
+                                'vendor_merge','txn_bulk_update','doc_bulk_update',
+                                'mileage_add','plaid_connected','txn_receipt_attached',
+                                'link_manual')
+               GROUP BY action
+               ORDER BY last_seen DESC"""
+        ).fetchall()
+        out["recent_activity"] = {r["action"]: {"last_seen": r["last_seen"],
+                                                 "total": r["total"]} for r in rows}
+        conn.close()
+    except Exception as e:
+        out["recent_activity"] = {"error": str(e)[:120]}
+
+    # ── feature configuration state ─────────────────────────────────────
+    try:
+        cfg = {
+            "gmail_configured":    bool(db.get_setting("gmail_oauth_token")),
+            "plaid_configured":    bool(db.get_setting("plaid_client_id")),
+            "imap_configured":     bool(db.get_setting("imap_host")) and bool(db.get_setting("imap_password")),
+            "simplefin_connected": bool(db.get_setting("simplefin_access_url")),
+            "paperless_configured":bool(db.get_setting("paperless_token")),
+            "accountant_portal_active": bool(db.get_setting("accountant_token")),
+        }
+        out["features"] = cfg
+    except Exception as e:
+        out["features"] = {"error": str(e)[:120]}
+
+    # Overall health signal — any section with error or missing thread = degraded
+    problems = []
+    if "error" in out.get("row_counts", {}):
+        problems.append("row_counts")
+    tp = out.get("threads", {}).get("expected_present", {})
+    for thread_name, alive in tp.items():
+        if not alive:
+            problems.append(f"thread:{thread_name}")
+    for path, info in (out.get("disk", {}) or {}).items():
+        if isinstance(info, dict) and info.get("pct_used", 0) > 90:
+            problems.append(f"disk:{path}")
+    out["overall"] = {"status": "ok" if not problems else "degraded",
+                      "problems": problems}
+
+    return jsonify(out)

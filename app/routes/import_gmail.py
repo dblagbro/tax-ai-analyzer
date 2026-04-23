@@ -6,7 +6,7 @@ import threading
 from datetime import datetime
 
 from flask import (
-    Blueprint, Response, flash, redirect, render_template,
+    Blueprint, Response, flash, jsonify, redirect, render_template,
     request, session as flask_session, stream_with_context,
 )
 from flask_login import current_user, login_required
@@ -32,22 +32,26 @@ def _gmail_callback_url() -> str:
         base = _req.host_url.rstrip("/")
         return f"{base}{URL_PREFIX}/import/gmail/auth/callback"
     except RuntimeError:
-        # Outside request context (e.g. startup) — fall back to config
-        from app.config import PAPERLESS_WEB_URL
-        host = os.environ.get("APP_HOST_URL", "https://www.voipguru.org")
-        return f"{host.rstrip('/')}{URL_PREFIX}/import/gmail/auth/callback"
+        # Outside request context — derive from APP_HOST_URL env var (no default)
+        host = os.environ.get("APP_HOST_URL", "").rstrip("/")
+        if not host:
+            raise RuntimeError(
+                "Gmail OAuth callback URL cannot be determined outside a request context. "
+                "Set APP_HOST_URL env var (e.g. https://your-domain.com)."
+            )
+        return f"{host}{URL_PREFIX}/import/gmail/auth/callback"
 
-GMAIL_SETUP_SYSTEM_PROMPT = """You are a friendly setup assistant helping the user connect their personal Gmail account to a self-hosted tax document organizer app. This app automatically imports tax-related emails (receipts, invoices, 1099s, W-2s, etc.) into a local document management system.
+def _gmail_setup_system_prompt(callback_url: str) -> str:
+    return f"""You are a friendly setup assistant helping the user connect their personal Gmail account to a self-hosted tax document organizer app. This app automatically imports tax-related emails (receipts, invoices, 1099s, W-2s, etc.) into a local document management system.
 
 KEY FACTS:
 - Works with personal @gmail.com accounts (NOT just Google Workspace)
 - Select "External" user type on the OAuth consent screen (for personal Gmail)
-- Create a "Desktop app" credential (NOT Web application)
 - App stays in "Testing" mode — that is fine and expected
 - Must add themselves as a test user on the consent screen
 
 CRITICAL — REDIRECT URI:
-The app callback URL is: https://voipguru.org/tax-ai-analyzer/import/gmail/auth/callback
+The app callback URL is: {callback_url}
 This MUST be added as an Authorized Redirect URI in the Google Cloud credential.
 Without this, Google redirects to localhost and the token is never received.
 
@@ -64,7 +68,7 @@ SETUP STEPS:
 7. Create credential: APIs & Services → Credentials → Create Credentials → OAuth client ID
    → Select type: "Web application" (NOT Desktop app)
    → Under "Authorized redirect URIs" click Add URI
-   → Enter: https://voipguru.org/tax-ai-analyzer/import/gmail/auth/callback
+   → Enter: {callback_url}
    → Click Create
 8. Download JSON: click download icon on the new credential
 9. Upload here: use the upload section below the chat
@@ -305,7 +309,7 @@ def gmail_setup_chat():
     user_message = data.get("message", "").strip()
     if not user_message:
         return jsonify({"error": "message required"}), 400
-    gen = setup_chat_stream(GMAIL_SETUP_SYSTEM_PROMPT, data.get("history", []), user_message)
+    gen = setup_chat_stream(_gmail_setup_system_prompt(_gmail_callback_url()), data.get("history", []), user_message)
     return Response(stream_with_context(gen()),
                     mimetype="text/event-stream",
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})

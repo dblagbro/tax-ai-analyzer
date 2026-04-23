@@ -28,7 +28,10 @@ def _cloud_unavail(service: str):
 def api_gdrive_auth():
     try:
         from app.cloud_adapters.google_drive import get_auth_url
-        return redirect(get_auth_url(url_for("import_cloud.api_gdrive_callback", _external=True)))
+        from flask import session as flask_session
+        redirect_uri = url_for("import_cloud.api_gdrive_callback", _external=True)
+        flask_session["gdrive_redirect_uri"] = redirect_uri
+        return redirect(get_auth_url(redirect_uri))
     except ImportError:
         return _cloud_unavail("Google Drive")
     except Exception as e:
@@ -96,7 +99,10 @@ def api_gdrive_import():
 def api_dropbox_auth():
     try:
         from app.cloud_adapters.dropbox_adapter import get_auth_url
-        return redirect(get_auth_url(url_for("import_cloud.api_dropbox_callback", _external=True)))
+        from flask import session as flask_session
+        redirect_uri = url_for("import_cloud.api_dropbox_callback", _external=True)
+        flask_session["dropbox_redirect_uri"] = redirect_uri
+        return redirect(get_auth_url(redirect_uri))
     except ImportError:
         return _cloud_unavail("Dropbox")
     except Exception as e:

@@ -270,6 +270,15 @@ def main():
     daemon = threading.Thread(target=analysis_daemon, daemon=True, name="analysis-daemon")
     daemon.start()
 
+    # Backfill vendor_normalized for existing transactions on startup
+    try:
+        from app.dedup import backfill_vendor_normalized
+        n = backfill_vendor_normalized()
+        if n:
+            _log(f"Backfilled vendor_normalized for {n} transactions")
+    except Exception as e:
+        _log(f"vendor_normalized backfill error: {e}")
+
     # Daily dedup scan — runs at startup then every 24 hours
     def _daily_dedup():
         while True:
@@ -284,6 +293,14 @@ def main():
                      f"({', '.join(f'{v} {k}' for k,v in hash_stats['by_source'].items())})")
             except Exception as e:
                 _log(f"Scheduled dedup error: {e}")
+            try:
+                from app.dedup import scan_cross_source_matches
+                xs = scan_cross_source_matches()
+                if xs["links_created"] or xs["links_updated"]:
+                    _log(f"Cross-source dedup: {xs['links_created']} new links, "
+                         f"{xs['links_updated']} updated, {xs['scanned']} txns scanned")
+            except Exception as e:
+                _log(f"Cross-source dedup error: {e}")
             try:
                 pruned = db.prune_old_import_jobs(days=90)
                 if pruned:

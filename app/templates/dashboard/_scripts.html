@@ -140,6 +140,8 @@ function loadTab(t) {
   const m = {dashboard:()=>{loadStats();loadAct();loadRecentJobs();loadFiledReturns();},transactions:loadTxns,documents:docReload,
     import:()=>{loadJobs();loadGmailImportStatus();loadUsaStatus();startJobRefresh();},
     tax_review:()=>{loadTaxReviewYears();},
+    mileage:loadMileage,
+    activity:loadActivity,
     ai_costs:loadAiCosts,
     folder_manager:foLoadMigration,
     chat:loadSessions,reports:loadExports,settings:loadSettings,users:loadUsers};
@@ -182,6 +184,12 @@ async function loadStats() {
   const el = document.getElementById('s-net');
   el.textContent = (n<0?'-$':'$')+fmt(Math.abs(n));
   el.className = 'stat-num '+(n>=0?'pos':'neg');
+
+  // Audit-risk card: in-parallel fetch, degrades gracefully
+  fetch(P+'/api/transactions/audit-risk'+(p.toString()?'?'+p:'')).then(r=>r.json()).then(ar => {
+    const rel = document.getElementById('s-audit-risk');
+    if (rel) rel.textContent = (ar.count ?? 0).toString();
+  }).catch(() => {});
   const g = document.getElementById('entityGrid');
   const ents = Object.entries(r.by_entity||{});
   g.innerHTML = ents.length ? ents.map(([sl,e])=>`<div class="entity-card" style="border-left-color:${e.color||'#1a3c5e'};cursor:pointer" title="Filter by ${e.name||sl}" onclick="jumpToEntity(${e.id})" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.12)'" onmouseout="this.style.boxShadow=''">
@@ -233,6 +241,14 @@ function jumpToEntity(entityId) {
   if (gEl) { gEl.value = entityId; applyGlobal(); }
   sw('transactions');
 }
+function jumpToAuditRisk() {
+  // Switch to transactions tab, Unmatched sub-tab, load reconcile view
+  sw('transactions');
+  setTimeout(() => {
+    const btn = document.getElementById('txn-sub-unmatched');
+    if (btn) showReconcile(btn);
+  }, 50);
+}
 function jumpToDocs(entityId) {
   const gEl = document.getElementById('g-entity');
   if (gEl) { gEl.value = entityId; applyGlobal(); }
@@ -244,11 +260,231 @@ function txnSubTab(cat, btn) {
   const catEl = document.getElementById('tf-cat');
   if (catEl) catEl.value = cat;
   _txnTM = null;
+  // Swap panels: hide reconcile+vendors, show main txn table
+  document.getElementById('txn-reconcile-view').style.display = 'none';
+  document.getElementById('txn-vendors-view').style.display = 'none';
+  document.getElementById('txn-main-card').style.display = '';
+  const bulkBar = document.getElementById('txn-bulk-bar');
   loadTxns();
+}
+
+// Dispatch filter changes to whichever view is active
+function refreshTxnView() {
+  const recon = document.getElementById('txn-reconcile-view');
+  if (recon && recon.style.display !== 'none') {
+    loadReconcile();
+  } else {
+    loadTxns();
+  }
+}
+
+// Unmatched / reconciliation view
+let _reconSelectedTxn = null;
+let _reconSelectedDoc = null;
+
+async function showReconcile(btn) {
+  document.querySelectorAll('.imp-tab[id^="txn-sub-"]').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('txn-reconcile-view').style.display = '';
+  document.getElementById('txn-vendors-view').style.display = 'none';
+  document.getElementById('txn-main-card').style.display = 'none';
+  await loadReconcile();
+}
+
+async function showVendors(btn) {
+  document.querySelectorAll('.imp-tab[id^="txn-sub-"]').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('txn-reconcile-view').style.display = 'none';
+  document.getElementById('txn-vendors-view').style.display = '';
+  document.getElementById('txn-main-card').style.display = 'none';
+  await loadVendors();
+}
+
+async function loadReconcile() {
+  _reconSelectedTxn = null;
+  _reconSelectedDoc = null;
+  document.getElementById('recon-link-btn').disabled = true;
+  document.getElementById('recon-link-status').textContent = '';
+
+  const p = new URLSearchParams({limit:500});
+  const e=document.getElementById('tf-entity')?.value; if(e) p.set('entity_id',e);
+  const y=document.getElementById('tf-year')?.value; if(y) p.set('year',y);
+
+  // Audit-risk query uses same entity/year but own threshold
+  const threshold = parseFloat(document.getElementById('audit-threshold')?.value) || 75;
+  const auditParams = new URLSearchParams();
+  if (e) auditParams.set('entity_id', e);
+  if (y) auditParams.set('year', y);
+  auditParams.set('threshold', threshold);
+
+  const [txnResp, docResp, auditResp] = await Promise.all([
+    fetch(P+'/api/transactions/unmatched?'+p).then(r=>r.json()).catch(()=>({transactions:[]})),
+    fetch(P+'/api/documents/unmatched?'+p).then(r=>r.json()).catch(()=>({documents:[]})),
+    fetch(P+'/api/transactions/audit-risk?'+auditParams).then(r=>r.json()).catch(()=>({count:0,total_amount:0})),
+  ]);
+
+  // Populate audit-risk card
+  document.getElementById('audit-threshold-label').textContent = Math.round(auditResp.threshold || threshold);
+  document.getElementById('audit-count').textContent = (auditResp.count ?? 0).toLocaleString();
+  document.getElementById('audit-total').textContent = '$' + (auditResp.total_amount || 0).toLocaleString(undefined, {maximumFractionDigits:0});
+  const txns = txnResp.transactions || [];
+  const docs = docResp.documents || [];
+
+  document.getElementById('recon-txn-count').textContent = txns.length;
+  document.getElementById('recon-doc-count').textContent = docs.length;
+
+  const txnBody = document.getElementById('recon-txn-body');
+  txnBody.innerHTML = txns.length ? txns.map(t=>{
+    const absAmt = Math.abs(t.amount||0);
+    const amt = absAmt.toFixed(2);
+    const isExpenseish = (t.category||'').toLowerCase() === 'expense' || (t.category||'').toLowerCase() === 'deduction';
+    const isAuditRisk = isExpenseish && absAmt >= threshold;
+    const riskFlag = isAuditRisk ? '<span title="IRS audit risk — receipt required for business expenses ≥ $'+threshold+'" style="color:#c0621c;margin-right:4px;font-weight:700">&#9888;</span>' : '';
+    return `<tr data-id="${t.id}" style="cursor:pointer${isAuditRisk?';background:#fffaf0':''}" onclick="selectReconTxn(${t.id},this)">
+      <td style="white-space:nowrap">${riskFlag}${esc((t.date||'').slice(0,10))}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.vendor||'')}">${esc(t.vendor||'')}</td>
+      <td style="text-align:right;font-weight:600" class="${(t.amount||0)>=0?'pos':'neg'}">$${amt}</td>
+      <td style="font-size:.72rem;color:var(--muted)">${esc(t.source||'')}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">&#10003; No unmatched transactions!</td></tr>`;
+
+  const docBody = document.getElementById('recon-doc-body');
+  docBody.innerHTML = docs.length ? docs.map(d=>{
+    const amt = Math.abs(d.amount||0).toFixed(2);
+    const purl = (typeof PAPERLESS_WEB_URL !== 'undefined' && PAPERLESS_WEB_URL && d.paperless_doc_id)
+      ? `<a href="${PAPERLESS_WEB_URL}/documents/${d.paperless_doc_id}/preview/" target="_blank" onclick="event.stopPropagation()" style="color:#1a3c5e">&#128196;</a>` : '';
+    return `<tr data-id="${d.id}" style="cursor:pointer" onclick="selectReconDoc(${d.id},this)">
+      <td style="white-space:nowrap">${esc((d.date||'').slice(0,10))}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.vendor||'')}">${esc(d.vendor||'')}</td>
+      <td style="text-align:right;font-weight:600">$${amt}</td>
+      <td>${purl}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">&#10003; No orphan documents!</td></tr>`;
+}
+
+function selectReconTxn(id, row) {
+  _reconSelectedTxn = id;
+  document.querySelectorAll('#recon-txn-body tr').forEach(r => r.style.background = '');
+  row.style.background = '#fff4e6';
+  document.getElementById('recon-link-btn').disabled = !(_reconSelectedTxn && _reconSelectedDoc);
+}
+
+function selectReconDoc(id, row) {
+  _reconSelectedDoc = id;
+  document.querySelectorAll('#recon-doc-body tr').forEach(r => r.style.background = '');
+  row.style.background = '#f0e7ff';
+  document.getElementById('recon-link-btn').disabled = !(_reconSelectedTxn && _reconSelectedDoc);
+}
+
+function updateAuditThreshold() {
+  // Only refresh if reconcile view is active (fast — single fetch)
+  if (document.getElementById('txn-reconcile-view')?.style.display !== 'none') {
+    loadReconcile();
+  }
+}
+
+async function manualLinkSelected() {
+  if (!_reconSelectedTxn || !_reconSelectedDoc) return;
+  const status = document.getElementById('recon-link-status');
+  status.innerHTML = '<span style="color:var(--muted)">Linking…</span>';
+  const r = await post('/api/transactions/links/manual',
+                       {txn_id: _reconSelectedTxn, doc_id: _reconSelectedDoc});
+  if (r.status === 'created' || r.status === 'updated') {
+    status.innerHTML = `<span style="color:#28a745">&#10003; Linked (${r.status})</span>`;
+    toast('Link saved', 'success');
+    await loadReconcile();  // refresh both sides
+  } else {
+    status.innerHTML = `<span style="color:#d32f2f">&#10007; ${esc(r.error||'Link failed')}</span>`;
+  }
 }
 
 /* Transactions */
 let _txnTM = null;
+
+// Bulk selection state
+const _bulkSelection = new Set();
+
+function toggleTxnRow(id, cb) {
+  if (cb.checked) _bulkSelection.add(id); else _bulkSelection.delete(id);
+  updateBulkBar();
+}
+
+function toggleAllTxns(cb) {
+  const visibleCbs = document.querySelectorAll('.txn-row-check');
+  visibleCbs.forEach(rc => {
+    rc.checked = cb.checked;
+    const id = parseInt(rc.dataset.id);
+    if (cb.checked) _bulkSelection.add(id); else _bulkSelection.delete(id);
+  });
+  updateBulkBar();
+}
+
+function clearBulkSelection() {
+  _bulkSelection.clear();
+  document.querySelectorAll('.txn-row-check').forEach(rc => rc.checked = false);
+  const sa = document.getElementById('txn-select-all');
+  if (sa) sa.checked = false;
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('txn-bulk-bar');
+  if (!bar) return;
+  const n = _bulkSelection.size;
+  bar.style.display = n > 0 ? '' : 'none';
+  const countEl = document.getElementById('txn-bulk-count');
+  if (countEl) countEl.textContent = n;
+}
+
+async function applyBulkUpdate() {
+  const n = _bulkSelection.size;
+  if (!n) return;
+  const changes = {};
+  const cat = document.getElementById('bulk-category').value;
+  const eid = document.getElementById('bulk-entity').value;
+  const yr  = document.getElementById('bulk-year').value;
+  const dt  = document.getElementById('bulk-doctype').value.trim();
+  if (cat) changes.category = cat;
+  if (eid !== '') changes.entity_id = eid === '_clear' ? null : parseInt(eid);
+  if (yr) changes.tax_year = yr;
+  if (dt) changes.doc_type = dt;
+  if (!Object.keys(changes).length) { alert('Pick at least one field to change.'); return; }
+  if (!confirm(`Apply changes to ${n} transaction${n===1?'':'s'}?\n${JSON.stringify(changes,null,2)}`)) return;
+  const r = await post('/api/transactions/bulk', {
+    action: 'update',
+    ids: Array.from(_bulkSelection),
+    changes: changes,
+  });
+  if (r.status === 'updated') {
+    toast(`Updated ${r.count} transaction${r.count===1?'':'s'}`, 'success');
+    clearBulkSelection();
+    // Reset inputs
+    document.getElementById('bulk-category').value = '';
+    document.getElementById('bulk-entity').value = '';
+    document.getElementById('bulk-year').value = '';
+    document.getElementById('bulk-doctype').value = '';
+    loadTxns();
+  } else {
+    alert(r.error || 'Bulk update failed');
+  }
+}
+
+async function applyBulkDelete() {
+  const n = _bulkSelection.size;
+  if (!n) return;
+  if (!confirm(`Permanently delete ${n} transaction${n===1?'':'s'}? This cannot be undone.`)) return;
+  const r = await post('/api/transactions/bulk', {
+    action: 'delete',
+    ids: Array.from(_bulkSelection),
+  });
+  if (r.status === 'deleted') {
+    toast(`Deleted ${r.count} transaction${r.count===1?'':'s'}`, 'success');
+    clearBulkSelection();
+    loadTxns();
+  } else {
+    alert(r.error || 'Bulk delete failed');
+  }
+}
 
 async function loadTxns() {
   const p = new URLSearchParams({limit:500});
@@ -273,6 +509,7 @@ async function loadTxns() {
   } else if (sumRow) { sumRow.innerHTML=''; }
 
   const cols = [
+    {key:'_select',     label:'<input type="checkbox" id="txn-select-all" onclick="toggleAllTxns(this)" title="Select all visible">', sortable:false, filterable:false},
     {key:'date',        label:'Date',        type:'date', sortable:true, filterable:true},
     {key:'description', label:'Description', type:'str',  sortable:true, filterable:true},
     {key:'vendor',      label:'Vendor',      type:'str',  sortable:true, filterable:true},
@@ -297,7 +534,9 @@ async function loadTxns() {
     } else {
       srcCell = esc(t.source||'');
     }
+    const checked = _bulkSelection.has(t.id) ? 'checked' : '';
     return `<tr>
+      <td style="width:28px;padding:0 4px"><input type="checkbox" class="txn-row-check" data-id="${t.id}" ${checked} onclick="toggleTxnRow(${t.id},this)"></td>
       <td>${t.date||''}</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.description||'')}">${esc(t.description||'')}</td>
       <td>${esc(t.vendor||'')}</td>
@@ -306,7 +545,12 @@ async function loadTxns() {
       <td><a href="#" onclick="event.preventDefault();jumpToEntity(${t.entity_id})" style="color:var(--navy);text-decoration:none">${esc(t.entity_name||'')}</a></td>
       <td>${t.tax_year||''}</td>
       <td style="text-align:right;font-weight:600" class="${(t.amount||0)>=0?'pos':'neg'}">$${fmt(Math.abs(t.amount||0))}</td>
-      <td><button class="btn btn-sm btn-outline" onclick="editTxn(${t.id})">Edit</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-outline" onclick="editTxn(${t.id})">Edit</button>
+        ${t.link_count > 0
+          ? `<button class="btn btn-sm" style="margin-left:4px;background:#e8f4fd;color:#1a3c5e;border:1px solid #b8d4ed" title="${t.link_count} linked document(s)" onclick="showTxnLinks(${t.id},this)">&#128279; ${t.link_count}</button>`
+          : ''}
+      </td>
     </tr>`;
   };
 
@@ -318,25 +562,99 @@ async function loadTxns() {
     _txnTM = new TableManager({tableId:'txn-table', data:txns, columns:cols, renderRow});
   }
   document.getElementById('txnInfo').textContent = txns.length ? `${txns.length} of ${d.total} loaded` : '';
+  updateBulkBar();
 }
 
 function filterTxns() {
   // Legacy: now handled by TableManager filter row. No-op kept for compatibility.
 }
 
-function openAddTxn() { document.getElementById('nt-date').value=new Date().toISOString().slice(0,10); document.getElementById('mAddTxn').classList.add('open'); }
+async function runDedupScan() {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  btn.textContent = '⏳ Scanning…';
+  const r = await fetch(P+'/api/transactions/dedup/scan', {method:'POST'})
+              .then(res=>res.json()).catch(()=>({error:'Request failed'}));
+  btn.disabled = false;
+  btn.innerHTML = '&#128279; Link Scan';
+  if (r.error) { toast('Scan failed: '+r.error, 'error'); return; }
+  toast(`Links: ${r.links_created} new, ${r.links_updated} updated (${r.scanned} txns scanned)`, 'success');
+  loadTxns();
+}
+
+async function showTxnLinks(txnId, btn) {
+  const r = await fetch(P+'/api/transactions/'+txnId+'/links').then(res=>res.json()).catch(()=>({links:[]}));
+  const links = r.links || [];
+  if (!links.length) { toast('No linked documents found.', 'info'); return; }
+  let html = `<div style="font-weight:600;margin-bottom:8px">Linked Documents (${links.length})</div>`;
+  links.forEach(l => {
+    const purl = PAPERLESS_WEB_URL && l.paperless_doc_id
+      ? `<a href="${PAPERLESS_WEB_URL}/documents/${l.paperless_doc_id}/preview/" target="_blank" style="color:#1a3c5e">&#128196; View</a>`
+      : '';
+    html += `<div style="border:1px solid #e0e4ea;border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:.82rem">
+      <span style="font-weight:600">${esc(l.vendor||'')}</span>
+      <span style="color:var(--muted);margin:0 8px">|</span>
+      $${Math.abs(l.amount||0).toFixed(2)}
+      <span style="color:var(--muted);margin:0 8px">|</span>
+      ${l.date||''}
+      <span style="color:var(--muted);margin:0 8px">|</span>
+      <span style="color:#6f42c1">${Math.round((l.confidence||0)*100)}% confidence</span>
+      <span style="margin-left:8px">${purl}</span>
+    </div>`;
+  });
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 4px 24px rgba(0,0,0,.2)">
+    ${html}
+    <button class="btn btn-outline" style="margin-top:12px" onclick="this.closest('[style*=fixed]').remove()">Close</button>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function openAddTxn() {
+  document.getElementById('nt-date').value = new Date().toISOString().slice(0,10);
+  ['nt-amt','nt-desc','nt-vendor'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  const rec = document.getElementById('nt-receipt'); if (rec) rec.value = '';
+  document.getElementById('mAddTxn').classList.add('open');
+}
 
 async function saveTxn() {
+  const btn = document.getElementById('nt-save-btn');
+  if (btn) btn.disabled = true;
   const r = await post('/api/transactions',{
     date:document.getElementById('nt-date').value,
     amount:parseFloat(document.getElementById('nt-amt').value)||0,
     description:document.getElementById('nt-desc').value,
+    vendor:document.getElementById('nt-vendor')?.value || '',
     entity_id:parseInt(document.getElementById('nt-ent').value)||null,
     year:document.getElementById('nt-year').value,
     category:document.getElementById('nt-cat').value
   });
-  if(r?.status==='created'){closeM('mAddTxn');toast('Saved.','success');loadTxns();}
-  else toast('Error: '+(r?.error||'unknown'),'error');
+  if (r?.status !== 'created') {
+    if (btn) btn.disabled = false;
+    toast('Error: '+(r?.error||'unknown'),'error');
+    return;
+  }
+  // Optional receipt attachment
+  const fileInput = document.getElementById('nt-receipt');
+  const file = fileInput?.files?.[0];
+  if (file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const attachR = await fetch(P+'/api/transactions/'+r.id+'/attach', {method:'POST', body:fd})
+      .then(res => res.json()).catch(() => ({error:'upload failed'}));
+    if (attachR.status === 'attached') {
+      toast(`Saved + receipt linked (${attachR.bytes.toLocaleString()}B)`, 'success');
+    } else {
+      toast('Transaction saved, but receipt failed: '+(attachR.error||'unknown'), 'error');
+    }
+  } else {
+    toast('Saved.', 'success');
+  }
+  if (btn) btn.disabled = false;
+  closeM('mAddTxn');
+  loadTxns();
 }
 
 function editTxn(id){toast('Edit #'+id+' (coming soon)');}
@@ -349,6 +667,89 @@ function paperlessDocUrl(docId) {
 }
 let _docView = 'table';
 let _docTM = null;
+
+// Document bulk selection
+const _docBulkSelection = new Set();
+
+function toggleDocRow(id, cb) {
+  if (cb.checked) _docBulkSelection.add(id); else _docBulkSelection.delete(id);
+  updateDocBulkBar();
+}
+
+function toggleAllDocs(cb) {
+  document.querySelectorAll('.doc-row-check').forEach(rc => {
+    rc.checked = cb.checked;
+    const id = parseInt(rc.dataset.id);
+    if (cb.checked) _docBulkSelection.add(id); else _docBulkSelection.delete(id);
+  });
+  updateDocBulkBar();
+}
+
+function clearDocBulkSelection() {
+  _docBulkSelection.clear();
+  document.querySelectorAll('.doc-row-check').forEach(rc => rc.checked = false);
+  const sa = document.getElementById('doc-select-all');
+  if (sa) sa.checked = false;
+  updateDocBulkBar();
+}
+
+function updateDocBulkBar() {
+  const bar = document.getElementById('doc-bulk-bar');
+  if (!bar) return;
+  const n = _docBulkSelection.size;
+  bar.style.display = n > 0 ? '' : 'none';
+  const countEl = document.getElementById('doc-bulk-count');
+  if (countEl) countEl.textContent = n;
+}
+
+async function applyDocBulkUpdate() {
+  const n = _docBulkSelection.size;
+  if (!n) return;
+  const changes = {};
+  const cat = document.getElementById('doc-bulk-category').value;
+  const eid = document.getElementById('doc-bulk-entity').value;
+  const yr  = document.getElementById('doc-bulk-year').value;
+  const dt  = document.getElementById('doc-bulk-doctype').value.trim();
+  const dupSel = document.getElementById('doc-bulk-dup').value;
+  if (cat) changes.category = cat;
+  if (eid !== '') changes.entity_id = eid === '_clear' ? null : parseInt(eid);
+  if (yr) changes.tax_year = yr;
+  if (dt) changes.doc_type = dt;
+  if (dupSel !== '') changes.is_duplicate = dupSel === '1';
+  if (!Object.keys(changes).length) { alert('Pick at least one field to change.'); return; }
+  if (!confirm(`Apply changes to ${n} document${n===1?'':'s'}?\n${JSON.stringify(changes,null,2)}`)) return;
+  const r = await post('/api/documents/bulk', {
+    action: 'update', ids: Array.from(_docBulkSelection), changes: changes,
+  });
+  if (r.status === 'updated') {
+    toast(`Updated ${r.count} document${r.count===1?'':'s'}`, 'success');
+    clearDocBulkSelection();
+    document.getElementById('doc-bulk-category').value = '';
+    document.getElementById('doc-bulk-entity').value = '';
+    document.getElementById('doc-bulk-year').value = '';
+    document.getElementById('doc-bulk-doctype').value = '';
+    document.getElementById('doc-bulk-dup').value = '';
+    docReload();
+  } else {
+    alert(r.error || 'Bulk update failed');
+  }
+}
+
+async function applyDocBulkDelete() {
+  const n = _docBulkSelection.size;
+  if (!n) return;
+  if (!confirm(`Permanently delete ${n} document record${n===1?'':'s'}? Their links will be removed.`)) return;
+  const r = await post('/api/documents/bulk', {
+    action: 'delete', ids: Array.from(_docBulkSelection),
+  });
+  if (r.status === 'deleted') {
+    toast(`Deleted ${r.count} document record${r.count===1?'':'s'}`, 'success');
+    clearDocBulkSelection();
+    docReload();
+  } else {
+    alert(r.error || 'Bulk delete failed');
+  }
+}
 
 function docSetView(v) {
   _docView = v;
@@ -374,6 +775,7 @@ async function loadDocs() {
   const docs = d.documents || [];
 
   const cols = [
+    {key:'_select',          label:'<input type="checkbox" id="doc-select-all" onclick="toggleAllDocs(this)" title="Select all visible">', sortable:false, filterable:false},
     {key:'paperless_doc_id', label:'ID',       type:'num',  sortable:true,  filterable:false},
     {key:'title',            label:'Title',     type:'str',  sortable:true,  filterable:true},
     {key:'doc_type',         label:'Type',      type:'str',  sortable:true,  filterable:true},
@@ -392,7 +794,9 @@ async function loadDocs() {
     const plUrl = paperlessDocUrl(docId);
     const rowClick = plUrl ? `onclick="window.open('${plUrl}','_blank')" style="cursor:pointer"` : '';
     const stopProp = `onclick="event.stopPropagation()"`;
+    const checked = _docBulkSelection.has(doc.id) ? 'checked' : '';
     return `<tr ${rowClick}>
+      <td style="width:28px;padding:0 4px" onclick="event.stopPropagation()"><input type="checkbox" class="doc-row-check" data-id="${doc.id}" ${checked} onclick="toggleDocRow(${doc.id},this)"></td>
       <td>${docId||'—'}</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(doc.title||'')}">
         ${esc(doc.title||'Untitled')}
@@ -419,6 +823,7 @@ async function loadDocs() {
     wrap.innerHTML = '<table id="doc-table"></table>';
     _docTM = new TableManager({tableId:'doc-table', data:docs, columns:cols, renderRow});
   }
+  updateDocBulkBar();
 }
 
 async function backfillTitles() {
@@ -1541,6 +1946,43 @@ async function loadSettings() {
   updateModelDropdown(s.llm_model || '');
   const m={'llm_api_key':'s-key','paperless_url':'s-purl','paperless_token':'s-ptok','smtp_host':'s-smh','smtp_port':'s-smp','smtp_user':'s-smu','smtp_pass':'s-smw','smtp_from':'s-smf','s3_bucket':'s-s3b','s3_region':'s-s3r','s3_access_key':'s-s3a','s3_secret_key':'s-s3s'};
   for(const [k,id] of Object.entries(m)){const el=document.getElementById(id);if(el&&s[k]!=null)el.value=s[k];}
+  loadAccountantToken();
+}
+
+async function loadAccountantToken() {
+  const st = document.getElementById('acct-portal-status');
+  const urlBox = document.getElementById('acct-portal-url');
+  const openBtn = document.getElementById('acct-portal-open');
+  if (!st) return;
+  const r = await fetch(P+'/api/accountant/token').then(r=>r.json()).catch(()=>({}));
+  if (r.token) {
+    st.innerHTML = '<span style="color:#28a745">&#10003; Portal active — link ready to share</span>';
+    urlBox.style.display = 'block';
+    urlBox.textContent = r.url;
+    openBtn.style.display = 'inline-block';
+    openBtn.href = r.url;
+  } else {
+    st.innerHTML = '<span style="color:var(--muted)">No portal link generated yet</span>';
+    urlBox.style.display = 'none';
+    openBtn.style.display = 'none';
+  }
+}
+
+async function generateAccountantToken() {
+  const r = await post('/api/accountant/token', {action:'generate'});
+  if (r && r.token) {
+    toast('Accountant portal link generated', 'success');
+    loadAccountantToken();
+  } else {
+    toast('Failed to generate link', 'error');
+  }
+}
+
+async function clearAccountantToken() {
+  if (!confirm('Revoke the current accountant portal link? Anyone holding it will lose access.')) return;
+  await post('/api/accountant/token', {action:'clear'});
+  toast('Accountant portal link revoked', 'success');
+  loadAccountantToken();
 }
 async function saveSettings() {
   const r = await post('/api/settings',{'llm_provider':document.getElementById('s-prov').value,'llm_model':document.getElementById('s-model').value,'llm_api_key':document.getElementById('s-key').value,'paperless_url':document.getElementById('s-purl').value,'paperless_token':document.getElementById('s-ptok').value,'smtp_host':document.getElementById('s-smh').value,'smtp_port':document.getElementById('s-smp').value,'smtp_user':document.getElementById('s-smu').value,'smtp_pass':document.getElementById('s-smw').value,'smtp_from':document.getElementById('s-smf').value,'s3_bucket':document.getElementById('s-s3b').value,'s3_region':document.getElementById('s-s3r').value,'s3_access_key':document.getElementById('s-s3a').value,'s3_secret_key':document.getElementById('s-s3s').value});
@@ -2332,3 +2774,1100 @@ class TableManager {
 })();
 </script>
 
+
+<script>
+// ── Capital One, US Bank, Merrick Bank, Chime, SimpleFIN importers ─────────────
+(function() {
+  // Generic log poller factory — shared by all new importers
+  function makePoller(prefix, mfaBoxId) {
+    var jobId = null, offset = 0, timer = null;
+    return {
+      start: function(jid) {
+        jobId = jid; offset = 0;
+        document.getElementById(prefix+'-log-panel').style.display = '';
+        document.getElementById(prefix+'-log-lines').innerHTML = '';
+        document.getElementById(prefix+'-log-status').textContent = 'running';
+        document.getElementById(prefix+'-start-btn').disabled = true;
+        this.poll();
+      },
+      poll: function() {
+        var self = this;
+        if (!jobId) return;
+        fetch(P + '/api/import/jobs/' + jobId + '/logs?offset=' + offset)
+          .then(function(r){ return r.json(); })
+          .then(function(data) {
+            if (data.lines && data.lines.length) {
+              var box = document.getElementById(prefix+'-log-lines');
+              data.lines.forEach(function(line) {
+                var div = document.createElement('div');
+                div.textContent = line;
+                if (line.toLowerCase().includes('mfa') || line.toLowerCase().includes('verification')) {
+                  div.style.color = '#ffc107';
+                  if (mfaBoxId) document.getElementById(mfaBoxId).style.display = '';
+                }
+                box.appendChild(div);
+              });
+              box.scrollTop = box.scrollHeight;
+              offset = data.total;
+            }
+            fetch(P + '/api/import/jobs/' + jobId)
+              .then(function(r){ return r.json(); })
+              .then(function(job) {
+                var done = job.status === 'completed' || job.status === 'error';
+                document.getElementById(prefix+'-log-status').textContent = job.status || 'running';
+                if (done) {
+                  document.getElementById(prefix+'-start-btn').disabled = false;
+                  if (mfaBoxId) document.getElementById(mfaBoxId).style.display = 'none';
+                  loadJobs();
+                } else {
+                  timer = setTimeout(function(){ self.poll(); }, 2500);
+                }
+              }).catch(function(){ timer = setTimeout(function(){ self.poll(); }, 5000); });
+          }).catch(function(){ timer = setTimeout(function(){ self.poll(); }, 5000); });
+      },
+      getJobId: function() { return jobId; }
+    };
+  }
+
+  // Generic credential + cookie helpers
+  function makeBankHelpers(bank, prefix, statusId, cookieStatusId, cookieResultId) {
+    return {
+      saveCreds: async function() {
+        var u = document.getElementById(prefix+'-username').value.trim();
+        var p = document.getElementById(prefix+'-password').value.trim();
+        if (!u || !p) { alert('Enter both username and password.'); return; }
+        var r = await post('/api/import/'+bank+'/credentials', {username:u, password:p});
+        if (r.status === 'saved') {
+          document.getElementById(statusId).innerHTML = '<span style="color:#4caf50">&#10003; Credentials saved</span>';
+          document.getElementById(prefix+'-password').value = '';
+        } else { alert(r.error || 'Save failed.'); }
+      },
+      loadStatus: async function() {
+        var r = await fetch(P+'/api/import/'+bank+'/status').then(function(r){return r.json();}).catch(function(){return {};});
+        var badge = document.getElementById(statusId);
+        if (!badge) return;
+        badge.innerHTML = r.configured
+          ? '<span style="color:#4caf50">&#10003; Credentials configured (' + (r.username_preview||'') + ')</span>'
+          : '<span style="color:#f57c00">&#9888; No credentials saved</span>';
+        var ck = document.getElementById(cookieStatusId);
+        if (ck) {
+          ck.innerHTML = r.cookies_saved
+            ? '<span style="color:#4caf50">&#10003; '+r.cookies_count+' cookies saved — cookie auth active</span>'
+            : '<span style="color:var(--muted)">No cookies — using credential login</span>';
+        }
+      },
+      saveCookies: async function(inputId) {
+        var raw = document.getElementById(inputId).value.trim();
+        if (!raw) { alert('Paste your cookies JSON first.'); return; }
+        var res = document.getElementById(cookieResultId);
+        res.innerHTML = '<span style="color:var(--muted)">Saving…</span>';
+        var r = await post('/api/import/'+bank+'/cookies', {cookies:raw});
+        if (r.status === 'saved') {
+          res.innerHTML = '<span style="color:#4caf50">&#10003; '+esc(r.message)+'</span>';
+          document.getElementById(inputId).value = '';
+          this.loadStatus();
+        } else {
+          res.innerHTML = '<span style="color:#d32f2f">&#10007; '+esc(r.error||'Failed')+'</span>';
+        }
+      },
+      clearCookies: async function() {
+        if (!confirm('Clear saved cookies?')) return;
+        await fetch(P+'/api/import/'+bank+'/cookies', {method:'DELETE'}).then(function(r){return r.json();}).catch(function(){});
+        document.getElementById(cookieStatusId).innerHTML = '<span style="color:var(--muted)">Cookies cleared</span>';
+        document.getElementById(cookieResultId).innerHTML = '';
+        this.loadStatus();
+      }
+    };
+  }
+
+  // ── Capital One ──
+  var _coPoller = makePoller('co', 'co-mfa-box');
+  var _coHelper = makeBankHelpers('capitalone', 'co', 'co-status-badge', 'co-cookie-status', 'co-cookie-result');
+
+  window.saveCoOneCreds = function() { _coHelper.saveCreds(); };
+  window.loadCoStatus   = function() { _coHelper.loadStatus(); };
+  window.saveCoCookies  = function() { _coHelper.saveCookies('co-cookies-input'); };
+  window.clearCoCookies = function() { _coHelper.clearCookies(); };
+
+  window.startCoOneImport = async function() {
+    var yrs = (document.getElementById('co-years-input').value||'').split(/[\s,]+/).filter(Boolean);
+    var eid = document.getElementById('co-entity').value;
+    if (!yrs.length) { alert('Enter at least one year.'); return; }
+    var r = await post('/api/import/capitalone/start', {entity_id:eid||null, years:yrs});
+    if (r.error) { alert(r.error); return; }
+    _coPoller.start(r.job_id);
+    toast('Capital One import started. Job #'+r.job_id, 'success');
+  };
+
+  window.submitCoMfa = async function() {
+    var code = document.getElementById('co-mfa-code').value.trim();
+    var jid  = _coPoller.getJobId();
+    if (!code || !jid) return;
+    var r = await post('/api/import/capitalone/mfa', {job_id:jid, code:code});
+    if (r.status === 'ok') {
+      document.getElementById('co-mfa-code').value = '';
+      document.getElementById('co-mfa-box').style.display = 'none';
+    } else { alert(r.error || 'Failed to submit MFA.'); }
+  };
+
+  // ── US Bank ──
+  var _usbPoller = makePoller('usb', 'usb-mfa-box');
+  var _usbHelper = makeBankHelpers('usbank', 'usb', 'usb-status-badge', 'usb-cookie-status', 'usb-cookie-result');
+
+  window.saveUsbCreds   = function() { _usbHelper.saveCreds(); };
+  window.loadUsbStatus  = function() { _usbHelper.loadStatus(); };
+  window.saveUsbCookies = function() { _usbHelper.saveCookies('usb-cookies-input'); };
+  window.clearUsbCookies= function() { _usbHelper.clearCookies(); };
+
+  window.startUsbImport = async function() {
+    var yrs = (document.getElementById('usb-years-input').value||'').split(/[\s,]+/).filter(Boolean);
+    var eid = document.getElementById('usb-entity').value;
+    if (!yrs.length) { alert('Enter at least one year.'); return; }
+    var r = await post('/api/import/usbank/start', {entity_id:eid||null, years:yrs});
+    if (r.error) { alert(r.error); return; }
+    _usbPoller.start(r.job_id);
+    toast('US Bank import started. Job #'+r.job_id, 'success');
+  };
+
+  window.submitUsbMfa = async function() {
+    var code = document.getElementById('usb-mfa-code').value.trim();
+    var jid  = _usbPoller.getJobId();
+    if (!code || !jid) return;
+    var r = await post('/api/import/usbank/mfa', {job_id:jid, code:code});
+    if (r.status === 'ok') {
+      document.getElementById('usb-mfa-code').value = '';
+      document.getElementById('usb-mfa-box').style.display = 'none';
+    } else { alert(r.error || 'Failed to submit MFA.'); }
+  };
+
+  // ── Merrick Bank ──
+  var _mrkPoller = makePoller('mrk', 'mrk-mfa-box');
+  var _mrkHelper = makeBankHelpers('merrick', 'mrk', 'mrk-status-badge', 'mrk-cookie-status', 'mrk-cookie-result');
+
+  window.saveMrkCreds   = function() { _mrkHelper.saveCreds(); };
+  window.loadMrkStatus  = function() { _mrkHelper.loadStatus(); };
+  window.saveMrkCookies = function() { _mrkHelper.saveCookies('mrk-cookies-input'); };
+  window.clearMrkCookies= function() { _mrkHelper.clearCookies(); };
+
+  window.startMrkImport = async function() {
+    var yrs = (document.getElementById('mrk-years-input').value||'').split(/[\s,]+/).filter(Boolean);
+    var eid = document.getElementById('mrk-entity').value;
+    if (!yrs.length) { alert('Enter at least one year.'); return; }
+    var r = await post('/api/import/merrick/start', {entity_id:eid||null, years:yrs});
+    if (r.error) { alert(r.error); return; }
+    _mrkPoller.start(r.job_id);
+    toast('Merrick Bank import started. Job #'+r.job_id, 'success');
+  };
+
+  window.submitMrkMfa = async function() {
+    var code = document.getElementById('mrk-mfa-code').value.trim();
+    var jid  = _mrkPoller.getJobId();
+    if (!code || !jid) return;
+    var r = await post('/api/import/merrick/mfa', {job_id:jid, code:code});
+    if (r.status === 'ok') {
+      document.getElementById('mrk-mfa-code').value = '';
+      document.getElementById('mrk-mfa-box').style.display = 'none';
+    } else { alert(r.error || 'Failed to submit MFA.'); }
+  };
+
+  // ── Chime Playwright importer ──
+  var _chmPoller = makePoller('chm', 'chm-mfa-box');
+  var _chmJobId = null;
+
+  window.chmSaveCreds = async function() {
+    var em = (document.getElementById('chm-email')||{}).value || '';
+    var pw = (document.getElementById('chm-password')||{}).value || '';
+    em = em.trim(); pw = pw.trim();
+    if (!em || !pw) { alert('Enter both email and password.'); return; }
+    var r = await post('/api/import/chime/credentials', {email:em, password:pw});
+    if (r.status === 'saved') {
+      document.getElementById('chm-status').innerHTML = '<span style="color:#4caf50">&#10003; Credentials saved</span>';
+      document.getElementById('chm-password').value = '';
+    } else { alert(r.error || 'Save failed.'); }
+  };
+  window.chmSaveCookies = async function() {
+    var raw = (document.getElementById('chm-cookies')||{}).value || '';
+    raw = raw.trim();
+    if (!raw) { alert('Paste cookies JSON first.'); return; }
+    var r = await post('/api/import/chime/cookies', {cookies:raw});
+    if (r.status === 'saved') {
+      toast(r.message, 'success');
+      document.getElementById('chm-cookies').value = '';
+      loadChimeStatus();
+    } else { alert(r.error || 'Failed.'); }
+  };
+  window.chmClearCookies = async function() {
+    if (!confirm('Clear saved Chime cookies?')) return;
+    await fetch(P+'/api/import/chime/cookies', {method:'DELETE'}).then(function(r){return r.json();}).catch(function(){});
+    loadChimeStatus();
+  };
+
+  window.loadChimeStatus = async function() {
+    var r = await fetch(P+'/api/import/chime/status').then(function(r){return r.json();}).catch(function(){return {};});
+    var el = document.getElementById('chm-status');
+    if (!el) return;
+    if (r.configured) {
+      el.innerHTML = '<span style="color:#4caf50">&#10003; Credentials saved ('+esc(r.email_preview)+')'
+        + (r.cookies_saved ? ' + '+r.cookies_count+' cookies' : '') + '</span>';
+    } else {
+      el.innerHTML = '<span style="color:#f57c00">&#9888; Enter Chime credentials below</span>';
+    }
+  };
+
+  window.chmSubmitMfa = async function() {
+    var code = document.getElementById('chm-mfa-code').value.trim();
+    if (!code || !_chmJobId) return;
+    await post('/api/import/chime/mfa', {job_id: _chmJobId, code: code});
+    document.getElementById('chm-mfa-code').value = '';
+    toast('MFA code submitted', 'success');
+  };
+
+  window.startChime = async function() {
+    var yrs = (document.getElementById('chm-years-input').value||'').split(/[\s,]+/).filter(Boolean);
+    var eid = document.getElementById('chm-entity').value;
+    if (!yrs.length) { alert('Enter at least one year.'); return; }
+    document.getElementById('chm-start-btn').disabled = true;
+    var r = await post('/api/import/chime/start', {entity_id:eid||null, years:yrs});
+    document.getElementById('chm-start-btn').disabled = false;
+    if (r.error) { alert(r.error); return; }
+    _chmJobId = r.job_id;
+    _chmPoller.start(r.job_id);
+    toast('Chime import started. Job #'+r.job_id, 'success');
+  };
+
+  // ── Verizon Playwright importer ──
+  var _vznPoller = makePoller('vzn', 'vzn-mfa-box');
+  var _vznJobId = null;
+
+  window.vznSaveCreds = async function() {
+    var u = (document.getElementById('vzn-username')||{}).value || '';
+    var pw = (document.getElementById('vzn-password')||{}).value || '';
+    u = u.trim(); pw = pw.trim();
+    if (!u || !pw) { alert('Enter both username and password.'); return; }
+    var r = await post('/api/import/verizon/credentials', {username:u, password:pw});
+    if (r.status === 'saved') {
+      document.getElementById('vzn-status').innerHTML = '<span style="color:#4caf50">&#10003; Credentials saved</span>';
+      document.getElementById('vzn-password').value = '';
+    } else { alert(r.error || 'Save failed.'); }
+  };
+  window.vznSaveCookies = async function() {
+    var raw = (document.getElementById('vzn-cookies')||{}).value || '';
+    raw = raw.trim();
+    if (!raw) { alert('Paste cookies JSON first.'); return; }
+    var r = await post('/api/import/verizon/cookies', {cookies:raw});
+    if (r.status === 'saved') {
+      toast(r.message, 'success');
+      document.getElementById('vzn-cookies').value = '';
+      loadVznStatus();
+    } else { alert(r.error || 'Failed.'); }
+  };
+  window.vznClearCookies = async function() {
+    if (!confirm('Clear saved Verizon cookies?')) return;
+    await fetch(P+'/api/import/verizon/cookies', {method:'DELETE'}).then(function(r){return r.json();}).catch(function(){});
+    loadVznStatus();
+  };
+
+  window.loadVznStatus = async function() {
+    var r = await fetch(P+'/api/import/verizon/status').then(function(r){return r.json();}).catch(function(){return {};});
+    var el = document.getElementById('vzn-status');
+    if (!el) return;
+    if (r.configured) {
+      el.innerHTML = '<span style="color:#4caf50">&#10003; Credentials saved ('+esc(r.username_preview)+')'
+        + (r.cookies_saved ? ' + '+r.cookies_count+' cookies' : '') + '</span>';
+    } else {
+      el.innerHTML = '<span style="color:#f57c00">&#9888; Enter My Verizon credentials below</span>';
+    }
+  };
+
+  window.vznSubmitMfa = async function() {
+    var code = document.getElementById('vzn-mfa-code').value.trim();
+    if (!code || !_vznJobId) return;
+    await post('/api/import/verizon/mfa', {job_id: _vznJobId, code: code});
+    document.getElementById('vzn-mfa-code').value = '';
+    toast('MFA submitted', 'success');
+  };
+
+  window.startVerizon = async function() {
+    var yrs = (document.getElementById('vzn-years-input').value||'').split(/[\s,]+/).filter(Boolean);
+    var eid = document.getElementById('vzn-entity').value;
+    if (!yrs.length) { alert('Enter at least one year.'); return; }
+    document.getElementById('vzn-start-btn').disabled = true;
+    var r = await post('/api/import/verizon/start', {entity_id:eid||null, years:yrs});
+    document.getElementById('vzn-start-btn').disabled = false;
+    if (r.error) { alert(r.error); return; }
+    _vznJobId = r.job_id;
+    _vznPoller.start(r.job_id);
+    toast('Verizon import started. Job #'+r.job_id, 'success');
+  };
+
+  // ── SimpleFIN Bridge ──
+  var _sfinPoller = makePoller('sfin', null);
+
+  window.loadSfinStatus = async function() {
+    var r = await fetch(P+'/api/import/simplefin/status').then(function(r){return r.json();}).catch(function(){return {};});
+    var badge = document.getElementById('sfin-status-badge');
+    if (!badge) return;
+    badge.innerHTML = r.connected
+      ? '<span style="color:#4caf50">&#10003; Connected — '+esc(r.preview||'SimpleFIN Bridge')+'</span>'
+      : '<span style="color:#f57c00">&#9888; Not connected — claim a token below</span>';
+    document.getElementById('sfin-start-btn').disabled = !r.connected;
+  };
+
+  window.claimSimpleFin = async function() {
+    var token = document.getElementById('sfin-token').value.trim();
+    if (!token) { alert('Paste your SimpleFIN setup URL or token first.'); return; }
+    var res = document.getElementById('sfin-claim-result');
+    res.innerHTML = '<span style="color:var(--muted)">Claiming token…</span>';
+    var r = await post('/api/import/simplefin/claim', {setup_url: token});
+    if (r.status === 'connected') {
+      res.innerHTML = '<span style="color:#4caf50">&#10003; '+esc(r.message)+'</span>';
+      document.getElementById('sfin-token').value = '';
+      loadSfinStatus();
+    } else {
+      res.innerHTML = '<span style="color:#d32f2f">&#10007; '+esc(r.error||'Claim failed')+'</span>';
+    }
+  };
+
+  window.startSfinImport = async function() {
+    var yrs = (document.getElementById('sfin-years-input').value||'').split(/[\s,]+/).filter(Boolean);
+    var eid = document.getElementById('sfin-entity').value;
+    var filterRaw = (document.getElementById('sfin-account-filter').value||'').trim();
+    var acctFilter = filterRaw ? filterRaw.split(/[\s,]+/).filter(Boolean) : null;
+    if (!yrs.length) { alert('Enter at least one year.'); return; }
+    var r = await post('/api/import/simplefin/start', {entity_id:eid||null, years:yrs, account_filter:acctFilter});
+    if (r.error) { alert(r.error); return; }
+    _sfinPoller.start(r.job_id);
+    toast('SimpleFIN pull started. Job #'+r.job_id, 'success');
+  };
+
+  // ── IMAP ──
+  var _imapPoller = makePoller('imap', null);
+  var _imapProviders = {};
+
+  window.loadImapStatus = async function() {
+    var r = await fetch(P+'/api/import/imap/status').then(function(r){return r.json();}).catch(function(){return {};});
+    var badge = document.getElementById('imap-status-badge');
+    if (!badge) return;
+    if (r.configured) {
+      badge.innerHTML = '<span style="color:#4caf50">&#10003; Configured — '+esc(r.username||'')+' @ '+esc(r.host||'')+'</span>';
+    } else if (r.host || r.username) {
+      badge.innerHTML = '<span style="color:#f57c00">&#9888; Partial — save password to enable imports</span>';
+    } else {
+      badge.innerHTML = '<span style="color:var(--muted)">Not configured</span>';
+    }
+    // Pre-populate form
+    if (r.provider) document.getElementById('imap-provider').value = r.provider;
+    if (r.host)     document.getElementById('imap-host').value = r.host;
+    if (r.port)     document.getElementById('imap-port').value = r.port;
+    if (r.username) document.getElementById('imap-username').value = r.username;
+    if (r.folder)   document.getElementById('imap-folder').value = r.folder;
+    document.getElementById('imap-use-ssl').checked = (r.use_ssl !== false);
+    // Load providers for preset dropdown
+    if (!Object.keys(_imapProviders).length) {
+      try {
+        var pr = await fetch(P+'/api/import/imap/providers').then(function(r){return r.json();});
+        _imapProviders = pr.providers || {};
+      } catch(e) {}
+    }
+  };
+
+  window.imapApplyPreset = function() {
+    var prov = document.getElementById('imap-provider').value;
+    var preset = _imapProviders[prov];
+    if (preset && preset.host) {
+      document.getElementById('imap-host').value = preset.host;
+      document.getElementById('imap-port').value = preset.port;
+    }
+  };
+
+  window.imapSaveSettings = async function() {
+    var payload = {
+      provider: document.getElementById('imap-provider').value,
+      host:     document.getElementById('imap-host').value.trim(),
+      port:     parseInt(document.getElementById('imap-port').value) || 993,
+      username: document.getElementById('imap-username').value.trim(),
+      password: document.getElementById('imap-password').value,  // may be blank → keep existing
+      folder:   document.getElementById('imap-folder').value.trim() || 'INBOX',
+      use_ssl:  document.getElementById('imap-use-ssl').checked,
+    };
+    if (!payload.host || !payload.username) { alert('Host and username required.'); return; }
+    var r = await post('/api/import/imap/settings', payload);
+    if (r.status === 'saved') {
+      toast('IMAP settings saved' + (r.password_updated ? ' (password updated)' : ''), 'success');
+      document.getElementById('imap-password').value = '';
+      loadImapStatus();
+    } else {
+      alert(r.error || 'Save failed');
+    }
+  };
+
+  window.imapTestConnection = async function() {
+    var el = document.getElementById('imap-test-result');
+    el.innerHTML = '<span style="color:var(--muted)">Testing…</span>';
+    var r = await post('/api/import/imap/test', {});
+    if (r.ok) {
+      var folders = (r.folders || []).slice(0, 8).join(', ');
+      el.innerHTML = '<span style="color:#4caf50">&#10003; Connected</span>' +
+        (folders ? '<br><span style="font-size:.74rem;color:var(--muted)">folders: '+esc(folders)+(r.folders.length>8?'…':'')+'</span>' : '');
+    } else {
+      el.innerHTML = '<span style="color:#d32f2f">&#10007; ' + esc(r.error || 'failed') + '</span>';
+    }
+  };
+
+  window.startImapImport = async function() {
+    var yrs = (document.getElementById('imap-years').value||'').split(/[\s,]+/).filter(Boolean);
+    var eid = document.getElementById('imap-entity').value;
+    var terms = document.getElementById('imap-search-terms').value.trim();
+    if (!yrs.length) { alert('Enter at least one year.'); return; }
+    document.getElementById('imap-start-btn').disabled = true;
+    var r = await post('/api/import/imap/start', {
+      entity_id: eid || null,
+      years: yrs,
+      search_terms: terms || null,
+    });
+    document.getElementById('imap-start-btn').disabled = false;
+    if (r.error) { alert(r.error); return; }
+    _imapPoller.start(r.job_id);
+    toast('IMAP import started. Job #'+r.job_id, 'success');
+  };
+
+  // ── Plaid ──
+  var _plaidPoller = makePoller('plaid', null);
+
+  window.loadPlaidStatus = async function() {
+    var r = await fetch(P+'/api/import/plaid/status').then(function(r){return r.json();}).catch(function(){return {};});
+    var badge = document.getElementById('plaid-status-badge');
+    var list = document.getElementById('plaid-items-list');
+    if (!badge) return;
+    if (r.configured) {
+      badge.innerHTML = '<span style="color:#4caf50">&#10003; Configured ('+esc(r.env||'sandbox')+') · '+(r.item_count||0)+' bank'+(r.item_count===1?'':'s')+' connected</span>';
+      var envSel = document.getElementById('plaid-env'); if (envSel && r.env) envSel.value = r.env;
+    } else {
+      badge.innerHTML = '<span style="color:#f57c00">&#9888; Not configured — enter Plaid client_id + secret below</span>';
+    }
+    document.getElementById('plaid-connect-btn').disabled = !r.configured;
+    document.getElementById('plaid-sync-btn').disabled = !r.configured || !(r.items && r.items.length);
+    if (list) {
+      if (r.items && r.items.length) {
+        list.innerHTML = r.items.map(function(it){
+          var last = it.last_sync ? new Date(it.last_sync).toLocaleString() : 'never';
+          return '<div style="border:1px solid #e0e4ea;border-radius:6px;padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">'
+            + '<div><strong>'+esc(it.institution_name||it.item_id)+'</strong>'
+            + '<div style="font-size:.74rem;color:var(--muted)">last sync: '+esc(last)+' · status: '+esc(it.status)+'</div></div>'
+            + '<div style="display:flex;gap:6px">'
+            + '<button class="btn btn-sm btn-primary" onclick="syncOnePlaid(\''+esc(it.item_id)+'\')">Sync</button>'
+            + '<button class="btn btn-sm btn-outline" onclick="removePlaidItem(\''+esc(it.item_id)+'\')">&#128465;</button>'
+            + '</div></div>';
+        }).join('');
+      } else {
+        list.innerHTML = '<span style="color:var(--muted)">No banks connected yet.</span>';
+      }
+    }
+  };
+
+  window.savePlaidSettings = async function() {
+    var ci = (document.getElementById('plaid-client-id')||{}).value || '';
+    var sec = (document.getElementById('plaid-secret')||{}).value || '';
+    var env = (document.getElementById('plaid-env')||{}).value || 'sandbox';
+    if (!ci.trim() || !sec.trim()) { alert('Enter both client_id and secret.'); return; }
+    var r = await post('/api/import/plaid/settings', {client_id:ci.trim(), secret:sec.trim(), env:env});
+    if (r.status === 'saved') {
+      document.getElementById('plaid-secret').value = '';
+      toast('Plaid credentials saved ('+esc(env)+')', 'success');
+      loadPlaidStatus();
+    } else {
+      alert(r.error || 'Save failed');
+    }
+  };
+
+  window.openPlaidLink = async function() {
+    if (typeof Plaid === 'undefined') { alert('Plaid Link SDK not loaded. Reload the page.'); return; }
+    var msg = document.getElementById('plaid-connect-msg');
+    msg.textContent = 'Creating link token…';
+    var tok = await post('/api/import/plaid/link-token', {});
+    if (!tok.link_token) { msg.textContent = 'Error: '+(tok.error||'failed to create link token'); return; }
+    var entityId = document.getElementById('plaid-entity').value || null;
+    msg.textContent = 'Opening Plaid Link…';
+    var handler = Plaid.create({
+      token: tok.link_token,
+      onSuccess: async function(public_token, metadata) {
+        msg.textContent = 'Exchanging token…';
+        var r = await post('/api/import/plaid/exchange', {
+          public_token: public_token,
+          institution_id: (metadata.institution||{}).institution_id || null,
+          institution_name: (metadata.institution||{}).name || null,
+          entity_id: entityId ? parseInt(entityId) : null,
+        });
+        if (r.status === 'ok') {
+          msg.innerHTML = '<span style="color:#28a745">&#10003; Connected '+esc((r.item||{}).institution_name||'bank')+'</span>';
+          toast('Bank connected', 'success');
+          loadPlaidStatus();
+        } else {
+          msg.innerHTML = '<span style="color:#d32f2f">Error: '+esc(r.error||'exchange failed')+'</span>';
+        }
+      },
+      onExit: function(err, metadata) {
+        msg.textContent = err ? 'Plaid Link cancelled: '+(err.error_message||err.error_code||'') : '';
+      },
+    });
+    handler.open();
+  };
+
+  window.syncAllPlaid = async function() {
+    var entityId = document.getElementById('plaid-entity').value || null;
+    var r = await post('/api/import/plaid/start', {entity_id: entityId ? parseInt(entityId) : null});
+    if (r.status === 'started') {
+      _plaidPoller.start(r.job_id);
+      toast('Plaid sync started (job #'+r.job_id+')', 'success');
+    } else {
+      alert(r.error || 'Failed to start sync');
+    }
+  };
+
+  window.syncOnePlaid = async function(itemId) {
+    var r = await post('/api/import/plaid/start', {item_id: itemId});
+    if (r.status === 'started') {
+      _plaidPoller.start(r.job_id);
+      toast('Syncing item (job #'+r.job_id+')', 'success');
+    } else {
+      alert(r.error || 'Sync failed');
+    }
+  };
+
+  window.removePlaidItem = async function(itemId) {
+    if (!confirm('Disconnect this bank? Transactions already imported will be kept.')) return;
+    var r = await fetch(P+'/api/import/plaid/items/'+encodeURIComponent(itemId), {method:'DELETE'})
+              .then(function(r){return r.json();}).catch(function(){return {error:'request failed'};});
+    if (r.status === 'removed') {
+      toast('Disconnected', 'success');
+      loadPlaidStatus();
+    } else {
+      alert(r.error || 'Failed to disconnect');
+    }
+  };
+
+  // ── Status loading on tab switch ──
+  var _origImpTab2 = window.impTab;
+  window.impTab = function(name, btn) {
+    if (_origImpTab2) _origImpTab2(name, btn);
+    if (name === 'capitalone') loadCoStatus();
+    if (name === 'usbank')     loadUsbStatus();
+    if (name === 'merrick')    loadMrkStatus();
+    if (name === 'chime')      loadChimeStatus();
+    if (name === 'verizon')    loadVznStatus();
+    if (name === 'simplefin')  loadSfinStatus();
+    if (name === 'plaid')      loadPlaidStatus();
+    if (name === 'imap')       loadImapStatus();
+  };
+
+  // Also load status on page init for Import tab
+  var _origInitImport = window._initTabFns && window._initTabFns.import;
+  document.addEventListener('DOMContentLoaded', function() {
+    // If the import tab is initially active, pre-load statuses
+    if (document.getElementById('ip-capitalone')) loadCoStatus();
+    if (document.getElementById('sfin-status-badge')) loadSfinStatus();
+    if (document.getElementById('chm-status')) loadChimeStatus();
+    if (document.getElementById('vzn-status')) loadVznStatus();
+    if (document.getElementById('plaid-status-badge')) loadPlaidStatus();
+  });
+})();
+
+/* ───── Vendor merge ───── */
+const _vendorSelection = new Set();
+let _vendorData = [];  // cached for client-side filter
+
+async function loadVendors() {
+  _vendorSelection.clear();
+  updateVendorMergeBar();
+  const body = document.getElementById('vendor-body');
+  body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)"><div class="spinner"></div></td></tr>';
+
+  const p = new URLSearchParams();
+  const e = document.getElementById('tf-entity')?.value; if (e) p.set('entity_id', e);
+  const y = document.getElementById('tf-year')?.value;   if (y) p.set('year', y);
+  const search = document.getElementById('vendor-search')?.value.trim(); if (search) p.set('search', search);
+  p.set('group_by', document.getElementById('vendor-group-raw')?.checked ? 'raw' : 'normalized');
+
+  const r = await fetch(P+'/api/vendors?'+p).then(r=>r.json()).catch(()=>({vendors:[]}));
+  _vendorData = r.vendors || [];
+  renderVendorList();
+  document.getElementById('vendor-count-label').textContent =
+    `${_vendorData.length} unique vendor${_vendorData.length===1?'':'s'}`;
+}
+
+function renderVendorList() {
+  const body = document.getElementById('vendor-body');
+  const searchTerm = (document.getElementById('vendor-search')?.value || '').toLowerCase();
+  const isRaw = document.getElementById('vendor-group-raw')?.checked;
+  const filtered = searchTerm
+    ? _vendorData.filter(v => {
+        const name = (v.vendor_normalized || v.vendor || '').toLowerCase();
+        const raws = (v.raw_variants || v.vendor || '').toLowerCase();
+        return name.includes(searchTerm) || raws.includes(searchTerm);
+      })
+    : _vendorData;
+  if (!filtered.length) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">No vendors match.</td></tr>';
+    return;
+  }
+  body.innerHTML = filtered.map(v => {
+    // In raw-group mode we select by the exact 'vendor' string (one per row).
+    // In normalized-group mode we select all raw variants collapsing into that canonical.
+    const key = isRaw ? v.vendor : v.vendor_normalized;
+    const selectable = isRaw ? [v.vendor] : (v.raw_variants || v.vendor_normalized || '').split(',').filter(Boolean);
+    const selKey = JSON.stringify(selectable);
+    const checked = Array.from(_vendorSelection).some(s => s.key === key) ? 'checked' : '';
+    const canonical = v.vendor_normalized || v.vendor || '(blank)';
+    const variants = isRaw ? '' : (v.variant_count > 1 ? `${v.variant_count} variants: ${esc((v.raw_variants||'').slice(0,80))}${(v.raw_variants||'').length>80?'…':''}` : '');
+    const total = (v.total || 0).toLocaleString(undefined, {maximumFractionDigits:2});
+    return `<tr>
+      <td style="padding:0 4px"><input type="checkbox" class="vendor-check" data-key="${esc(key)}" data-from='${esc(selKey)}' ${checked} onclick="toggleVendorRow(this)"></td>
+      <td><strong>${esc(canonical)}</strong></td>
+      <td style="font-size:.78rem;color:var(--muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(v.raw_variants||'')}">${variants}</td>
+      <td style="text-align:right;font-weight:600">${v.count||0}</td>
+      <td style="text-align:right;font-weight:600">$${total}</td>
+      <td style="font-size:.78rem;color:var(--muted);white-space:nowrap">${esc((v.first_seen||'').slice(0,10))}</td>
+      <td style="font-size:.78rem;color:var(--muted);white-space:nowrap">${esc((v.last_seen||'').slice(0,10))}</td>
+      <td style="white-space:nowrap"><button class="btn btn-sm btn-outline" onclick="renameVendor('${esc(key).replace(/'/g,"\\'")}')">Rename</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function filterVendorList() { renderVendorList(); }
+
+function toggleVendorRow(cb) {
+  const key = cb.dataset.key;
+  let fromList = [];
+  try { fromList = JSON.parse(cb.dataset.from); } catch(e) { fromList = [key]; }
+  if (cb.checked) {
+    _vendorSelection.add(JSON.stringify({key, from: fromList}));
+    // dedupe by key (a toggle on different element with same key)
+  } else {
+    for (const s of Array.from(_vendorSelection)) {
+      try { if (JSON.parse(s).key === key) _vendorSelection.delete(s); } catch(e) {}
+    }
+  }
+  updateVendorMergeBar();
+}
+
+function toggleAllVendors(cb) {
+  const boxes = document.querySelectorAll('.vendor-check');
+  boxes.forEach(b => {
+    b.checked = cb.checked;
+    toggleVendorRow(b);
+  });
+}
+
+function clearVendorSelection() {
+  _vendorSelection.clear();
+  document.querySelectorAll('.vendor-check').forEach(b => b.checked = false);
+  const sa = document.getElementById('vendor-select-all');
+  if (sa) sa.checked = false;
+  document.getElementById('vendor-merge-target').value = '';
+  updateVendorMergeBar();
+}
+
+function updateVendorMergeBar() {
+  const bar = document.getElementById('vendor-merge-bar');
+  if (!bar) return;
+  const n = _vendorSelection.size;
+  bar.style.display = n > 0 ? '' : 'none';
+  const countEl = document.getElementById('vendor-select-count');
+  if (countEl) countEl.textContent = n;
+  // Suggestion: if exactly one vendor selected with variants, prefill merge target
+  if (n === 1) {
+    try {
+      const sel = JSON.parse(Array.from(_vendorSelection)[0]);
+      const target = document.getElementById('vendor-merge-target');
+      if (target && !target.value) target.value = sel.key;
+    } catch(e) {}
+  }
+}
+
+async function doVendorMerge() {
+  const to_vendor = document.getElementById('vendor-merge-target').value.trim();
+  if (!to_vendor) { alert('Enter a canonical vendor name to merge into.'); return; }
+  // Collect all from_vendors by flattening each selected group's raw variants
+  const fromVendors = [];
+  for (const s of _vendorSelection) {
+    try {
+      const obj = JSON.parse(s);
+      (obj.from || [obj.key]).forEach(v => fromVendors.push(v));
+    } catch(e) {}
+  }
+  const uniqueFrom = Array.from(new Set(fromVendors.filter(Boolean)));
+  if (!uniqueFrom.length) { alert('No source vendors selected.'); return; }
+  if (!confirm(`Merge ${uniqueFrom.length} vendor name${uniqueFrom.length===1?'':'s'} into "${to_vendor}"?\n\nThis rewrites the vendor column on all matching transactions.`)) return;
+  const r = await post('/api/vendors/merge', {
+    from_vendors: uniqueFrom,
+    to_vendor: to_vendor,
+    update_normalized: true,
+  });
+  if (r.status === 'merged') {
+    toast(`Merged ${r.count} transaction${r.count===1?'':'s'} into "${to_vendor}"`, 'success');
+    clearVendorSelection();
+    loadVendors();
+  } else if (r.status === 'noop') {
+    toast('No transactions matched the selected vendor names', 'info');
+  } else {
+    alert(r.error || 'Merge failed');
+  }
+}
+
+async function renameVendor(currentName) {
+  const newName = prompt(`Rename "${currentName}" to:`, currentName);
+  if (!newName || newName.trim() === currentName) return;
+  const r = await post('/api/vendors/rename', {
+    from_vendor: currentName,
+    to_vendor: newName.trim(),
+  });
+  if (r.status === 'renamed') {
+    toast(`Renamed ${r.count} transaction${r.count===1?'':'s'}`, 'success');
+    loadVendors();
+  } else {
+    alert(r.error || 'Rename failed');
+  }
+}
+
+/* ───── Year-over-Year report ───── */
+async function loadYoY() {
+  const yearsRaw = (document.getElementById('yoy-years')?.value || '').trim();
+  const years = yearsRaw.split(/[\s,]+/).filter(Boolean);
+  const entityId = document.getElementById('yoy-entity')?.value || '';
+  const resEl = document.getElementById('yoy-result');
+  if (years.length < 2) {
+    resEl.innerHTML = '<div class="empty" style="padding:30px;color:#d32f2f;text-align:center">Enter at least 2 years.</div>';
+    return;
+  }
+  resEl.innerHTML = '<div class="empty" style="padding:40px;color:var(--muted);text-align:center"><div class="spinner"></div></div>';
+  const p = new URLSearchParams({years: years.join(',')});
+  if (entityId) p.set('entity_id', entityId);
+  const r = await fetch(P+'/api/reports/yoy?'+p).then(r=>r.json()).catch(()=>({error:'request failed'}));
+  if (r.error) { resEl.innerHTML = `<div class="empty" style="padding:30px;color:#d32f2f;text-align:center">Error: ${esc(r.error)}</div>`; return; }
+
+  // Build a per-year summary table
+  const cs = 'background:#fff;border:1px solid #e0e4ea;border-radius:10px;padding:16px 20px';
+  const header = `<div style="display:grid;grid-template-columns:repeat(${r.per_year.length},1fr);gap:12px;margin-bottom:14px">`;
+  const cards = r.per_year.map(y => {
+    // Combined: take max per category to avoid double-counting when both sources report
+    const income = Math.max(y.transactions.income, y.documents.income);
+    const expense = Math.max(y.transactions.expense, y.documents.expense);
+    const totalCount = y.transactions.count + y.documents.count;
+    const net = income - expense;
+    return `<div style="${cs}">
+      <div style="font-size:1.1rem;font-weight:700;color:#1a3c5e;margin-bottom:10px">${esc(y.year)}</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="color:#28a745;font-size:.82rem">Income</span><span style="font-weight:700;color:#28a745">$${fmt(income)}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="color:#dc3545;font-size:.82rem">Expenses</span><span style="font-weight:700;color:#dc3545">$${fmt(expense)}</span></div>
+      <div style="display:flex;justify-content:space-between;border-top:1px solid #e0e4ea;padding-top:6px;margin-top:6px"><span style="font-size:.82rem;color:var(--muted)">Net</span><span style="font-weight:700;color:${net>=0?'#28a745':'#dc3545'}">${net<0?'-':''}$${fmt(Math.abs(net))}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:.74rem;color:var(--muted)"><span>${y.transactions.count} txns + ${y.documents.count} docs</span><span>${totalCount}</span></div>
+    </div>`;
+  }).join('');
+
+  // Deltas row
+  let deltasHtml = '';
+  if (r.deltas && r.deltas.length) {
+    deltasHtml = `<div style="background:#f8f9fb;border:1px solid #e0e4ea;border-radius:10px;padding:14px 18px;margin-bottom:14px">
+      <div style="font-weight:700;font-size:.9rem;color:#1a3c5e;margin-bottom:10px">Year-over-Year Change</div>
+      ${r.deltas.map(d => {
+        const pctFmt = (v) => v === null ? '—' : (v === Infinity ? '∞' : (v>=0?'+':'')+v+'%');
+        const incColor = d.income_change >= 0 ? '#28a745' : '#dc3545';
+        const expColor = d.expense_change >= 0 ? '#dc3545' : '#28a745';  // expense UP is red
+        return `<div style="display:flex;gap:20px;font-size:.85rem;margin-bottom:6px">
+          <span style="font-weight:600;color:#1a3c5e;min-width:140px">${esc(d.prev_year)} → ${esc(d.current_year)}</span>
+          <span>Income: <strong style="color:${incColor}">${d.income_change>=0?'+':''}$${fmt(Math.abs(d.income_change))}</strong> <span style="color:var(--muted)">(${pctFmt(d.income_change_pct)})</span></span>
+          <span>Expenses: <strong style="color:${expColor}">${d.expense_change>=0?'+':''}$${fmt(Math.abs(d.expense_change))}</strong> <span style="color:var(--muted)">(${pctFmt(d.expense_change_pct)})</span></span>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // Top expense vendors per year
+  const vendorCols = years.map(y => {
+    const list = (r.top_expense_vendors[y] || []).slice(0, 10);
+    return `<div style="${cs}">
+      <div style="font-weight:700;color:#1a3c5e;margin-bottom:10px;font-size:.95rem">${esc(y)} · Top Expenses</div>
+      ${list.length ? list.map((v,i) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:4px 0;border-bottom:1px solid #f0f2f5">
+        <span style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(v.vendor)}">${i+1}. ${esc(v.vendor)}</span>
+        <span style="font-weight:600;color:#dc3545">$${fmt(v.total)}</span>
+      </div>`).join('') : '<div style="font-size:.82rem;color:var(--muted)">No data</div>'}
+    </div>`;
+  }).join('');
+
+  resEl.innerHTML = `${header}${cards}</div>
+    ${deltasHtml}
+    <div style="display:grid;grid-template-columns:repeat(${years.length},1fr);gap:12px">${vendorCols}</div>`;
+}
+
+function downloadYoYCsv() {
+  const yearsRaw = (document.getElementById('yoy-years')?.value || '').trim();
+  const years = yearsRaw.split(/[\s,]+/).filter(Boolean);
+  const entityId = document.getElementById('yoy-entity')?.value || '';
+  if (years.length < 2) { alert('Enter at least 2 years.'); return; }
+  const p = new URLSearchParams({years: years.join(',')});
+  if (entityId) p.set('entity_id', entityId);
+  // Client-side CSV synthesis from the existing JSON endpoint — no new route needed
+  fetch(P+'/api/reports/yoy?'+p).then(r=>r.json()).then(data => {
+    if (data.error) { alert(data.error); return; }
+    const lines = ['year,income,expense,net,count'];
+    data.per_year.forEach(y => {
+      const d = y.transactions.count > 0 ? y.transactions : y.documents;
+      lines.push([y.year, d.income, d.expense, (d.income - d.expense).toFixed(2), d.count].join(','));
+    });
+    const csv = lines.join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `yoy_${years.join('_')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+/* ───── Mileage log ───── */
+async function loadMileage() {
+  const p = new URLSearchParams({limit:1000});
+  const e = document.getElementById('mf-entity')?.value; if(e) p.set('entity_id',e);
+  const y = document.getElementById('mf-year')?.value;   if(y) p.set('year',y);
+  if (document.getElementById('mf-business-only')?.checked) p.set('business_only','1');
+  const d = await fetch(P+'/api/mileage?'+p).then(r=>r.json()).catch(()=>({entries:[],summary:{}}));
+
+  // Summary cards
+  const s = d.summary || {};
+  const summaryEl = document.getElementById('mil-summary');
+  if (summaryEl) {
+    const total = (s.total_miles || 0).toFixed(1);
+    const biz   = (s.business_miles || 0).toFixed(1);
+    const pers  = (s.personal_miles || 0).toFixed(1);
+    const ded   = (s.deduction_amount || 0).toFixed(2);
+    const rate  = s.rate ? `$${s.rate.toFixed(3)}/mi` : 'IRS default';
+    const yr    = document.getElementById('mf-year')?.value || 'all years';
+    const cs = 'background:#fff;border:1px solid #e0e4ea;border-radius:10px;padding:14px 18px;text-align:center';
+    const ls = 'font-size:.72rem;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em';
+    const vs = 'font-size:1.4rem;font-weight:700';
+    summaryEl.innerHTML = `
+      <div style="${cs}"><div style="${ls}">Business Miles</div><div style="${vs};color:#28a745">${biz}</div></div>
+      <div style="${cs}"><div style="${ls}">Personal Miles</div><div style="${vs};color:#6c757d">${pers}</div></div>
+      <div style="${cs}"><div style="${ls}">Total Miles</div><div style="${vs}">${total}</div></div>
+      <div style="${cs}"><div style="${ls}">Deduction (${esc(yr)})</div><div style="${vs};color:#6f42c1">$${ded}</div></div>
+      <div style="${cs}"><div style="${ls}">Rate</div><div style="${vs};font-size:1rem;color:var(--muted)">${esc(rate)}</div></div>
+      <div style="${cs}"><div style="${ls}">Entries</div><div style="${vs}">${s.count || 0}</div></div>
+    `;
+  }
+
+  // Row list
+  const tbody = document.getElementById('mileage-body');
+  if (!tbody) return;
+  const rows = d.entries || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">No mileage logged yet. Click "+ Add Entry" to start.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const miles = parseFloat(r.miles || 0);
+    const rate  = parseFloat(r.rate_per_mile || 0);
+    const ded   = r.business ? (miles * rate).toFixed(2) : '—';
+    const route = (r.from_location || r.to_location)
+      ? `${esc(r.from_location || '?')} → ${esc(r.to_location || '?')}` : '';
+    return `<tr>
+      <td style="white-space:nowrap">${esc((r.date||'').slice(0,10))}</td>
+      <td style="text-align:right">${miles.toFixed(1)}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.purpose||'')}">${esc(r.purpose||'')}</td>
+      <td style="font-size:.78rem;color:var(--muted)">${route}</td>
+      <td>${esc(r.vehicle||'')}</td>
+      <td>${r.business ? '<span class="badge badge-income">business</span>' : '<span class="badge badge-other">personal</span>'}</td>
+      <td style="text-align:right;font-size:.78rem">$${rate.toFixed(3)}</td>
+      <td style="text-align:right;font-weight:600;color:${r.business?'#6f42c1':'#aaa'}">${r.business?'$'+ded:'—'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-outline" onclick="editMileage(${r.id})">Edit</button>
+        <button class="btn btn-sm btn-outline" onclick="deleteMileageEntry(${r.id})" style="color:#c0392b;border-color:#e6a8a1">&#128465;</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openMileageForm(entry) {
+  document.getElementById('mil-id').value = entry?.id || '';
+  document.getElementById('mil-form-title').textContent = entry ? 'Edit Mileage Entry' : 'Add Mileage Entry';
+  document.getElementById('mil-date').value = entry?.date?.slice(0,10) || new Date().toISOString().slice(0,10);
+  document.getElementById('mil-miles').value = entry?.miles ?? '';
+  document.getElementById('mil-entity').value = entry?.entity_id ?? '';
+  document.getElementById('mil-vehicle').value = entry?.vehicle || '';
+  document.getElementById('mil-purpose').value = entry?.purpose || '';
+  document.getElementById('mil-from').value = entry?.from_location || '';
+  document.getElementById('mil-to').value = entry?.to_location || '';
+  document.getElementById('mil-odo-start').value = entry?.odometer_start ?? '';
+  document.getElementById('mil-odo-end').value = entry?.odometer_end ?? '';
+  document.getElementById('mil-rate').value = entry?.rate_per_mile ?? '';
+  document.getElementById('mil-business').checked = entry ? !!entry.business : true;
+  document.getElementById('mil-notes').value = entry?.notes || '';
+  const modal = document.getElementById('mileage-modal');
+  modal.style.display = 'flex';
+}
+
+function closeMileageForm() {
+  document.getElementById('mileage-modal').style.display = 'none';
+}
+
+async function editMileage(id) {
+  const r = await fetch(P+'/api/mileage/'+id).then(r=>r.json()).catch(()=>null);
+  if (!r || r.error) { alert('Could not load entry'); return; }
+  openMileageForm(r);
+}
+
+async function saveMileageEntry() {
+  const id = document.getElementById('mil-id').value;
+  const payload = {
+    date: document.getElementById('mil-date').value,
+    miles: parseFloat(document.getElementById('mil-miles').value) || 0,
+    entity_id: document.getElementById('mil-entity').value || null,
+    vehicle: document.getElementById('mil-vehicle').value.trim(),
+    purpose: document.getElementById('mil-purpose').value.trim(),
+    from_location: document.getElementById('mil-from').value.trim(),
+    to_location: document.getElementById('mil-to').value.trim(),
+    odometer_start: document.getElementById('mil-odo-start').value || null,
+    odometer_end: document.getElementById('mil-odo-end').value || null,
+    rate_per_mile: document.getElementById('mil-rate').value || null,
+    business: document.getElementById('mil-business').checked,
+    notes: document.getElementById('mil-notes').value.trim(),
+  };
+  if (!payload.date || !payload.miles || payload.miles <= 0) {
+    alert('Date and a positive miles value are required.');
+    return;
+  }
+  const btn = document.getElementById('mil-save-btn');
+  btn.disabled = true;
+  let r;
+  if (id) {
+    r = await post('/api/mileage/'+id, payload);
+    if (r.updated) { toast('Entry updated', 'success'); closeMileageForm(); loadMileage(); }
+    else { alert(r.error || 'Update failed'); }
+  } else {
+    r = await post('/api/mileage', payload);
+    if (r.status === 'created') { toast('Entry added', 'success'); closeMileageForm(); loadMileage(); }
+    else { alert(r.error || 'Save failed'); }
+  }
+  btn.disabled = false;
+}
+
+async function deleteMileageEntry(id) {
+  if (!confirm('Delete this mileage entry?')) return;
+  const r = await fetch(P+'/api/mileage/'+id, {method:'DELETE'}).then(r=>r.json()).catch(()=>({}));
+  if (r.deleted) { toast('Entry deleted', 'success'); loadMileage(); }
+  else { alert(r.error || 'Delete failed'); }
+}
+
+function exportMileageCSV() {
+  const p = new URLSearchParams();
+  const e = document.getElementById('mf-entity')?.value; if(e) p.set('entity_id',e);
+  const y = document.getElementById('mf-year')?.value;   if(y) p.set('year',y);
+  window.location = P+'/api/mileage/export.csv' + (p.toString() ? '?'+p : '');
+}
+
+/* ───── Activity log filter view ───── */
+let _actOffset = 0;
+const _actPageSize = 100;
+let _actTotal = 0;
+let _actDebounceTimer = null;
+
+function debouncedLoadActivity() {
+  clearTimeout(_actDebounceTimer);
+  _actDebounceTimer = setTimeout(() => { _actOffset = 0; loadActivity(); }, 300);
+}
+
+async function loadActivity() {
+  await Promise.all([_ensureActionOptions(), _ensureUserOptions()]);
+  const p = new URLSearchParams();
+  const s = document.getElementById('act-search')?.value.trim();
+  const a = document.getElementById('act-action')?.value;
+  const u = document.getElementById('act-user')?.value;
+  const since = document.getElementById('act-since')?.value;
+  const until = document.getElementById('act-until')?.value;
+  if (s) p.set('search', s);
+  if (a) p.set('action', a);
+  if (u) p.set('user_id', u);
+  if (since) p.set('since', since);
+  if (until) p.set('until', until);
+  p.set('limit', _actPageSize);
+  p.set('offset', _actOffset);
+
+  const body = document.getElementById('act-body');
+  body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)"><div class="spinner"></div></td></tr>';
+
+  const r = await fetch(P+'/api/activity?'+p).then(r=>r.json()).catch(()=>({rows:[],total:0}));
+  // Endpoint returns a flat list if no filters; a {rows,total} if filtered
+  const rows = Array.isArray(r) ? r : (r.rows || []);
+  _actTotal = Array.isArray(r) ? rows.length : (r.total || 0);
+
+  const countEl = document.getElementById('act-count');
+  if (countEl) {
+    const from = _actOffset + (rows.length ? 1 : 0);
+    const to = _actOffset + rows.length;
+    countEl.textContent = `${from.toLocaleString()}–${to.toLocaleString()} of ${_actTotal.toLocaleString()}`;
+  }
+  const pageLabel = document.getElementById('act-page-label');
+  if (pageLabel) pageLabel.textContent = `Page ${Math.floor(_actOffset/_actPageSize)+1} of ${Math.max(1, Math.ceil(_actTotal/_actPageSize))}`;
+  const prevBtn = document.getElementById('act-prev-btn');
+  const nextBtn = document.getElementById('act-next-btn');
+  if (prevBtn) prevBtn.disabled = _actOffset === 0;
+  if (nextBtn) nextBtn.disabled = _actOffset + rows.length >= _actTotal;
+
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">No activity matches the filters.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(a => `<tr>
+    <td style="white-space:nowrap;font-size:.78rem;color:var(--muted)">${esc((a.created_at||'').slice(0,19).replace('T',' '))}</td>
+    <td style="white-space:nowrap"><span class="tag" style="font-size:.76rem">${esc(a.action||'')}</span></td>
+    <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis" title="${esc(a.detail||'')}">${esc(a.detail||'')}</td>
+    <td>${esc(a.username||'—')}</td>
+    <td>${esc(a.entity_name||'')}</td>
+  </tr>`).join('');
+}
+
+async function _ensureActionOptions() {
+  const sel = document.getElementById('act-action');
+  if (!sel || sel.dataset.loaded) return;
+  const opts = await fetch(P+'/api/activity/actions').then(r=>r.json()).catch(()=>[]);
+  (opts || []).forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.action;
+    opt.textContent = `${o.action} (${o.count.toLocaleString()})`;
+    sel.appendChild(opt);
+  });
+  sel.dataset.loaded = '1';
+}
+
+async function _ensureUserOptions() {
+  const sel = document.getElementById('act-user');
+  if (!sel || sel.dataset.loaded) return;
+  const users = await fetch(P+'/api/users').then(r=>r.json()).catch(()=>[]);
+  (users || []).forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u.id;
+    opt.textContent = u.username;
+    sel.appendChild(opt);
+  });
+  sel.dataset.loaded = '1';
+}
+
+function clearActivityFilters() {
+  ['act-search','act-action','act-user','act-since','act-until'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  _actOffset = 0;
+  loadActivity();
+}
+
+function actPagePrev() {
+  if (_actOffset === 0) return;
+  _actOffset = Math.max(0, _actOffset - _actPageSize);
+  loadActivity();
+}
+function actPageNext() {
+  if (_actOffset + _actPageSize >= _actTotal) return;
+  _actOffset += _actPageSize;
+  loadActivity();
+}
+</script>

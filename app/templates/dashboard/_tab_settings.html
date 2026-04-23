@@ -65,6 +65,20 @@
         <div class="form-group"><label>Secret Key</label><input id="s-s3s" class="form-control" type="password"></div>
       </div>
     </div>
+    <div class="stt-section">
+      <div class="stt-title">&#128203; Accountant Portal</div>
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
+        Generate a shareable read-only link for your accountant. They can view all documents and
+        transactions by entity and year without needing a login account.
+      </p>
+      <div id="acct-portal-status" style="font-size:.82rem;margin-bottom:10px;color:var(--muted)">Loading…</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn btn-primary btn-sm" onclick="generateAccountantToken()">&#128279; Generate Link</button>
+        <button class="btn btn-outline btn-sm" onclick="clearAccountantToken()">&#128465; Revoke</button>
+        <a id="acct-portal-open" href="#" target="_blank" style="display:none" class="btn btn-outline btn-sm">&#128203; Open Portal</a>
+      </div>
+      <div id="acct-portal-url" style="font-size:.78rem;font-family:monospace;word-break:break-all;background:#f8f9fb;border:1px solid #e0e4ea;border-radius:6px;padding:8px;display:none"></div>
+    </div>
   </div>
 </div>
 

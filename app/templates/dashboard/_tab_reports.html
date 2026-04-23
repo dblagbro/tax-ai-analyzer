@@ -14,6 +14,7 @@
         <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','csv')">CSV</button>
         <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','pdf')">PDF</button>
         <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','iif')">IIF</button>
+        <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','qbo')">QBO</button>
         <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','ofx')">OFX</button>
         <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','txf')">TXF</button>
         <button class="fmt-btn" onclick="dlExport('{{ y }}','{{ e.slug }}','json')">JSON</button>
@@ -21,6 +22,22 @@
       </div>
     </div>
     {% endfor %}{% endfor %}
+  </div>
+  <br>
+  <div class="card">
+    <div class="card-title">&#128200; Year-over-Year Comparison</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <label style="font-size:.84rem;color:var(--muted)">Entity:</label>
+      <select id="yoy-entity" class="form-control" style="width:auto;max-width:200px" onchange="loadYoY()">
+        <option value="">All Entities</option>
+        {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+      </select>
+      <label style="font-size:.84rem;color:var(--muted)">Years:</label>
+      <input id="yoy-years" type="text" class="form-control" style="width:180px" value="2023,2024,2025" placeholder="e.g. 2023,2024,2025">
+      <button class="btn btn-primary btn-sm" onclick="loadYoY()">Compare</button>
+      <button class="btn btn-outline btn-sm" onclick="downloadYoYCsv()" title="Download the data as CSV">&#128196; CSV</button>
+    </div>
+    <div id="yoy-result"><div class="empty" style="padding:40px;color:var(--muted);text-align:center">Pick years + click Compare to see trends.</div></div>
   </div>
   <br>
   <div class="card">

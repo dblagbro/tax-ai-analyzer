@@ -10,7 +10,7 @@
       Add Transaction
     </button>
   </div>
-  <!-- Quick sub-tabs: All / Income / Expenses / Deductions -->
+  <!-- Quick sub-tabs: All / Income / Expenses / Deductions / Unmatched -->
   <div class="imp-tabs" style="margin-bottom:16px">
     <button id="txn-sub-all" class="imp-tab active" onclick="txnSubTab('',this)">All Transactions</button>
     <button id="txn-sub-income" class="imp-tab" onclick="txnSubTab('income',this)">
@@ -22,31 +22,177 @@
     <button id="txn-sub-deduction" class="imp-tab" onclick="txnSubTab('deduction',this)">
       <span style="color:#6f42c1">&#10004;</span> Deductions
     </button>
+    <button id="txn-sub-unmatched" class="imp-tab" onclick="showReconcile(this)" title="Transactions with no receipt + documents with no bank record">
+      <span style="color:#f57c00">&#9888;</span> Unmatched
+    </button>
+    <button id="txn-sub-vendors" class="imp-tab" onclick="showVendors(this)" title="Clean up vendor names — merge duplicates into canonical form">
+      <span style="color:#6f42c1">&#127978;</span> Vendors
+    </button>
   </div>
   <!-- Summary row for the active filter -->
   <div id="txn-summary-row" style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap"></div>
   <div class="filter-bar">
-    <select id="tf-entity" class="form-control" onchange="loadTxns()">
+    <select id="tf-entity" class="form-control" onchange="refreshTxnView()">
       <option value="">All Entities</option>
       {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
     </select>
-    <select id="tf-year" class="form-control" onchange="loadTxns()">
+    <select id="tf-year" class="form-control" onchange="refreshTxnView()">
       <option value="">All Years</option>
       {% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}
     </select>
     <select id="tf-source" class="form-control" onchange="loadTxns()">
       <option value="">All Sources</option>
-      <option value="gmail">Gmail</option><option value="paypal">PayPal</option>
-      <option value="venmo">Venmo</option><option value="bank_csv">Bank CSV</option>
-      <option value="manual">Manual</option><option value="url">URL</option>
+      <option value="gmail">Gmail</option>
+      <option value="paypal">PayPal</option>
+      <option value="venmo">Venmo</option>
+      <option value="simplefin">SimpleFIN</option>
+      <option value="usbank">US Bank</option>
+      <option value="usalliance">US Alliance FCU</option>
+      <option value="capitalone">Capital One</option>
+      <option value="merrick">Merrick Bank</option>
+      <option value="chime">Chime</option>
+      <option value="verizon">Verizon</option>
+      <option value="bank_csv">Bank CSV</option>
+      <option value="ofx_import">OFX</option>
+      <option value="manual">Manual</option>
+      <option value="url">URL</option>
     </select>
     <input type="text" id="tf-search" class="form-control" placeholder="Search description, vendor…" oninput="filterTxns()">
+    <button class="btn btn-outline btn-sm" onclick="runDedupScan()" title="Match transactions to documents across sources" style="white-space:nowrap">&#128279; Link Scan</button>
   </div>
-  <div class="card">
+  <!-- Bulk action bar (appears when any rows are selected) -->
+  <div id="txn-bulk-bar" style="display:none;background:#fff8e1;border:1px solid #ffcc02;border-radius:8px;padding:10px 14px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <strong style="font-size:.88rem">&#9989; <span id="txn-bulk-count">0</span> selected</strong>
+      <select id="bulk-category" class="form-control" style="width:auto;max-width:140px">
+        <option value="">— Category —</option>
+        <option value="income">Income</option>
+        <option value="expense">Expense</option>
+        <option value="deduction">Deduction</option>
+        <option value="fee">Fee</option>
+        <option value="other">Other</option>
+      </select>
+      <select id="bulk-entity" class="form-control" style="width:auto;max-width:180px">
+        <option value="">— Entity —</option>
+        <option value="_clear">(clear)</option>
+        {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+      </select>
+      <input id="bulk-year" type="text" class="form-control" placeholder="— Year —" style="width:90px">
+      <input id="bulk-doctype" type="text" class="form-control" placeholder="— Doc type —" style="width:130px">
+      <button class="btn btn-primary btn-sm" onclick="applyBulkUpdate()">&#9989; Apply</button>
+      <button class="btn btn-outline btn-sm" onclick="applyBulkDelete()" style="color:#c0392b;border-color:#e6a8a1">&#128465; Delete</button>
+      <button class="btn btn-outline btn-sm" onclick="clearBulkSelection()">Cancel</button>
+    </div>
+  </div>
+
+  <div class="card" id="txn-main-card">
     <div class="tbl-wrap">
       <table id="txn-table"></table>
     </div>
     <div id="txnInfo" style="margin-top:10px;font-size:.82rem;color:var(--muted);text-align:center"></div>
+  </div>
+
+  <!-- Reconciliation view (hidden until "Unmatched" sub-tab activated) -->
+  <div id="txn-reconcile-view" style="display:none">
+    <!-- Audit-risk card (IRS ≥$75 no-receipt expenses) -->
+    <div id="audit-risk-card" style="background:linear-gradient(90deg,#fff4e6,#ffe8cc);border:1px solid #f5a742;border-radius:10px;padding:14px 18px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+      <div style="flex:1;min-width:200px">
+        <div style="font-weight:700;color:#c0621c;font-size:1rem">&#9888; Audit Risk — Missing Receipts</div>
+        <div style="font-size:.78rem;color:#555;margin-top:2px">IRS Pub 463 requires receipts for business expenses ≥ $<span id="audit-threshold-label">75</span></div>
+      </div>
+      <div style="text-align:center;min-width:100px">
+        <div style="font-size:1.6rem;font-weight:800;color:#c0621c" id="audit-count">—</div>
+        <div style="font-size:.72rem;text-transform:uppercase;color:#888;letter-spacing:.04em">transactions</div>
+      </div>
+      <div style="text-align:center;min-width:120px">
+        <div style="font-size:1.6rem;font-weight:800;color:#c0621c" id="audit-total">—</div>
+        <div style="font-size:.72rem;text-transform:uppercase;color:#888;letter-spacing:.04em">at risk</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;min-width:200px">
+        <label style="font-size:.78rem;color:#555;white-space:nowrap">Threshold $</label>
+        <input id="audit-threshold" type="number" min="0" step="5" value="75" onchange="updateAuditThreshold()" style="width:80px;padding:4px 6px;font-size:.85rem;border:1px solid #d4b996;border-radius:4px;background:#fff">
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div>
+            <div style="font-weight:700;color:#dc3545">&#9888; Unmatched Transactions</div>
+            <div style="font-size:.78rem;color:var(--muted)">Paid but no matching receipt/document</div>
+          </div>
+          <span id="recon-txn-count" class="badge badge-expense">0</span>
+        </div>
+        <div class="tbl-wrap" style="max-height:520px;overflow-y:auto">
+          <table id="recon-txn-table" style="font-size:.8rem;width:100%">
+            <thead><tr><th>Date</th><th>Vendor</th><th>Amount</th><th>Source</th></tr></thead>
+            <tbody id="recon-txn-body"><tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div>
+            <div style="font-weight:700;color:#6f42c1">&#128196; Orphan Documents</div>
+            <div style="font-size:.78rem;color:var(--muted)">Have receipt but no matching bank record</div>
+          </div>
+          <span id="recon-doc-count" class="badge" style="background:#e2d9f3;color:#4a235a">0</span>
+        </div>
+        <div class="tbl-wrap" style="max-height:520px;overflow-y:auto">
+          <table id="recon-doc-table" style="font-size:.8rem;width:100%">
+            <thead><tr><th>Date</th><th>Vendor</th><th>Amount</th><th>Doc</th></tr></thead>
+            <tbody id="recon-doc-body"><tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:14px;padding:12px;background:#f8f9fb;border:1px solid #e0e4ea;border-radius:8px;font-size:.82rem;color:var(--muted)">
+      &#128161; To manually link a pair: click a transaction on the left, then a matching document on the right, then click
+      <button class="btn btn-primary btn-sm" onclick="manualLinkSelected()" id="recon-link-btn" disabled style="margin-left:6px">Link Selected</button>
+      <span id="recon-link-status" style="margin-left:10px"></span>
+    </div>
+  </div>
+
+  <!-- Vendor merge view (hidden until "Vendors" sub-tab activated) -->
+  <div id="txn-vendors-view" style="display:none">
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input id="vendor-search" type="text" placeholder="Search vendors…" class="form-control" style="flex:1;min-width:200px" oninput="filterVendorList()">
+        <label style="display:flex;align-items:center;gap:6px;font-size:.82rem">
+          <input id="vendor-group-raw" type="checkbox" onchange="loadVendors()"> Show raw vendor strings
+        </label>
+        <span id="vendor-count-label" style="font-size:.82rem;color:var(--muted)"></span>
+      </div>
+    </div>
+
+    <!-- Merge action bar -->
+    <div id="vendor-merge-bar" style="display:none;background:#e8f4fd;border:1px solid #b8d4ed;border-radius:8px;padding:10px 14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <strong style="font-size:.88rem">&#10003; <span id="vendor-select-count">0</span> selected</strong>
+        <span style="font-size:.82rem;color:var(--muted)">Merge into:</span>
+        <input id="vendor-merge-target" type="text" class="form-control" placeholder="Canonical name (e.g. Amazon)" style="flex:1;max-width:260px">
+        <button class="btn btn-primary btn-sm" onclick="doVendorMerge()">&#128260; Merge</button>
+        <button class="btn btn-outline btn-sm" onclick="clearVendorSelection()">Cancel</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tbl-wrap">
+        <table id="vendor-table" style="width:100%;font-size:.84rem">
+          <thead><tr>
+            <th style="width:32px;padding:0 4px"><input type="checkbox" id="vendor-select-all" onclick="toggleAllVendors(this)" title="Select all visible"></th>
+            <th>Canonical</th>
+            <th>Raw Variants</th>
+            <th style="text-align:right">Txns</th>
+            <th style="text-align:right">Total</th>
+            <th>First Seen</th>
+            <th>Last Seen</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="vendor-body"><tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 

@@ -44,6 +44,72 @@ def get_activity_log(limit: int = 50) -> list:
     return [dict(r) for r in rows]
 
 
+def search_activity(
+    action: str = None,
+    user_id: int = None,
+    entity_id: int = None,
+    search: str = None,
+    since: str = None,      # YYYY-MM-DD
+    until: str = None,      # YYYY-MM-DD (exclusive)
+    limit: int = 200,
+    offset: int = 0,
+) -> tuple[list, int]:
+    """Filtered activity log query. Returns (rows, total_count)."""
+    where: list[str] = []
+    params: list = []
+    if action:
+        where.append("a.action = ?")
+        params.append(action)
+    if user_id is not None:
+        where.append("a.user_id = ?")
+        params.append(user_id)
+    if entity_id is not None:
+        where.append("a.entity_id = ?")
+        params.append(entity_id)
+    if search:
+        where.append("(a.action LIKE ? OR a.detail LIKE ?)")
+        params.append(f"%{search}%")
+        params.append(f"%{search}%")
+    if since:
+        where.append("a.created_at >= ?")
+        params.append(since)
+    if until:
+        where.append("a.created_at < ?")
+        params.append(until)
+    w = "WHERE " + " AND ".join(where) if where else ""
+
+    conn = get_connection()
+    try:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM activity_log a {w}", tuple(params)
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"""SELECT a.*, u.username, e.name as entity_name
+                FROM activity_log a
+                LEFT JOIN users u ON u.id = a.user_id
+                LEFT JOIN entities e ON e.id = a.entity_id
+                {w}
+                ORDER BY a.created_at DESC
+                LIMIT ? OFFSET ?""",
+            (*params, limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows], total
+    finally:
+        conn.close()
+
+
+def distinct_activity_actions() -> list[str]:
+    """List all distinct action values (for filter dropdown)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT action, COUNT(*) n FROM activity_log GROUP BY action ORDER BY n DESC"
+        ).fetchall()
+        return [{"action": r["action"], "count": r["n"]} for r in rows]
+    finally:
+        conn.close()
+
+
 def ensure_default_data():
     from app.config import DEFAULT_ENTITIES, DEFAULT_TAX_YEARS
     from app.db.users import user_count, create_user

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Tax Organizer — Accountant Portal</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f6fa;color:#222;min-height:100vh}
+    .topbar{background:#1a3c5e;color:#fff;padding:14px 24px;display:flex;align-items:center;gap:16px}
+    .topbar h1{font-size:1.1rem;font-weight:700}
+    .badge{background:#e8f0f8;color:#1a3c5e;font-size:.78rem;padding:2px 8px;border-radius:12px;font-weight:600}
+    .container{max-width:860px;margin:0 auto;padding:32px 20px}
+    h2{font-size:1.3rem;margin-bottom:20px;color:#1a3c5e}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+    .card{background:#fff;border:1px solid #e0e4ea;border-radius:10px;padding:20px;text-decoration:none;color:#222;display:block;transition:box-shadow .15s}
+    .card:hover{box-shadow:0 2px 12px rgba(0,0,0,.1)}
+    .card-title{font-size:1rem;font-weight:700;margin-bottom:6px}
+    .card-sub{font-size:.82rem;color:#777}
+    .year-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .year-btn{background:#f0f4f8;border:1px solid #c5d0de;color:#1a3c5e;border-radius:6px;padding:4px 14px;font-size:.85rem;text-decoration:none;display:inline-block}
+    .year-btn:hover{background:#1a3c5e;color:#fff}
+    .note{font-size:.82rem;color:#888;margin-top:24px;padding:12px;background:#fff;border:1px solid #e0e4ea;border-radius:8px}
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <h1>&#128203; Tax Organizer — Accountant Portal</h1>
+  <span class="badge">Read Only</span>
+</div>
+<div class="container">
+  <h2>Select Entity &amp; Year</h2>
+  <div class="grid">
+    {% for entity in entities %}
+    <div class="card">
+      <div class="card-title" style="color:{{ entity.color or '#1a3c5e' }}">{{ entity.name }}</div>
+      <div class="card-sub">{{ entity.type or 'entity' }}</div>
+      <div class="year-list">
+        {% for y in years %}
+        <a class="year-btn" href="{{ url_prefix }}/accountant/{{ y }}/{{ entity.slug }}{% if token %}?token={{ token }}{% endif %}">{{ y }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if not entities %}
+  <p style="color:#888;margin-top:20px">No entities found.</p>
+  {% endif %}
+  <div class="note">
+    &#128274; This portal provides read-only access to tax documents and transaction summaries.
+    No editing or importing is available here.
+  </div>
+</div>
+</body>
+</html>

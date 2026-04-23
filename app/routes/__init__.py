@@ -12,9 +12,20 @@ def register_blueprints(app):
     from app.routes.import_jobs import bp as import_jobs_bp
     from app.routes.import_cloud import bp as import_cloud_bp
     from app.routes.import_gmail import bp as import_gmail_bp
+    from app.routes.import_imap import bp as import_imap_bp
     from app.routes.import_paypal import bp as import_paypal_bp
     from app.routes.import_usalliance import bp as import_usalliance_bp
     from app.routes.import_capitalone import bp as import_capitalone_bp
+    from app.routes.import_simplefin import bp as import_simplefin_bp
+    from app.routes.import_plaid import bp as import_plaid_bp
+    from app.routes.import_usbank import bp as import_usbank_bp
+    from app.routes.import_merrick import bp as import_merrick_bp
+    from app.routes.import_chime import bp as import_chime_bp
+    from app.routes.import_verizon import bp as import_verizon_bp
+    from app.routes.accountant import bp as accountant_bp
+    from app.routes.mileage import bp as mileage_bp
+    from app.routes.reports import bp as reports_bp
+    from app.routes.vendors import bp as vendors_bp
     from app.routes.export_ import bp as export_bp
     from app.routes.tax_review import bp as tax_review_bp
     from app.routes.settings import bp as settings_bp
@@ -35,9 +46,20 @@ def register_blueprints(app):
         import_jobs_bp,
         import_cloud_bp,
         import_gmail_bp,
+        import_imap_bp,
         import_paypal_bp,
         import_usalliance_bp,
         import_capitalone_bp,
+        import_simplefin_bp,
+        import_plaid_bp,
+        import_usbank_bp,
+        import_merrick_bp,
+        import_chime_bp,
+        import_verizon_bp,
+        accountant_bp,
+        mileage_bp,
+        reports_bp,
+        vendors_bp,
         export_bp,
         tax_review_bp,
         settings_bp,

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ entity.name }} — {{ year }} Tax Summary</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f6fa;color:#222;min-height:100vh}
+    .topbar{background:#1a3c5e;color:#fff;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    .topbar h1{font-size:1.1rem;font-weight:700}
+    .badge{background:#e8f0f8;color:#1a3c5e;font-size:.78rem;padding:2px 8px;border-radius:12px;font-weight:600}
+    .container{max-width:1080px;margin:0 auto;padding:24px 20px}
+    .section-title{font-size:1rem;font-weight:700;margin:24px 0 10px;display:flex;align-items:center;gap:8px}
+    .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px}
+    .stat-card{background:#fff;border:1px solid #e0e4ea;border-radius:10px;padding:16px 20px;text-align:center}
+    .stat-label{font-size:.78rem;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
+    .stat-value{font-size:1.5rem;font-weight:700}
+    .income-color{color:#28a745}
+    .expense-color{color:#dc3545}
+    .deduction-color{color:#6f42c1}
+    .neutral-color{color:#1a3c5e}
+    table{width:100%;border-collapse:collapse;font-size:.84rem}
+    th{background:#f8f9fb;border-bottom:2px solid #e0e4ea;padding:8px 10px;text-align:left;font-weight:600;color:#555}
+    td{padding:7px 10px;border-bottom:1px solid #f0f2f5;vertical-align:top}
+    tr:hover td{background:#fafbff}
+    .tbl-wrap{background:#fff;border:1px solid #e0e4ea;border-radius:10px;overflow:hidden;margin-bottom:24px}
+    .badge-cat{display:inline-block;font-size:.72rem;padding:2px 7px;border-radius:10px;font-weight:600;text-transform:capitalize}
+    .badge-income{background:#d4edda;color:#155724}
+    .badge-expense{background:#f8d7da;color:#721c24}
+    .badge-deduction{background:#e2d9f3;color:#4a235a}
+    .back-link{color:#e8f0f8;font-size:.84rem;text-decoration:none;opacity:.85}
+    .back-link:hover{opacity:1}
+    .doc-link{color:#1a3c5e;text-decoration:none;font-size:.8rem}
+    .doc-link:hover{text-decoration:underline}
+    .empty{color:#aaa;font-size:.85rem;padding:20px;text-align:center}
+    .section-toggle{cursor:pointer;user-select:none;font-size:.82rem;color:#888;margin-left:8px}
+    @media print{.topbar .back-link,.no-print{display:none}}
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <div>
+    <a class="back-link" href="{{ url_prefix }}/accountant{% if token %}?token={{ token }}{% endif %}">&#8592; Back</a>
+    <h1 style="display:inline;margin-left:16px">{{ entity.name }} — {{ year }} Tax Summary</h1>
+    <span class="badge" style="margin-left:12px">Read Only</span>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button onclick="window.print()" style="background:#e8f0f8;color:#1a3c5e;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:.84rem" class="no-print">&#128438; Print / PDF</button>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Summary cards -->
+  <div class="summary-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Income</div>
+      <div class="stat-value income-color">${{ "%.2f"|format(summary.income_total) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Expenses</div>
+      <div class="stat-value expense-color">${{ "%.2f"|format(summary.expense_total) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Deductions</div>
+      <div class="stat-value deduction-color">${{ "%.2f"|format(summary.deduction_total) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Net</div>
+      {% set net = summary.income_total - summary.expense_total %}
+      <div class="stat-value {{ 'income-color' if net >= 0 else 'expense-color' }}">${{ "%.2f"|format(net) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Documents</div>
+      <div class="stat-value neutral-color">{{ summary.doc_count }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Transactions</div>
+      <div class="stat-value neutral-color">{{ summary.txn_count }}</div>
+    </div>
+  </div>
+
+  <!-- Income documents -->
+  {% if income_docs %}
+  <div class="section-title">
+    <span style="color:#28a745">&#9650;</span> Income Documents ({{ income_docs|length }})
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Vendor / Source</th><th>Type</th><th>Amount</th><th>Document</th></tr></thead>
+      <tbody>
+      {% for d in income_docs|sort(attribute='date', reverse=True) %}
+      <tr>
+        <td>{{ d.date or '—' }}</td>
+        <td>{{ d.vendor or d.title or '—' }}</td>
+        <td>{{ d.doc_type or '—' }}</td>
+        <td style="font-weight:600;color:#28a745">${{ "%.2f"|format(d.amount or 0) }}</td>
+        <td>{% if paperless_url and d.paperless_doc_id %}<a class="doc-link" href="{{ paperless_url }}/documents/{{ d.paperless_doc_id }}/preview/" target="_blank">&#128196; View</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Expense documents -->
+  {% if expense_docs %}
+  <div class="section-title">
+    <span style="color:#dc3545">&#9660;</span> Expense Documents ({{ expense_docs|length }})
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Vendor / Source</th><th>Type</th><th>Amount</th><th>Document</th></tr></thead>
+      <tbody>
+      {% for d in expense_docs|sort(attribute='date', reverse=True) %}
+      <tr>
+        <td>{{ d.date or '—' }}</td>
+        <td>{{ d.vendor or d.title or '—' }}</td>
+        <td>{{ d.doc_type or '—' }}</td>
+        <td style="font-weight:600;color:#dc3545">${{ "%.2f"|format(d.amount or 0) }}</td>
+        <td>{% if paperless_url and d.paperless_doc_id %}<a class="doc-link" href="{{ paperless_url }}/documents/{{ d.paperless_doc_id }}/preview/" target="_blank">&#128196; View</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Deductions -->
+  {% if deduction_docs %}
+  <div class="section-title">
+    <span style="color:#6f42c1">&#10004;</span> Deductions ({{ deduction_docs|length }})
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Vendor / Source</th><th>Type</th><th>Amount</th><th>Document</th></tr></thead>
+      <tbody>
+      {% for d in deduction_docs|sort(attribute='date', reverse=True) %}
+      <tr>
+        <td>{{ d.date or '—' }}</td>
+        <td>{{ d.vendor or d.title or '—' }}</td>
+        <td>{{ d.doc_type or '—' }}</td>
+        <td style="font-weight:600;color:#6f42c1">${{ "%.2f"|format(d.amount or 0) }}</td>
+        <td>{% if paperless_url and d.paperless_doc_id %}<a class="doc-link" href="{{ paperless_url }}/documents/{{ d.paperless_doc_id }}/preview/" target="_blank">&#128196; View</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Bank transactions -->
+  {% if income_txns or expense_txns %}
+  <div class="section-title">&#127981; Bank &amp; Card Transactions</div>
+
+  {% if expense_txns %}
+  <div style="font-size:.85rem;font-weight:600;color:#dc3545;margin-bottom:6px">Expenses / Debits</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Description</th><th>Vendor</th><th>Source</th><th>Amount</th></tr></thead>
+      <tbody>
+      {% for t in expense_txns|sort(attribute='date', reverse=True) %}
+      <tr>
+        <td>{{ t.date or '—' }}</td>
+        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ t.description or '' }}">{{ t.description or '—' }}</td>
+        <td>{{ t.vendor or '—' }}</td>
+        <td style="font-size:.78rem;color:#888">{{ t.source or '—' }}</td>
+        <td style="font-weight:600;color:#dc3545">${{ "%.2f"|format((t.amount or 0)|abs) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if income_txns %}
+  <div style="font-size:.85rem;font-weight:600;color:#28a745;margin-bottom:6px">Income / Credits</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Description</th><th>Vendor</th><th>Source</th><th>Amount</th></tr></thead>
+      <tbody>
+      {% for t in income_txns|sort(attribute='date', reverse=True) %}
+      <tr>
+        <td>{{ t.date or '—' }}</td>
+        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ t.description or '' }}">{{ t.description or '—' }}</td>
+        <td>{{ t.vendor or '—' }}</td>
+        <td style="font-size:.78rem;color:#888">{{ t.source or '—' }}</td>
+        <td style="font-weight:600;color:#28a745">${{ "%.2f"|format((t.amount or 0)|abs) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% if not income_docs and not expense_docs and not deduction_docs and not income_txns and not expense_txns %}
+  <div class="empty">No documents or transactions found for {{ entity.name }} / {{ year }}.</div>
+  {% endif %}
+
+  <div style="font-size:.78rem;color:#aaa;margin-top:24px;text-align:center">
+    Generated {{ now }} · Tax Organizer Accountant Portal · Read Only
+  </div>
+</div>
+</body>
+</html>

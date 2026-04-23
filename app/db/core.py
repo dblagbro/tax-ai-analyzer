@@ -285,3 +285,67 @@ def _migrate(conn):
     if "created_at" not in ij_cols:
         conn.execute("ALTER TABLE import_jobs ADD COLUMN created_at TEXT DEFAULT NULL")
         conn.commit()
+
+    # transaction_links — cross-source event matching
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS transaction_links (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            txn_id      INTEGER REFERENCES transactions(id) ON DELETE CASCADE,
+            doc_id      INTEGER REFERENCES analyzed_documents(id) ON DELETE CASCADE,
+            link_type   TEXT NOT NULL DEFAULT 'match',
+            confidence  REAL NOT NULL DEFAULT 0.0,
+            created_at  TEXT DEFAULT (datetime('now')),
+            UNIQUE(txn_id, doc_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_txnlinks_txn ON transaction_links(txn_id);
+        CREATE INDEX IF NOT EXISTS idx_txnlinks_doc ON transaction_links(doc_id);
+
+        CREATE TABLE IF NOT EXISTS plaid_items (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id          TEXT UNIQUE NOT NULL,
+            institution_id   TEXT,
+            institution_name TEXT,
+            access_token     TEXT NOT NULL,
+            cursor           TEXT DEFAULT '',
+            entity_id        INTEGER REFERENCES entities(id),
+            last_sync        TEXT,
+            status           TEXT DEFAULT 'active',
+            created_at       TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_plaid_item_id ON plaid_items(item_id);
+
+        CREATE TABLE IF NOT EXISTS mileage_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_id       INTEGER REFERENCES entities(id),
+            tax_year        TEXT,
+            date            TEXT NOT NULL,
+            miles           REAL NOT NULL,
+            purpose         TEXT DEFAULT '',
+            from_location   TEXT DEFAULT '',
+            to_location     TEXT DEFAULT '',
+            business        INTEGER DEFAULT 1,
+            vehicle         TEXT DEFAULT '',
+            odometer_start  REAL,
+            odometer_end    REAL,
+            notes           TEXT DEFAULT '',
+            rate_per_mile   REAL,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_mileage_entity ON mileage_log(entity_id);
+        CREATE INDEX IF NOT EXISTS idx_mileage_year ON mileage_log(tax_year);
+        CREATE INDEX IF NOT EXISTS idx_mileage_date ON mileage_log(date);
+    """)
+    conn.commit()
+
+    # vendor_normalized on transactions for fuzzy matching
+    txn_cols = {r[1] for r in conn.execute("PRAGMA table_info(transactions)").fetchall()}
+    if "vendor_normalized" not in txn_cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN vendor_normalized TEXT DEFAULT ''")
+        conn.commit()
+
+    # cross_source_duplicate on analyzed_documents
+    if "cross_source_duplicate" not in ad_cols:
+        conn.execute(
+            "ALTER TABLE analyzed_documents ADD COLUMN cross_source_duplicate INTEGER DEFAULT 0"
+        )
+        conn.commit()

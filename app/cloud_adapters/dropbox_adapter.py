@@ -306,3 +306,91 @@ def _ext_to_mime(ext: str) -> str:
         ".csv":  "text/csv",
     }
     return _map.get(ext, "application/octet-stream")
+
+
+# ── Module-level convenience API (used by routes/import_cloud.py) ──────────────
+
+_adapter: Optional["DropboxAdapter"] = None
+
+
+def _get_adapter() -> "DropboxAdapter":
+    global _adapter
+    if _adapter is None:
+        _adapter = DropboxAdapter()
+    return _adapter
+
+
+def is_authenticated() -> bool:
+    return _get_adapter().is_authenticated()
+
+
+def get_auth_url(redirect_uri: str) -> str:
+    return _get_adapter().get_auth_url(redirect_uri)
+
+
+def handle_callback(args) -> bool:
+    from flask import session as flask_session
+    code = args.get("code", "") if hasattr(args, "get") else args["code"]
+    redirect_uri = flask_session.get("dropbox_redirect_uri") or \
+                   flask_session.get("oauth_redirect_uri", "")
+    return _get_adapter().complete_auth(code, redirect_uri)
+
+
+def list_files(folder_id: str = "", page_size: int = 100) -> list[dict]:
+    """List Dropbox files under folder_id (empty = root). Returns JSON-safe dicts."""
+    path = folder_id or ""  # Dropbox uses paths rather than IDs
+    files = _get_adapter().list_files(folder=path, page_size=page_size)
+    out = []
+    for f in files:
+        out.append({
+            "id": getattr(f, "id", None) or getattr(f, "path", None),
+            "name": getattr(f, "name", ""),
+            "mime_type": getattr(f, "mime_type", ""),
+            "size": getattr(f, "size", 0),
+            "modified": getattr(f, "modified", ""),
+        })
+    return out
+
+
+def import_files(file_paths: list[str], entity_id: Optional[int] = None,
+                 log_fn=None) -> int:
+    """Download each Dropbox path to CONSUME_PATH so Paperless ingests it.
+
+    Returns the number of files successfully written.
+    """
+    import os
+    import re as _re
+    from app.config import CONSUME_PATH
+
+    _log = log_fn or logger.info
+    adapter = _get_adapter()
+
+    from app import db
+    entity_slug = "personal"
+    if entity_id:
+        ent = db.get_entity(entity_id=entity_id)
+        if ent:
+            entity_slug = ent.get("slug") or "personal"
+
+    dest_dir = os.path.join(CONSUME_PATH, entity_slug, "dropbox")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    written = 0
+    for path in file_paths:
+        try:
+            data, name = adapter.download_file(path)
+            if not data:
+                _log(f"  skip (empty): {path}")
+                continue
+            safe_name = _re.sub(r"[^A-Za-z0-9._\- ]", "_", name or os.path.basename(path))[:200]
+            dest_path = os.path.join(dest_dir, safe_name)
+            if os.path.exists(dest_path):
+                base, ext = os.path.splitext(safe_name)
+                dest_path = os.path.join(dest_dir, f"{base}_{secrets.token_hex(3)}{ext}")
+            with open(dest_path, "wb") as f:
+                f.write(data)
+            _log(f"  wrote {os.path.basename(dest_path)} ({len(data):,}B)")
+            written += 1
+        except Exception as e:
+            _log(f"  error downloading {path}: {e}")
+    return written

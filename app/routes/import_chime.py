@@ -1,4 +1,4 @@
-"""Capital One import routes."""
+"""Chime import routes — Playwright-based automation."""
 import json
 import logging
 import threading
@@ -12,26 +12,25 @@ from app.config import URL_PREFIX, CONSUME_PATH
 from app.routes._state import _job_logs, append_job_log
 
 logger = logging.getLogger(__name__)
+bp = Blueprint("import_chime", __name__)
 
-bp = Blueprint("import_capitalone", __name__)
 
-
-@bp.route(URL_PREFIX + "/api/import/capitalone/credentials", methods=["POST"])
+@bp.route(URL_PREFIX + "/api/import/chime/credentials", methods=["POST"])
 @login_required
-def api_capitalone_save_credentials():
+def api_chime_save_credentials():
     data = request.get_json() or {}
-    username = data.get("username", "").strip()
+    email = data.get("email", "").strip()
     password = data.get("password", "").strip()
-    if not username or not password:
-        return jsonify({"error": "username and password required"}), 400
-    db.set_setting("capitalone_username", username)
-    db.set_setting("capitalone_password", password)
+    if not email or not password:
+        return jsonify({"error": "email and password required"}), 400
+    db.set_setting("chime_email", email)
+    db.set_setting("chime_password", password)
     return jsonify({"status": "saved", "message": "Credentials saved."})
 
 
-@bp.route(URL_PREFIX + "/api/import/capitalone/cookies", methods=["POST"])
+@bp.route(URL_PREFIX + "/api/import/chime/cookies", methods=["POST"])
 @login_required
-def api_capitalone_save_cookies():
+def api_chime_save_cookies():
     data = request.get_json() or {}
     cookies_raw = data.get("cookies")
     if not cookies_raw:
@@ -40,30 +39,30 @@ def api_capitalone_save_cookies():
         try:
             cookies_list = json.loads(cookies_raw)
         except Exception:
-            return jsonify({"error": "cookies must be a valid JSON array"}), 400
+            return jsonify({"error": "cookies must be valid JSON array"}), 400
     elif isinstance(cookies_raw, list):
         cookies_list = cookies_raw
     else:
         return jsonify({"error": "cookies must be a JSON array"}), 400
     if not isinstance(cookies_list, list) or not cookies_list:
         return jsonify({"error": "cookies must be a non-empty JSON array"}), 400
-    db.set_setting("capitalone_cookies", json.dumps(cookies_list))
+    db.set_setting("chime_cookies", json.dumps(cookies_list))
     return jsonify({"status": "saved", "message": f"{len(cookies_list)} cookies saved.",
                     "count": len(cookies_list)})
 
 
-@bp.route(URL_PREFIX + "/api/import/capitalone/cookies", methods=["DELETE"])
+@bp.route(URL_PREFIX + "/api/import/chime/cookies", methods=["DELETE"])
 @login_required
-def api_capitalone_clear_cookies():
-    db.set_setting("capitalone_cookies", "")
+def api_chime_clear_cookies():
+    db.set_setting("chime_cookies", "")
     return jsonify({"status": "cleared"})
 
 
-@bp.route(URL_PREFIX + "/api/import/capitalone/status", methods=["GET"])
+@bp.route(URL_PREFIX + "/api/import/chime/status", methods=["GET"])
 @login_required
-def api_capitalone_status():
-    user = db.get_setting("capitalone_username") or ""
-    cookies_raw = db.get_setting("capitalone_cookies") or ""
+def api_chime_status():
+    email = db.get_setting("chime_email") or ""
+    cookies_raw = db.get_setting("chime_cookies") or ""
     cookies_count = 0
     if cookies_raw:
         try:
@@ -71,42 +70,42 @@ def api_capitalone_status():
         except Exception:
             pass
     return jsonify({
-        "configured": bool(user),
-        "username_preview": (user[:3] + "…") if len(user) > 3 else user,
+        "configured": bool(email),
+        "email_preview": (email[:3] + "…") if len(email) > 3 else email,
         "cookies_saved": cookies_count > 0,
         "cookies_count": cookies_count,
     })
 
 
-@bp.route(URL_PREFIX + "/api/import/capitalone/mfa", methods=["POST"])
+@bp.route(URL_PREFIX + "/api/import/chime/mfa", methods=["POST"])
 @login_required
-def api_capitalone_mfa():
+def api_chime_mfa():
     data = request.get_json() or {}
     job_id = data.get("job_id")
     code = data.get("code", "").strip()
     if not job_id or not code:
         return jsonify({"error": "job_id and code required"}), 400
-    from app.importers.capitalone_importer import set_mfa_code
+    from app.importers.chime_importer import set_mfa_code
     set_mfa_code(int(job_id), code)
     return jsonify({"status": "ok"})
 
 
-@bp.route(URL_PREFIX + "/api/import/capitalone/start", methods=["POST"])
+@bp.route(URL_PREFIX + "/api/import/chime/start", methods=["POST"])
 @login_required
-def api_import_capitalone_start():
+def api_import_chime_start():
     data = request.get_json() or {}
     entity_id = data.get("entity_id") or None
     years = data.get("years") or ["2022", "2023", "2024", "2025"]
     if isinstance(years, str):
         years = [y.strip() for y in years.split(",") if y.strip()]
 
-    username = db.get_setting("capitalone_username")
-    password = db.get_setting("capitalone_password")
-    if not username or not password:
-        return jsonify({"error": "Capital One credentials not configured."}), 400
+    email = db.get_setting("chime_email")
+    password = db.get_setting("chime_password")
+    if not email or not password:
+        return jsonify({"error": "Chime credentials not configured."}), 400
 
     cookies = None
-    cookies_raw = db.get_setting("capitalone_cookies") or ""
+    cookies_raw = db.get_setting("chime_cookies") or ""
     if cookies_raw:
         try:
             cookies = json.loads(cookies_raw)
@@ -120,19 +119,19 @@ def api_import_capitalone_start():
             entity_slug = ent.get("slug", "personal")
 
     job_id = db.create_import_job(
-        "capitalone", entity_id=entity_id,
+        "chime", entity_id=entity_id,
         config_json=json.dumps({"years": years, "cookie_auth": cookies is not None}),
     )
     _job_logs[job_id] = []
 
-    def _run(jid, uname, pw, yrs, eid, eslug, ckies):
+    def _run(jid, em, pw, yrs, eid, eslug, ckies):
         log = lambda msg: append_job_log(jid, msg)
         db.update_import_job(jid, status="running",
                              started_at=datetime.utcnow().isoformat())
         try:
-            from app.importers.capitalone_importer import run_import
+            from app.importers.chime_importer import run_import
             result = run_import(
-                username=uname, password=pw, years=yrs,
+                email=em, password=pw, years=yrs,
                 consume_path=CONSUME_PATH, entity_slug=eslug,
                 job_id=jid, log=log, cookies=ckies, entity_id=eid,
             )
@@ -140,7 +139,7 @@ def api_import_capitalone_start():
             db.update_import_job(jid, status="completed", count_imported=total,
                                  completed_at=datetime.utcnow().isoformat())
             db.log_activity("import_complete",
-                            f"Capital One: {total} statements for {yrs}")
+                            f"Chime: {total} transactions for {yrs}")
         except Exception as e:
             import traceback
             log(f"Fatal error: {e}")
@@ -150,7 +149,7 @@ def api_import_capitalone_start():
 
     threading.Thread(
         target=_run,
-        args=(job_id, username, password, years, entity_id, entity_slug, cookies),
-        daemon=True, name=f"capitalone-{job_id}",
+        args=(job_id, email, password, years, entity_id, entity_slug, cookies),
+        daemon=True, name=f"chime-{job_id}",
     ).start()
     return jsonify({"status": "started", "job_id": job_id})

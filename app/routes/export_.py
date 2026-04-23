@@ -1,6 +1,7 @@
 """Export generation, download, and listing."""
 import logging
 import os
+import re
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request, send_file
@@ -14,10 +15,40 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("export_", __name__)
 
+_YEAR_RE = re.compile(r"^\d{4}$")
+_SLUG_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+_VALID_FORMATS = {"csv", "json", "iif", "qbo", "ofx", "txf", "pdf", "zip"}
+_EXT_MAP = {"csv": ".csv", "json": ".json", "iif": ".iif", "qbo": ".qbo",
+            "ofx": ".ofx", "txf": ".txf", "pdf": ".pdf", "zip": ".zip"}
+
+
+def _validate_year_slug(year: str, entity_slug: str):
+    """Return (year, entity_slug) if valid, raise ValueError otherwise."""
+    if not _YEAR_RE.match(year):
+        raise ValueError("invalid year")
+    if not _SLUG_RE.match(entity_slug):
+        raise ValueError("invalid entity slug")
+    return year, entity_slug
+
+
+def _safe_export_path(year: str, entity_slug: str, ext: str) -> str:
+    """Build an export file path and verify it stays inside EXPORT_PATH."""
+    filename = f"{entity_slug}_{year}{ext}"
+    export_root = os.path.realpath(EXPORT_PATH)
+    for base in (os.path.join(EXPORT_PATH, year), EXPORT_PATH):
+        candidate = os.path.realpath(os.path.join(base, filename))
+        if candidate.startswith(export_root + os.sep) or candidate == export_root:
+            return candidate
+    raise ValueError("computed path escapes export directory")
+
 
 @bp.route(URL_PREFIX + "/api/export/<year>/<entity_slug>", methods=["POST"])
 @login_required
 def api_export_generate(year, entity_slug):
+    try:
+        _validate_year_slug(year, entity_slug)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     try:
         from app.export import export_all
         entity = db.get_entity(slug=entity_slug)
@@ -43,20 +74,19 @@ def api_export_generate(year, entity_slug):
 @bp.route(URL_PREFIX + "/api/export/<year>/<entity_slug>/download/<format_name>")
 @login_required
 def api_export_download(year, entity_slug, format_name):
-    import re
-    if not re.fullmatch(r"\d{4}", year):
-        return jsonify({"error": "invalid year"}), 400
-    if not re.fullmatch(r"[a-zA-Z0-9_\-]+", entity_slug):
-        return jsonify({"error": "invalid entity"}), 400
-    ext_map = {"csv": ".csv", "json": ".json", "iif": ".iif",
-               "ofx": ".ofx", "txf": ".txf", "pdf": ".pdf", "zip": ".zip"}
-    ext = ext_map.get(format_name.lower())
-    if not ext:
+    try:
+        _validate_year_slug(year, entity_slug)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    fmt = format_name.lower()
+    if fmt not in _VALID_FORMATS:
         return jsonify({"error": "unsupported format"}), 400
+    ext = _EXT_MAP[fmt]
     filename = f"{entity_slug}_{year}{ext}"
+    export_root = os.path.realpath(EXPORT_PATH)
     for base in (os.path.join(EXPORT_PATH, year), EXPORT_PATH):
         path = os.path.realpath(os.path.join(base, filename))
-        if not path.startswith(os.path.realpath(EXPORT_PATH)):
+        if not path.startswith(export_root):
             return jsonify({"error": "invalid path"}), 400
         if os.path.exists(path):
             return send_file(path, as_attachment=True, download_name=filename)
@@ -88,13 +118,21 @@ def api_export_list():
 @bp.route(URL_PREFIX + "/export/<year>/<entity_slug>")
 @login_required
 def export_download_direct(year, entity_slug):
+    try:
+        _validate_year_slug(year, entity_slug)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     format_name = request.args.get("format", "zip")
-    ext_map = {"csv": ".csv", "json": ".json", "iif": ".iif",
-               "ofx": ".ofx", "txf": ".txf", "pdf": ".pdf", "zip": ".zip"}
-    ext = ext_map.get(format_name.lower(), f".{format_name}")
+    fmt = format_name.lower()
+    if fmt not in _VALID_FORMATS:
+        return jsonify({"error": f"unknown format: {fmt}"}), 400
+    ext = _EXT_MAP[fmt]
     filename = f"{entity_slug}_{year}{ext}"
+    export_root = os.path.realpath(EXPORT_PATH)
     for base in (os.path.join(EXPORT_PATH, year), EXPORT_PATH):
-        path = os.path.join(base, filename)
+        path = os.path.realpath(os.path.join(base, filename))
+        if not path.startswith(export_root):
+            return jsonify({"error": "invalid path"}), 400
         if os.path.exists(path):
             return send_file(path, as_attachment=True, download_name=filename)
     try:
@@ -107,6 +145,9 @@ def export_download_direct(year, entity_slug):
         elif format_name == "iif":
             from app.export.quickbooks import export_iif
             path = export_iif(year, entity_slug)
+        elif format_name == "qbo":
+            from app.export.quickbooks import export_qbo
+            path = export_qbo(year, entity_slug)
         elif format_name == "ofx":
             from app.export.ofx_exporter import export_ofx
             path = export_ofx(year, entity_slug)

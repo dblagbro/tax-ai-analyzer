@@ -36,6 +36,35 @@
   </div>
   <!-- Table view -->
   <div id="doc-view-table">
+    <!-- Bulk action bar -->
+    <div id="doc-bulk-bar" style="display:none;background:#fff8e1;border:1px solid #ffcc02;border-radius:8px;padding:10px 14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <strong style="font-size:.88rem">&#9989; <span id="doc-bulk-count">0</span> selected</strong>
+        <select id="doc-bulk-category" class="form-control" style="width:auto;max-width:140px">
+          <option value="">— Category —</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+          <option value="deduction">Deduction</option>
+          <option value="fee">Fee</option>
+          <option value="other">Other</option>
+        </select>
+        <select id="doc-bulk-entity" class="form-control" style="width:auto;max-width:180px">
+          <option value="">— Entity —</option>
+          <option value="_clear">(clear)</option>
+          {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+        </select>
+        <input id="doc-bulk-year" type="text" class="form-control" placeholder="— Year —" style="width:90px">
+        <input id="doc-bulk-doctype" type="text" class="form-control" placeholder="— Doc type —" style="width:130px">
+        <select id="doc-bulk-dup" class="form-control" style="width:auto;max-width:130px" title="Flag as duplicate">
+          <option value="">— Duplicate? —</option>
+          <option value="1">Mark duplicate</option>
+          <option value="0">Unmark duplicate</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="applyDocBulkUpdate()">&#9989; Apply</button>
+        <button class="btn btn-outline btn-sm" onclick="applyDocBulkDelete()" style="color:#c0392b;border-color:#e6a8a1">&#128465; Delete</button>
+        <button class="btn btn-outline btn-sm" onclick="clearDocBulkSelection()">Cancel</button>
+      </div>
+    </div>
     <div class="card">
       <div class="tbl-wrap">
         <table id="doc-table"></table>

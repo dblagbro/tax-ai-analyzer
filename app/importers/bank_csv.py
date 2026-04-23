@@ -29,6 +29,9 @@ FORMAT_CHASE      = "chase"
 FORMAT_BOFA       = "bofa"
 FORMAT_WELLSFARGO = "wellsfargo"
 FORMAT_ALLY       = "ally"
+FORMAT_USBANK     = "usbank"
+FORMAT_MERRICK    = "merrick"
+FORMAT_CAPITALONE = "capitalone"
 FORMAT_GENERIC    = "generic"
 
 # Signature header sets for detection (lowercase, stripped)
@@ -49,6 +52,18 @@ _FORMAT_SIGNATURES: dict[str, list[set]] = {
     FORMAT_ALLY: [
         {"date", "time", "amount", "type", "description"},
         {"date", "time (et)", "amount", "type", "description"},
+    ],
+    FORMAT_USBANK: [
+        {"date", "transaction", "name", "memo", "amount"},
+        {"date", "transaction type", "name", "memo", "amount"},
+    ],
+    FORMAT_MERRICK: [
+        {"date", "description", "category", "amount", "type"},
+        {"transaction date", "posting date", "description", "amount"},
+    ],
+    FORMAT_CAPITALONE: [
+        {"transaction date", "posted date", "card no.", "description", "category", "debit", "credit"},
+        {"date", "description", "debit", "credit"},
     ],
 }
 

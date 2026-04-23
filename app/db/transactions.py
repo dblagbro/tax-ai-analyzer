@@ -22,6 +22,9 @@ def upsert_transaction(
     pdf_path: str = "",
     metadata_json: str = "{}",
 ) -> int:
+    from app.dedup import normalize_vendor
+    vendor_normalized = normalize_vendor(vendor or "")
+
     conn = get_connection()
     try:
         existing = conn.execute(
@@ -34,12 +37,13 @@ def upsert_transaction(
             """
             INSERT INTO transactions
                 (source,source_id,entity_id,tax_year,date,amount,vendor,description,
-                 category,doc_type,pdf_path,metadata_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                 category,doc_type,pdf_path,metadata_json,vendor_normalized)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 source, source_id, entity_id, tax_year, date, amount, vendor,
                 description, category, doc_type, pdf_path, metadata_json,
+                vendor_normalized,
             ),
         )
         conn.commit()
@@ -69,10 +73,12 @@ def list_transactions(
         w = f"WHERE {' AND '.join(where)}" if where else ""
         rows = conn.execute(
             f"""
-            SELECT t.*, e.name as entity_name, e.color as entity_color
+            SELECT t.*, e.name as entity_name, e.color as entity_color,
+                   COUNT(tl.id) as link_count
             FROM transactions t
             LEFT JOIN entities e ON e.id=t.entity_id
-            {w} ORDER BY t.date DESC LIMIT ?
+            LEFT JOIN transaction_links tl ON tl.txn_id=t.id
+            {w} GROUP BY t.id ORDER BY t.date DESC LIMIT ?
             """,
             (*params, limit),
         ).fetchall()
@@ -108,6 +114,63 @@ def update_transaction(transaction_id: int, **kwargs):
             f"UPDATE transactions SET {sets} WHERE id=?", (*fields.values(), transaction_id)
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def update_many_transactions(ids: list[int], **changes) -> int:
+    """Apply the same field changes to many transactions at once.
+
+    Returns the number of rows actually updated. Only fields in the allowed
+    whitelist are written; unknown keys are silently dropped.
+    """
+    if not ids:
+        return 0
+    allowed = {
+        "entity_id", "tax_year", "vendor", "description",
+        "category", "doc_type", "pdf_path", "paperless_doc_id", "metadata_json",
+    }
+    fields = {k: v for k, v in changes.items() if k in allowed}
+    if not fields:
+        return 0
+
+    # sanitize ids to plain ints to avoid SQL injection via str ids
+    safe_ids = [int(i) for i in ids]
+    placeholders = ",".join("?" for _ in safe_ids)
+    sets = ", ".join(f"{k}=?" for k in fields)
+
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            f"UPDATE transactions SET {sets} WHERE id IN ({placeholders})",
+            (*fields.values(), *safe_ids),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def delete_many_transactions(ids: list[int]) -> int:
+    """Delete many transactions (and their cross-source links). Returns rowcount."""
+    if not ids:
+        return 0
+    safe_ids = [int(i) for i in ids]
+    placeholders = ",".join("?" for _ in safe_ids)
+
+    conn = get_connection()
+    try:
+        # Remove links first (schema has ON DELETE CASCADE but be explicit in case FKs off)
+        conn.execute(
+            f"DELETE FROM transaction_links WHERE txn_id IN ({placeholders})",
+            safe_ids,
+        )
+        cur = conn.execute(
+            f"DELETE FROM transactions WHERE id IN ({placeholders})",
+            safe_ids,
+        )
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()
 

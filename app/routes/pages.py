@@ -88,3 +88,15 @@ def tax_review_page():
 @login_required
 def folder_manager_page():
     return render_template("dashboard.html", active_tab="folder_manager")
+
+
+@bp.route(URL_PREFIX + "/mileage")
+@login_required
+def mileage_page():
+    return render_template("dashboard.html", active_tab="mileage")
+
+
+@bp.route(URL_PREFIX + "/activity")
+@login_required
+def activity_page():
+    return render_template("dashboard.html", active_tab="activity")
