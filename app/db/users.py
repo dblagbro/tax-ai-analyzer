@@ -1,7 +1,7 @@
 """User account CRUD and authentication."""
-import hashlib
-import secrets
 import logging
+
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.db.core import get_connection
 
@@ -9,15 +9,17 @@ logger = logging.getLogger(__name__)
 
 
 def _hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return f"{salt}:{h}"
+    return generate_password_hash(password)
 
 
 def _verify_password(password: str, stored: str) -> bool:
     try:
-        salt, h = stored.split(":", 1)
-        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == h
+        # Support legacy sha256:salt:hash format during transition
+        if stored.count(":") == 1 and len(stored.split(":")[0]) == 32:
+            import hashlib
+            salt, h = stored.split(":", 1)
+            return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == h
+        return check_password_hash(stored, password)
     except Exception:
         return False
 

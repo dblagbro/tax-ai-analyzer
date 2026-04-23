@@ -43,12 +43,21 @@ def api_export_generate(year, entity_slug):
 @bp.route(URL_PREFIX + "/api/export/<year>/<entity_slug>/download/<format_name>")
 @login_required
 def api_export_download(year, entity_slug, format_name):
+    import re
+    if not re.fullmatch(r"\d{4}", year):
+        return jsonify({"error": "invalid year"}), 400
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]+", entity_slug):
+        return jsonify({"error": "invalid entity"}), 400
     ext_map = {"csv": ".csv", "json": ".json", "iif": ".iif",
                "ofx": ".ofx", "txf": ".txf", "pdf": ".pdf", "zip": ".zip"}
-    ext = ext_map.get(format_name.lower(), f".{format_name}")
+    ext = ext_map.get(format_name.lower())
+    if not ext:
+        return jsonify({"error": "unsupported format"}), 400
     filename = f"{entity_slug}_{year}{ext}"
     for base in (os.path.join(EXPORT_PATH, year), EXPORT_PATH):
-        path = os.path.join(base, filename)
+        path = os.path.realpath(os.path.join(base, filename))
+        if not path.startswith(os.path.realpath(EXPORT_PATH)):
+            return jsonify({"error": "invalid path"}), 400
         if os.path.exists(path):
             return send_file(path, as_attachment=True, download_name=filename)
     return jsonify({"error": "file not found"}), 404

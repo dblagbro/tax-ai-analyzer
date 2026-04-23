@@ -284,6 +284,12 @@ def main():
                      f"({', '.join(f'{v} {k}' for k,v in hash_stats['by_source'].items())})")
             except Exception as e:
                 _log(f"Scheduled dedup error: {e}")
+            try:
+                pruned = db.prune_old_import_jobs(days=90)
+                if pruned:
+                    _log(f"Pruned {pruned} old import jobs (>90 days)")
+            except Exception as e:
+                _log(f"Import job prune error: {e}")
             time.sleep(86400)  # 24 hours
 
     dedup_thread = threading.Thread(target=_daily_dedup, daemon=True, name="dedup-scheduler")

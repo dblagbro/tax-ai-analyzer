@@ -83,6 +83,29 @@ def get_import_job(job_id: int) -> dict:
         conn.close()
 
 
+def prune_old_import_jobs(days: int = 90) -> int:
+    """Delete completed/error jobs older than `days` days. Returns count deleted."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "DELETE FROM import_job_logs WHERE job_id IN ("
+            "  SELECT id FROM import_jobs"
+            "  WHERE status IN ('complete','error','cancelled')"
+            "  AND created_at < datetime('now', ?)"
+            ")", (f"-{days} days",)
+        )
+        conn.execute(
+            "DELETE FROM import_jobs"
+            " WHERE status IN ('complete','error','cancelled')"
+            " AND created_at < datetime('now', ?)",
+            (f"-{days} days",)
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def delete_import_job(job_id: int) -> bool:
     conn = get_connection()
     try:

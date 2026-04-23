@@ -25,7 +25,17 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("import_gmail", __name__)
 
-GMAIL_CALLBACK_URL = f"https://www.voipguru.org{URL_PREFIX}/import/gmail/auth/callback"
+def _gmail_callback_url() -> str:
+    """Derive callback URL from the current request host so OAuth works on any deployment."""
+    try:
+        from flask import request as _req
+        base = _req.host_url.rstrip("/")
+        return f"{base}{URL_PREFIX}/import/gmail/auth/callback"
+    except RuntimeError:
+        # Outside request context (e.g. startup) — fall back to config
+        from app.config import PAPERLESS_WEB_URL
+        host = os.environ.get("APP_HOST_URL", "https://www.voipguru.org")
+        return f"{host.rstrip('/')}{URL_PREFIX}/import/gmail/auth/callback"
 
 GMAIL_SETUP_SYSTEM_PROMPT = """You are a friendly setup assistant helping the user connect their personal Gmail account to a self-hosted tax document organizer app. This app automatically imports tax-related emails (receipts, invoices, 1099s, W-2s, etc.) into a local document management system.
 
@@ -69,7 +79,7 @@ def _make_flow(redirect_uri=None):
     return Flow.from_client_secrets_file(
         GMAIL_CREDENTIALS_FILE,
         scopes=GMAIL_SCOPES,
-        redirect_uri=redirect_uri or GMAIL_CALLBACK_URL,
+        redirect_uri=redirect_uri or _gmail_callback_url(),
     )
 
 
@@ -106,7 +116,7 @@ def gmail_upload_credentials():
 @login_required
 def gmail_oauth_start():
     try:
-        flow = _make_flow(redirect_uri=GMAIL_CALLBACK_URL)
+        flow = _make_flow(redirect_uri=_gmail_callback_url())
         auth_url, state = flow.authorization_url(
             access_type="offline", prompt="consent", include_granted_scopes="true")
         flask_session["gmail_oauth_state"] = state
@@ -127,8 +137,9 @@ def gmail_oauth_start():
 @login_required
 def gmail_oauth_callback():
     try:
-        flow = _make_flow(redirect_uri=GMAIL_CALLBACK_URL)
-        auth_response = GMAIL_CALLBACK_URL + "?" + request.query_string.decode()
+        flow = _make_flow(redirect_uri=_gmail_callback_url())
+        cb = _gmail_callback_url()
+        auth_response = cb + "?" + request.query_string.decode()
         flow.fetch_token(authorization_response=auth_response)
         creds = flow.credentials
         token_data = {
@@ -187,7 +198,7 @@ def gmail_status_api():
         "has_token": os.path.exists(GMAIL_TOKEN_FILE) or token_in_db,
         "authenticated": token_in_db,
         "search_terms": GMAIL_SEARCH_TERMS,
-        "callback_url": GMAIL_CALLBACK_URL,
+        "callback_url": _gmail_callback_url(),
     })
 
 
