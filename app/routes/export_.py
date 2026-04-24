@@ -22,6 +22,29 @@ _EXT_MAP = {"csv": ".csv", "json": ".json", "iif": ".iif", "qbo": ".qbo",
             "ofx": ".ofx", "txf": ".txf", "pdf": ".pdf", "zip": ".zip"}
 
 
+def _candidate_filenames(fmt: str, year: str, entity_slug: str) -> list[str]:
+    """Return possible filenames for a given export format on disk.
+
+    The generator (app/export/__init__.py:export_all) writes:
+      csv  → transactions_{year}_{slug}.csv
+      pdf  → summary_{year}_{slug}.pdf
+      zip  → tax_{year}_{slug}_complete.zip
+      json/iif/qbo/ofx/txf → export_{year}_{slug}.{ext}
+
+    The original download route looked for {slug}_{year}{ext} which never
+    matched any generated file — this helper enumerates every known
+    convention so both current and legacy files stay reachable.
+    """
+    ext = _EXT_MAP[fmt]
+    primary = {
+        "csv": f"transactions_{year}_{entity_slug}.csv",
+        "pdf": f"summary_{year}_{entity_slug}.pdf",
+        "zip": f"tax_{year}_{entity_slug}_complete.zip",
+    }.get(fmt, f"export_{year}_{entity_slug}{ext}")
+    legacy = f"{entity_slug}_{year}{ext}"
+    return [primary, legacy]
+
+
 def _validate_year_slug(year: str, entity_slug: str):
     """Return (year, entity_slug) if valid, raise ValueError otherwise."""
     if not _YEAR_RE.match(year):
@@ -81,15 +104,14 @@ def api_export_download(year, entity_slug, format_name):
     fmt = format_name.lower()
     if fmt not in _VALID_FORMATS:
         return jsonify({"error": "unsupported format"}), 400
-    ext = _EXT_MAP[fmt]
-    filename = f"{entity_slug}_{year}{ext}"
     export_root = os.path.realpath(EXPORT_PATH)
-    for base in (os.path.join(EXPORT_PATH, year), EXPORT_PATH):
-        path = os.path.realpath(os.path.join(base, filename))
-        if not path.startswith(export_root):
-            return jsonify({"error": "invalid path"}), 400
-        if os.path.exists(path):
-            return send_file(path, as_attachment=True, download_name=filename)
+    for filename in _candidate_filenames(fmt, year, entity_slug):
+        for base in (os.path.join(EXPORT_PATH, year), EXPORT_PATH):
+            path = os.path.realpath(os.path.join(base, filename))
+            if not path.startswith(export_root):
+                return jsonify({"error": "invalid path"}), 400
+            if os.path.exists(path):
+                return send_file(path, as_attachment=True, download_name=filename)
     return jsonify({"error": "file not found"}), 404
 
 
