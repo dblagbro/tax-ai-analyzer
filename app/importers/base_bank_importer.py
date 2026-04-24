@@ -150,6 +150,9 @@ _STEALTH_ARGS = [
     "--no-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
+    # New headless mode — much harder to fingerprint than classic headless
+    "--headless=new",
+    # Hide automation indicators
     "--disable-blink-features=AutomationControlled",
     "--disable-infobars",
     "--disable-extensions",
@@ -163,36 +166,77 @@ _STEALTH_ARGS = [
     "--use-mock-keychain",
     "--window-size=1280,900",
     "--lang=en-US",
-    "--disable-features=IsolateOrigins,site-per-process",
+    "--accept-lang=en-US",
 ]
 
 
 def launch_browser(bank_slug: str, headless: bool = True, log: Callable = logger.info):
     """
-    Launch a Chromium browser with a persistent profile.
+    Launch a hardened Chromium with the same anti-detection config that works
+    for US Alliance FCU (see app/importers/usalliance_importer.py for provenance).
 
-    Returns (playwright_context_manager, browser, context, page).
-    Caller is responsible for closing browser and pw context.
+    Stealth is hooked at the playwright-instance level BEFORE launch, then also
+    applied to the page — both lifecycle points matter for different signals
+    (the pw-level hook rewires the driver, the page-level apply covers
+    late-bound init scripts).
 
-    Persistent profile is stored at /app/data/chrome_profiles/<bank_slug>/
-    so MFA sessions survive between runs.
+    Uses an ephemeral browser+context rather than launch_persistent_context:
+    persistent profiles leak fingerprint anomalies back to detectors when
+    they're not a real, accumulated user-driven profile.
+
+    Returns (pw, context, page). Caller closes context + calls pw.stop().
     """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         raise RuntimeError("playwright not installed")
 
-    profile_dir = _CHROME_PROFILES_ROOT / bank_slug
-    profile_dir.mkdir(parents=True, exist_ok=True)
-    log(f"Chrome profile: {profile_dir}")
+    # _CHROME_PROFILES_ROOT is no longer used for persistent contexts, but is
+    # retained for the visible-fallback helper and future user-data-dir use.
+
+    # Build stealth config BEFORE starting playwright so we can hook it at the
+    # pw-instance level (not just the context level).
+    _stealth = None
+    try:
+        from playwright_stealth import Stealth
+        _stealth = Stealth(
+            navigator_webdriver=True,
+            navigator_plugins=True,
+            navigator_languages=True,
+            navigator_platform=True,
+            navigator_user_agent=True,
+            navigator_vendor=True,
+            chrome_app=True,
+            chrome_csi=True,
+            chrome_load_times=True,
+            webgl_vendor=True,
+            hairline=True,
+            media_codecs=True,
+            navigator_hardware_concurrency=True,
+            navigator_permissions=True,
+            error_prototype=True,
+            sec_ch_ua=True,
+            iframe_content_window=True,
+            navigator_platform_override="Win32",
+            navigator_languages_override=("en-US", "en"),
+        )
+        log("Stealth config built")
+    except ImportError:
+        log("Warning: playwright-stealth not available — bot detection risk")
 
     pw = sync_playwright().start()
 
+    # Hook stealth at the pw level BEFORE launch
+    if _stealth is not None:
+        try:
+            _stealth.hook_playwright_context(pw)
+            log("Stealth hooked at pw instance level")
+        except Exception as e:
+            log(f"Warning: stealth hook failed: {e!r}")
+
     try:
-        context = pw.chromium.launch_persistent_context(
-            user_data_dir=str(profile_dir),
-            headless=headless,
-            args=_STEALTH_ARGS,
+        browser = pw.chromium.launch(headless=headless, args=_STEALTH_ARGS)
+        context = browser.new_context(
             accept_downloads=True,
             viewport={"width": 1280, "height": 900},
             user_agent=_DEFAULT_UA,
@@ -210,20 +254,153 @@ def launch_browser(bank_slug: str, headless: bool = True, log: Callable = logger
         pw.stop()
         raise
 
-    page = context.pages[0] if context.pages else context.new_page()
+    page = context.new_page()
 
-    # Remove webdriver flag via CDP
+    # Apply stealth to the page as well (belt-and-suspenders — covers signals
+    # that only get evaluated on a live page context)
+    if _stealth is not None:
+        try:
+            _stealth.apply_stealth_sync(page)
+        except Exception as e:
+            log(f"Warning: stealth page-apply failed: {e!r}")
+
+    return pw, context, page
+
+
+# ── CAPTCHA / human-verification handling ─────────────────────────────────────
+
+def _normalize_apostrophes(text: str) -> str:
+    """Replace typographic quote variants with ASCII so string matching works
+    whether the page uses U+2019 (smart quote) or U+0027 (ASCII)."""
+    return (text.replace("’", "'")
+                .replace("‘", "'")
+                .replace("“", '"')
+                .replace("”", '"'))
+
+
+def handle_captcha_if_present(page, log: Callable = logger.info, timeout_ms: int = 3000) -> bool:
+    """Detect + click through common 'confirm you're a person' checkbox CAPTCHAs.
+
+    Returns True if a CAPTCHA was handled (page may need reload to proceed),
+    False if none was found. Does NOT solve hCaptcha/reCAPTCHA image puzzles —
+    those require user intervention or external solvers.
+    """
     try:
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.chrome = {runtime: {}};
-            Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US','en']});
-        """)
+        raw = page.content()
+        content = _normalize_apostrophes(raw).lower()
+    except Exception:
+        return False
+
+    captcha_markers = [
+        "confirm you're a person", "i'm a person", "i am a person",
+        "verify you're human", "verify you are human",
+        "prove you are not a robot", "press & hold", "press and hold",
+    ]
+    if not any(m in content for m in captcha_markers):
+        return False
+
+    log("CAPTCHA challenge detected — attempting to click through")
+
+    # Dump the page HTML to /tmp for debugging selector selection if we fail
+    try:
+        import os
+        dump_path = f"/tmp/bank_debug_captcha_dump.html"
+        with open(dump_path, "w") as f:
+            f.write(raw)
+        log(f"  HTML dumped to {dump_path}")
     except Exception:
         pass
 
-    return pw, context, page
+    # Try MANY click strategies — US Bank's bot-detect overlay uses custom widgets
+    checkbox_selectors = [
+        # Native checkbox variants
+        "input[type='checkbox'][aria-label*='person' i]",
+        "input[type='checkbox'][name*='person' i]",
+        "input[type='checkbox'][id*='person' i]",
+        # Label-by-text
+        "label:has-text(\"I'm a person\")",
+        "label:has-text(\"I am a person\")",
+        "label:has-text(\"human\")",
+        # ARIA roles (custom React widgets)
+        "[role='checkbox'][aria-label*='person' i]",
+        "[role='checkbox']:has-text('person')",
+        # Parent label wrapping an input — click the label visible text
+        "xpath=//label[contains(., \"I'm a person\")]",
+        "xpath=//label[contains(., \"I am a person\")]",
+        # Span or div near the checkbox
+        "xpath=//*[contains(text(), \"I'm a person\")]/preceding::input[@type='checkbox'][1]",
+        "xpath=//*[contains(text(), \"I'm a person\")]/ancestor::*[contains(@class, 'check')][1]",
+        # Desperate: any checkbox inside the modal
+        "div[role='dialog'] input[type='checkbox']",
+        "[class*='modal'] input[type='checkbox']",
+        "[class*='challenge'] input[type='checkbox']",
+    ]
+    clicked_checkbox = False
+    for sel in checkbox_selectors:
+        try:
+            el = page.query_selector(sel)
+            if not el:
+                continue
+            try:
+                el.scroll_into_view_if_needed(timeout=1500)
+            except Exception:
+                pass
+            try:
+                box = el.bounding_box()
+                if box:
+                    human_move(page, box["x"] + box["width"] / 2,
+                               box["y"] + box["height"] / 2)
+            except Exception:
+                pass
+            # Try both .click() and .check() for checkbox semantics
+            try:
+                el.click(timeout=timeout_ms, force=True)
+            except Exception:
+                try:
+                    el.check(timeout=timeout_ms, force=True)
+                except Exception:
+                    continue
+            log(f"  clicked: {sel}")
+            clicked_checkbox = True
+            page.wait_for_timeout(800)
+            break
+        except Exception:
+            continue
+
+    # If no checkbox click worked, try clicking the Continue button directly
+    # (some implementations auto-verify on button press)
+    cont_selectors = [
+        "button:has-text('Continue'):not([disabled])",
+        "button:has-text('Continue')",
+        "button:has-text('Verify')",
+        "button:has-text('Submit')",
+        "button[type='submit']",
+        "[role='button']:has-text('Continue')",
+    ]
+    for sel in cont_selectors:
+        try:
+            el = page.query_selector(sel)
+            if not el:
+                continue
+            try:
+                if el.is_disabled():
+                    continue
+            except Exception:
+                pass
+            el.click(timeout=timeout_ms)
+            log(f"  clicked continue: {sel}")
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1500)
+            return True
+        except Exception:
+            continue
+
+    if not clicked_checkbox:
+        log("  CAPTCHA handler: no clickable widget found — selector set needs update")
+    return clicked_checkbox
 
 
 def launch_browser_visible_fallback(bank_slug: str, log: Callable = logger.info):

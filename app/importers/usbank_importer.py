@@ -26,6 +26,7 @@ from typing import Callable, Optional
 
 from app.importers.base_bank_importer import (
     find_element, find_in_frames, find_all_in_frames,
+    handle_captcha_if_present,
     human_click, human_move, human_type,
     launch_browser, save_debug_screenshot,
     wait_for_element, wait_for_mfa_code,
@@ -197,15 +198,67 @@ def _login(page, username: str, password: str, log: Callable,
     page.wait_for_timeout(2000)
     save_debug_screenshot(page, "usb_post_login")
 
+    # Handle "Confirm you're a person" CAPTCHA if it appears
+    for attempt in range(2):
+        if handle_captcha_if_present(page, log):
+            page.wait_for_timeout(1500)
+            save_debug_screenshot(page, f"usb_post_captcha_{attempt}")
+        else:
+            break
+
     if _is_mfa_page(page):
         if not _handle_mfa(page, log, job_id):
             return False
 
     if "login" in page.url.lower() or "auth" in page.url.lower():
         content = page.content().lower()
-        if "incorrect" in content or "invalid" in content or "try again" in content:
+        # Only treat as rejected credentials when the language is unambiguous.
+        # A CAPTCHA/verification page can contain words like "invalid request"
+        # without meaning the password was wrong.
+        rejected_markers = [
+            "password is incorrect", "username is incorrect",
+            "we don't recognize that", "incorrect username or password",
+            "invalid username or password", "credentials do not match",
+            "please re-enter your", "try again with",
+            "something you entered is incorrect",  # US Bank's generic reject (often = locked account)
+            "account has been locked", "your account is locked",
+            "too many failed", "login attempts exceeded",
+        ]
+        if any(m in content for m in rejected_markers):
             raise RuntimeError("US Bank credentials rejected.")
-        return False
+        # Unknown login-page state — save screenshots + safely-scrubbed HTML
+        save_debug_screenshot(page, "usb_unknown_login_state")
+        try:
+            import re as _re
+            raw_html = page.content()
+            # SECURITY: scrub all form field values before writing to disk.
+            # Form input values (including the password!) show up as value="..."
+            # attributes in the serialized DOM — never dump raw.
+            scrubbed = _re.sub(
+                r'(value\s*=\s*)"[^"]*"',
+                r'\1"[REDACTED]"',
+                raw_html,
+            )
+            scrubbed = _re.sub(
+                r"(value\s*=\s*)'[^']*'",
+                r"\1'[REDACTED]'",
+                scrubbed,
+            )
+            with open("/tmp/bank_debug_usb_unknown_login_state.html", "w") as f:
+                f.write(scrubbed)
+            log(f"  HTML dumped (input values scrubbed) to /tmp/bank_debug_usb_unknown_login_state.html")
+            log(f"  URL: {page.url}")
+            try:
+                body_text = page.evaluate("() => document.body.innerText.slice(0, 800)")
+                log(f"  body text: {body_text!r}")
+            except Exception:
+                pass
+        except Exception as e:
+            log(f"  dump failed: {e}")
+        raise RuntimeError(
+            "Could not complete US Bank login — still on an auth page but no "
+            "clear rejection signal. Check /tmp/bank_debug_usb_unknown_login_state.html"
+        )
 
     log(f"Logged in — at {page.url}")
     return True
