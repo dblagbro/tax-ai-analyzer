@@ -516,13 +516,32 @@ session reached). Two follow-up findings logged:
 
 ---
 
-## Deferred targets (explicit, with rationale)
+## Phase 10B — US Alliance IIFE folded onto bank-modal factory (completed, `a606a5e`)
 
-- **`setup_modals.js` factory consolidation** — Phase 10 Track B (skipped
-  this session for risk budget; banking modals already have partial
-  factory via `makePoller` + `makeBankHelpers` for 5 banks — folding US
-  Alliance into the same factory would be a medium-risk ~200 LOC shrink
-  worth a dedicated commit)
+setup_modals.js had two IIFEs that served bank-modal concerns:
+  - Block A (US Alliance, lines 432-625) — 194 LOC written pre-factory,
+    inline-duplicating saveCreds / loadStatus / saveCookies / clearCookies /
+    poll-logs / submitMfa
+  - Block B (7 banks, lines 628-1221) — had `makePoller` + `makeBankHelpers`
+    factories plus per-bank adapter code
+
+Phase 10B:
+- Added `window.__bankFactory = {makePoller, makeBankHelpers}` cross-IIFE
+  export inside Block B
+- Rewrote US Alliance IIFE to wait for the factory, then delegate 5 of 8
+  `window.*` functions via the factory helpers
+- Kept US-Alliance-specific behavior inline: `usaCopySnippet` + clipboard
+  fallback, `testUsaCreds` (no other bank has a test-login endpoint),
+  bot-notice toggle integrated into `loadUsaStatus`, impTab hook
+
+Net: setup_modals.js 1222 → 1142 LOC (-80, -6.6%). One less place to edit
+when the factory pattern evolves.
+
+pytest: 126/126.
+
+---
+
+## Deferred targets (explicit, with rationale)
 - **usalliance inline Playwright launch → base** — Phase 10C (US Alliance
   has its own `sync_playwright()` block; consolidating to
   `launch_browser()` requires careful preservation of its SSE-streaming
