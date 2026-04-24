@@ -13,6 +13,7 @@ and polls for a code delivered via the in-memory MFA registry (fed by the
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import re
@@ -505,6 +506,18 @@ def _verify_logged_in(page, log: Callable):
         )
 
     log("Login successful.")
+
+    # Auto-save cookies so the next import can skip MFA entirely.
+    # Only save when we have a verifiably-authenticated session (we reached
+    # post-login URL), so we never cache a half-baked state.
+    try:
+        from app import db as _db
+        cookies = page.context.cookies()
+        if cookies:
+            _db.set_setting("usalliance_cookies", json.dumps(cookies))
+            log(f"💾 Saved {len(cookies)} auth cookies — next import should skip MFA")
+    except Exception as _e:
+        log(f"  (cookie save failed — not fatal: {_e!r})")
 
 
 # ── eStatements navigation ────────────────────────────────────────────────────
