@@ -242,6 +242,50 @@ def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logge
     return pw, context, page
 
 
+# ── Cookie persistence helpers ────────────────────────────────────────────────
+
+def save_auth_cookies(context, bank_slug: str, log: Callable = logger.info) -> int:
+    """Capture the context's current cookies and store them under
+    `<bank_slug>_cookies` in the settings table. Returns cookie count.
+
+    Call this AFTER the importer has proven an authenticated session
+    (e.g. after MFA approval + navigation to a post-login URL). Saving
+    pre-auth cookies would let a bad cookie jar poison future runs.
+    """
+    try:
+        import json as _json
+        from app import db as _db
+        cookies = context.cookies()
+        if not cookies:
+            return 0
+        _db.set_setting(f"{bank_slug}_cookies", _json.dumps(cookies))
+        log(f"💾 Saved {len(cookies)} auth cookies for {bank_slug}")
+        return len(cookies)
+    except Exception as e:
+        log(f"  cookie save failed ({bank_slug}): {e!r}")
+        return 0
+
+
+def load_auth_cookies(bank_slug: str) -> Optional[list]:
+    """Return the saved cookie list for `<bank_slug>_cookies`, or None.
+
+    Complement to save_auth_cookies. Callers should pass the result to
+    `context.add_cookies(...)` before the first navigation. If the cookies
+    are stale (server rejected the session), the importer MUST fall back
+    to the full credential login flow — caller's responsibility to check.
+    """
+    try:
+        import json as _json
+        from app import db as _db
+        raw = _db.get_setting(f"{bank_slug}_cookies") or ""
+        if not raw:
+            return None
+        cookies = _json.loads(raw)
+        return cookies if isinstance(cookies, list) and cookies else None
+    except Exception:
+        return None
+
+
 # ── CAPTCHA / human-verification handling ─────────────────────────────────────
 
 def _normalize_apostrophes(text: str) -> str:

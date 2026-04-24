@@ -518,17 +518,15 @@ def _verify_logged_in(page, log: Callable):
 
     log("Login successful.")
 
-    # Auto-save cookies so the next import can skip MFA entirely.
-    # Only save when we have a verifiably-authenticated session (we reached
-    # post-login URL), so we never cache a half-baked state.
-    try:
-        from app import db as _db
-        cookies = page.context.cookies()
-        if cookies:
-            _db.set_setting("usalliance_cookies", json.dumps(cookies))
-            log(f"💾 Saved {len(cookies)} auth cookies — next import should skip MFA")
-    except Exception as _e:
-        log(f"  (cookie save failed — not fatal: {_e!r})")
+    # Auto-save cookies so the next import can skip MFA entirely. Uses the
+    # shared base_bank_importer.save_auth_cookies helper so other bank
+    # importers can adopt the same pattern with a one-line change.
+    # NOTE: per bug-statement-download-usalliance.md Finding A, US Alliance's
+    # session model is not pure cookie-based — cookies persist but the
+    # server-side session also expires quickly. Save them anyway for cases
+    # where the gap between runs is short enough.
+    from app.importers.base_bank_importer import save_auth_cookies
+    save_auth_cookies(page.context, "usalliance", log)
 
 
 # ── eStatements navigation ────────────────────────────────────────────────────
