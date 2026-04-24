@@ -2,12 +2,22 @@
 import csv
 import io
 import logging
+import math
+from datetime import datetime
 
 from flask import Blueprint, Response, jsonify, request
 from flask_login import current_user, login_required
 
 from app import db
 from app.config import URL_PREFIX
+
+
+def _validate_iso_date(s: str) -> bool:
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("mileage", __name__)
@@ -34,12 +44,18 @@ def api_mileage_create():
     miles_raw = data.get("miles")
     if not date:
         return jsonify({"error": "date required (YYYY-MM-DD)"}), 400
+    if not _validate_iso_date(date):
+        return jsonify({"error": "date must be valid ISO YYYY-MM-DD"}), 400
     try:
         miles = float(miles_raw)
     except (TypeError, ValueError):
         return jsonify({"error": "miles must be numeric"}), 400
+    if not math.isfinite(miles):
+        return jsonify({"error": "miles must be a finite number"}), 400
     if miles <= 0:
         return jsonify({"error": "miles must be > 0"}), 400
+    if miles > 100000:
+        return jsonify({"error": "miles exceeds reasonable bound (100000)"}), 400
 
     entity_id = data.get("entity_id")
     if entity_id not in (None, ""):
@@ -103,6 +119,11 @@ def api_mileage_update(mid):
     if not db.get_mileage(mid):
         return jsonify({"error": "not found"}), 404
     data = request.get_json() or {}
+    if "date" in data and data["date"]:
+        d = str(data["date"]).strip()[:10]
+        if not _validate_iso_date(d):
+            return jsonify({"error": "date must be valid ISO YYYY-MM-DD"}), 400
+        data["date"] = d
     # coerce numerics if present
     for k in ("miles", "rate_per_mile", "odometer_start", "odometer_end"):
         if k in data and data[k] not in (None, ""):
@@ -110,6 +131,10 @@ def api_mileage_update(mid):
                 data[k] = float(data[k])
             except (TypeError, ValueError):
                 return jsonify({"error": f"{k} must be numeric"}), 400
+            if not math.isfinite(data[k]):
+                return jsonify({"error": f"{k} must be a finite number"}), 400
+    if "miles" in data and isinstance(data["miles"], float) and data["miles"] <= 0:
+        return jsonify({"error": "miles must be > 0"}), 400
     if "entity_id" in data and data["entity_id"] not in (None, ""):
         try:
             data["entity_id"] = int(data["entity_id"])

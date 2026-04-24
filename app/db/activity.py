@@ -111,13 +111,27 @@ def distinct_activity_actions() -> list[str]:
 
 
 def ensure_default_data():
+    import os
     from app.config import DEFAULT_ENTITIES, DEFAULT_TAX_YEARS
     from app.db.users import user_count, create_user
     from app.db.entities import get_entity, create_entity, ensure_tax_year, update_entity
 
     if user_count() == 0:
-        create_user("admin", "admin", "admin@localhost", "admin")
-        logger.info("Created default admin user (password: admin) — CHANGE THIS IMMEDIATELY")
+        initial_pw = os.environ.get("ADMIN_INITIAL_PASSWORD", "").strip()
+        if not initial_pw:
+            raise RuntimeError(
+                "No users exist and ADMIN_INITIAL_PASSWORD env var is not set. "
+                "Refusing to seed default admin with a known password. "
+                "Set ADMIN_INITIAL_PASSWORD to a strong value in your environment "
+                "(e.g. in docker-compose.yml) and restart."
+            )
+        if len(initial_pw) < 12:
+            raise RuntimeError(
+                "ADMIN_INITIAL_PASSWORD is too short (minimum 12 chars). "
+                "Refusing to seed admin."
+            )
+        create_user("admin", initial_pw, "admin@localhost", "admin")
+        logger.warning("Created default admin user from ADMIN_INITIAL_PASSWORD env var")
 
     for ent in DEFAULT_ENTITIES:
         existing = get_entity(slug=ent["slug"])

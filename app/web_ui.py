@@ -23,15 +23,38 @@ logger = logging.getLogger(__name__)
 # App
 # ---------------------------------------------------------------------------
 
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__, template_folder="templates", static_folder="static",
+            static_url_path=URL_PREFIX + "/static")
 app.secret_key = get_flask_secret_key()
 app.config["APPLICATION_ROOT"] = URL_PREFIX
 app.config["PREFERRED_URL_SCHEME"] = "https"
-app.config["SESSION_COOKIE_SAMESITE"] = "None"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"  # HIGH-1 mitigation: blocks cross-site CSRF via form posts
 app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_port=1)
+
+
+# MED-4: security headers
+@app.after_request
+def _security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    # Conservative CSP — allow same-origin assets + inline styles/scripts already used extensively
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "font-src 'self' data:; "
+        "frame-ancestors 'self'",
+    )
+    return resp
 
 # ---------------------------------------------------------------------------
 # Auth

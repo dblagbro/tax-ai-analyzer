@@ -14,16 +14,29 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("settings", __name__)
 
 
+_SENSITIVE_SUFFIXES = (
+    "_password", "_pass", "_secret", "_token", "_key",
+    "_api_key", "_client_secret", "_refresh_token", "_access_token",
+)
+_SENSITIVE_ALLOW_ID = ("_client_id", "_public_key")  # IDs / public parts — not secrets
+
+
+def _is_sensitive_key(key: str) -> bool:
+    k = key.lower()
+    if any(k.endswith(s) for s in _SENSITIVE_ALLOW_ID):
+        return False
+    return any(k.endswith(s) for s in _SENSITIVE_SUFFIXES)
+
+
 @bp.route(URL_PREFIX + "/api/settings", methods=["GET"])
 @login_required
 @admin_required
 def api_settings_get():
     raw = db.get_all_settings()
     masked = dict(raw)
-    for key in ("llm_api_key", "paperless_token", "smtp_pass",
-                "dropbox_token", "s3_secret_key"):
-        if masked.get(key):
-            masked[key] = "***" + str(masked[key])[-4:]
+    for key, value in list(masked.items()):
+        if value and _is_sensitive_key(key):
+            masked[key] = "***" + str(value)[-4:] if len(str(value)) >= 4 else "***"
     masked.setdefault("llm_model", LLM_MODEL)
     masked.setdefault("paperless_url", PAPERLESS_API_BASE_URL)
     return jsonify(masked)

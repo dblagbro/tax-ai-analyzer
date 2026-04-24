@@ -98,10 +98,12 @@ def api_gdrive_import():
 @login_required
 def api_dropbox_auth():
     try:
+        import secrets
         from app.cloud_adapters.dropbox_adapter import get_auth_url
         from flask import session as flask_session
         redirect_uri = url_for("import_cloud.api_dropbox_callback", _external=True)
         flask_session["dropbox_redirect_uri"] = redirect_uri
+        flask_session["dropbox_oauth_state"] = secrets.token_urlsafe(24)
         return redirect(get_auth_url(redirect_uri))
     except ImportError:
         return _cloud_unavail("Dropbox")
@@ -113,6 +115,14 @@ def api_dropbox_auth():
 @login_required
 def api_dropbox_callback():
     try:
+        from flask import session as flask_session
+        expected = flask_session.pop("dropbox_oauth_state", None)
+        returned = request.args.get("state")
+        # The Dropbox SDK uses its own csrf_token under key "dropbox_csrf" — our own
+        # state param is a belt-and-suspenders check for callers that relay it.
+        if expected and returned and expected != returned:
+            flash("Dropbox auth state mismatch — request rejected.", "danger")
+            return redirect(_url("/import"))
         from app.cloud_adapters.dropbox_adapter import handle_callback
         handle_callback(request.args)
         flash("Dropbox connected.", "success")
