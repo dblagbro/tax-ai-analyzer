@@ -33,7 +33,18 @@ app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_port=1)
+# ProxyFix is only safe when there IS a trusted reverse proxy appending
+# X-Forwarded-For; in direct access (dev, LAN, curl) any client can spoof
+# XFF and fool ProxyFix(x_for=1) into treating the spoofed value as the real
+# remote_addr — this is the CRIT-PASS2-1 attack. Gate the XFF-trusting fields
+# behind TRUST_PROXY_HEADERS=1. Always keep proto/host/port so url_for()
+# generates correct https:// URLs behind nginx.
+_trust_xff = os.environ.get("TRUST_PROXY_HEADERS", "").lower() in ("1", "true", "yes")
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1 if _trust_xff else 0,
+    x_proto=1, x_host=1, x_port=1,
+)
 
 
 # MED-4: security headers

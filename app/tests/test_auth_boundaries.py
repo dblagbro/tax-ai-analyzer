@@ -125,3 +125,105 @@ class TestInactiveUser:
         assert resp.status_code in (302, 401, 403), (
             f"inactive user passed auth gate: {resp.status_code}"
         )
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# CRIT-NEW-3 — Open redirect guard on /login?next=
+# ───────────────────────────────────────────────────────────────────────────────
+
+from app.routes.auth import _safe_next, _client_ip  # noqa: E402
+
+
+class TestOpenRedirect:
+    """Unit tests on _safe_next — the helper that validates the ?next= param."""
+
+    def test_external_url_rejected(self):
+        assert _safe_next("https://evil.com/") is None
+        assert _safe_next("http://evil.com/") is None
+
+    def test_protocol_relative_rejected(self):
+        # //evil.com is protocol-relative and would redirect off-origin
+        assert _safe_next("//evil.com/") is None
+
+    def test_javascript_scheme_rejected(self):
+        assert _safe_next("javascript:alert(1)") is None
+
+    def test_same_origin_path_accepted(self):
+        assert _safe_next("/tax-ai-analyzer/import") == "/tax-ai-analyzer/import"
+        assert _safe_next("/") == "/"
+
+    def test_empty_and_none_return_none(self):
+        assert _safe_next("") is None
+        assert _safe_next(None) is None
+
+
+class TestOpenRedirectIntegration:
+    """End-to-end: POST /login?next=https://evil.com/ must redirect to /."""
+
+    def test_login_post_strips_external_next(self):
+        client = flask_app.test_client()
+        resp = client.post(
+            "/tax-ai-analyzer/login?next=https://evil.com/",
+            data={"username": "admin", "password": "admin"},
+            follow_redirects=False,
+        )
+        # After successful login, Location must NOT be the attacker URL
+        assert resp.status_code == 302
+        location = resp.headers.get("Location", "")
+        assert not location.startswith("https://evil.com"), (
+            f"open redirect leaked: Location={location!r}"
+        )
+        assert not location.startswith("//"), f"protocol-relative leak: {location!r}"
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# CRIT-PASS2-1 — X-Forwarded-For rate-limiter bypass
+# ───────────────────────────────────────────────────────────────────────────────
+
+class TestRateLimitIpResolution:
+    """_client_ip must read request.remote_addr only. The actual XFF chain
+    parsing is delegated to werkzeug.middleware.proxy_fix.ProxyFix(x_for=1)
+    configured in app/web_ui.py. Unit tests here assert the function ignores
+    any attacker-supplied X-Forwarded-For headers that bypass ProxyFix."""
+
+    def test_returns_remote_addr(self):
+        with flask_app.test_request_context(
+                "/tax-ai-analyzer/login",
+                environ_base={"REMOTE_ADDR": "203.0.113.5"}):
+            assert _client_ip() == "203.0.113.5"
+
+    def test_ignores_header_only_xff(self):
+        # If ProxyFix didn't run (e.g. test_request_context alone), an XFF
+        # header shouldn't affect _client_ip — we trust only remote_addr.
+        with flask_app.test_request_context(
+                "/tax-ai-analyzer/login",
+                headers={"X-Forwarded-For": "1.2.3.4"},
+                environ_base={"REMOTE_ADDR": "203.0.113.5"}):
+            assert _client_ip() == "203.0.113.5"
+
+    def test_handles_missing_remote_addr(self):
+        with flask_app.test_request_context(
+                "/tax-ai-analyzer/login",
+                environ_base={"REMOTE_ADDR": None}):
+            assert _client_ip() == ""
+
+
+class TestRateLimitXffBypass:
+    """Integration: 15 bad logins with rotating XFF all hit the same remote_addr
+    (127.0.0.1) — the rate limiter must still fire."""
+
+    def test_xff_rotation_cannot_bypass_limit(self):
+        client = flask_app.test_client()
+        codes = []
+        for i in range(15):
+            resp = client.post(
+                "/tax-ai-analyzer/login",
+                data={"username": "nobody", "password": f"wrong{i}"},
+                headers={"X-Forwarded-For": f"10.{i}.{i}.{i}"},
+            )
+            codes.append(resp.status_code)
+        n_429 = codes.count(429)
+        assert n_429 >= 3, (
+            f"expected rate-limiter to fire ≥3x during 15 XFF-rotated bad "
+            f"logins; got status codes: {codes}"
+        )
