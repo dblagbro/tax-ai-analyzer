@@ -14,6 +14,18 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("entities", __name__)
 
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+
+
+def _validate_color(color: str) -> tuple[bool, str]:
+    """Return (is_valid, normalized_value). Empty/None falls back to the default."""
+    c = (color or "").strip()
+    if not c:
+        return True, "#1a3c5e"
+    if _HEX_COLOR_RE.match(c):
+        return True, c
+    return False, c
+
 
 @bp.route(URL_PREFIX + "/api/entities", methods=["GET"])
 @login_required
@@ -29,21 +41,26 @@ def api_entities_create():
     name = data.get("name", "").strip()
     if not name:
         return jsonify({"error": "name required"}), 400
+    ok, color = _validate_color(data.get("color"))
+    if not ok:
+        return jsonify({"error": "color must be hex (#abc or #aabbcc[aa])"}), 400
     slug = re.sub(r"[^\w]", "_", name.lower())
     try:
-        eid = db.create_entity(
+        row = db.create_entity(
             name=name, slug=slug,
             entity_type=data.get("type", "personal"),
             description=data.get("description", ""),
             tax_id=data.get("tax_id", ""),
-            color=data.get("color", "#1a3c5e"),
+            color=color,
             parent_entity_id=data.get("parent_entity_id") or None,
             display_name=data.get("display_name") or name,
             metadata_json=json.dumps(data.get("metadata", {})),
             sort_order=data.get("sort_order", 0),
         )
         db.log_activity("entity_created", f"Entity: {name}", user_id=current_user.id)
-        return jsonify({"id": eid, "name": name, "slug": slug}), 201
+        # db.create_entity returns the full row dict; extract the id so API
+        # clients see {"id": <int>, ...} as they expect.
+        return jsonify({"id": row["id"], "name": name, "slug": slug}), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -55,6 +72,11 @@ def api_entities_update(entity_id):
     data = request.get_json() or {}
     if "metadata" in data:
         data["metadata_json"] = json.dumps(data.pop("metadata"))
+    if "color" in data:
+        ok, color = _validate_color(data["color"])
+        if not ok:
+            return jsonify({"error": "color must be hex (#abc or #aabbcc[aa])"}), 400
+        data["color"] = color
     db.update_entity(entity_id, **data)
     row = db.get_entity(entity_id=entity_id)
     db.log_activity("entity_updated", f"ID: {entity_id}", user_id=current_user.id)

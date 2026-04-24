@@ -146,6 +146,36 @@ class TestHtmlCrawl:
 
 
 # ---------------------------------------------------------------------------
+# Tab registry (Phase 9): every tab reachable from the sidebar must have
+# exactly one registerTabLoader("<name>", ...) call somewhere in the
+# static/js/dashboard/ modules. Prevents drift (e.g. entities.js relied on
+# a legacy sw() monkey-patch until Wave 2).
+# ---------------------------------------------------------------------------
+
+class TestTabRegistry:
+    # Tab names that appear in loadTab() / sw() dispatch and must be registered.
+    EXPECTED_TABS = [
+        "dashboard", "transactions", "documents", "import",
+        "tax_review", "mileage", "activity", "ai_costs",
+        "folder_manager", "chat", "reports", "settings", "users", "entities",
+    ]
+
+    def test_all_tabs_registered(self):
+        import glob
+        import re as _re
+        js_files = glob.glob("app/static/js/dashboard/*.js")
+        assert js_files, "no JS modules found — static dir missing?"
+        combined = "\n".join(open(f).read() for f in js_files)
+        for tab in self.EXPECTED_TABS:
+            pat = _re.compile(r'registerTabLoader\("' + _re.escape(tab) + r'"')
+            matches = pat.findall(combined)
+            assert len(matches) == 1, (
+                f"tab {tab!r}: expected exactly 1 registerTabLoader call, "
+                f"found {len(matches)}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Route matrix: no 5xx on any GET
 # ---------------------------------------------------------------------------
 

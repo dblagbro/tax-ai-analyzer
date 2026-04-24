@@ -232,11 +232,7 @@ async function doMergeEntity() {
   setTimeout(()=>location.reload(), 800);
 }
 
-// Load entity tree when Entities tab is opened
-(function(){
-  var orig = window.sw;
-  window.sw = function(tab){
-    orig(tab);
-    if (tab==='entities') loadEntityTree();
-  };
-})();
+// Register with the tab-loader registry (Phase 9); the previous IIFE that
+// monkey-patched window.sw has been removed for consistency with the other
+// 12 tab modules.
+registerTabLoader("entities", loadEntityTree);

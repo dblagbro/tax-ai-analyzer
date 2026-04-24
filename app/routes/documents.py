@@ -181,6 +181,8 @@ def api_document_detail(doc_id):
             (doc_id,)).fetchone()
         conn.close()
         db_rec = dict(row) if row else {}
+        if not paperless_doc and not db_rec:
+            return jsonify({"error": "document not found"}), 404
         return jsonify({**paperless_doc, **db_rec, "doc_id": doc_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
