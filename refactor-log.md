@@ -390,5 +390,160 @@ Previous working image still tagged as `dblagbro/tax-ai-analyzer:pre-remediation
 
 - **Step 6 (residential proxy) and Step 7 (Camoufox)**: explicitly out of scope for this session. Step 6 requires the user to pick a proxy provider + commit to an ongoing cost. Step 7 is a last-resort if Steps 2-5 + residential proxy are insufficient.
 
+---
+
+## Remediation Waves 0-4 (2026-04-24, 5 commits)
+
+Post-Phase-9 deep QA passes (two passes, 18 findings) produced a 5-wave
+remediation sprint. Each wave = one commit, retest-gated, rollback-ready.
+
+### Wave 0 — `1bba238` — Stabilize Phase 9 commit
+Committed uncommitted xvfb-run → `docker-entrypoint.sh` replacement (fixed
+CRIT-NEW-1 daemon-didn't-start) + `-ac` on Xvfb (CRIT-NEW-2) + `COPY tools/`
+in Dockerfile (HIGH-NEW-2) + all 6 QA markdown files.
+
+### Wave 1 — `28acbbc` — Export download filename fix (HIGH-PASS2-1)
+All 8 /api/export/{year}/{slug}/download/{format} endpoints returned 404
+because downloader looked for `{slug}_{year}{ext}` while generator writes
+`export_{year}_{slug}{ext}` (and `transactions_{year}_{slug}.csv`,
+`summary_{year}_{slug}.pdf`). Added `_candidate_filenames(fmt, year, slug)`
+dispatch with per-format overrides + legacy fallback. +11 tests in new
+`app/tests/test_export.py`.
+
+### Wave 2 — `c917b23` — API contract fixes
+- `/api/documents/<id>` → 404 when neither Paperless nor local DB has the ID
+- `/api/entities` POST → return `{"id": int}` not `{"id": {...dict}}`
+- `/api/entities` POST/PATCH → reject non-hex `color` with 400
+- `entities.js` → replace legacy `sw()` monkey-patch IIFE with
+  `registerTabLoader("entities", loadEntityTree)`
+- +20 tests: `test_documents.py`, `test_entities.py`, `TestTabRegistry` in
+  `test_session_smoke.py`
+
+### Wave 3 — `7b8808c` — Security hardening
+- `_safe_next()` guard on `/login?next=` — same-origin paths only (CRIT-NEW-3)
+- `_client_ip()` + opt-in `TRUST_PROXY_HEADERS` env gate —
+  `ProxyFix(x_for=1 if trusted else 0)`. Defeats XFF spoof bypass of rate
+  limiter (CRIT-PASS2-1)
+- `ADMIN_INITIAL_PASSWORD` wired into `docker-compose.yml` + `.env`
+  (HIGH-NEW-1)
+- +10 tests: `TestOpenRedirect`, `TestOpenRedirectIntegration`,
+  `TestRateLimitIpResolution`, `TestRateLimitXffBypass` in
+  `test_auth_boundaries.py`
+
+### Wave 4 — `afbf09c` — Image hygiene (one rebuild)
+- `ENV DISPLAY=:99` at image layer — `docker exec` subshells get DISPLAY
+  without explicit `-e` flag (LOW-NEW-1)
+- `tini` as `ENTRYPOINT ["/usr/bin/tini", "--"]` — reaps Chrome crashpad
+  zombies (LOW-PASS2-1)
+- `httpx`/`httpcore`/`urllib3` log level → WARNING — idle log volume went
+  from 3049 bytes/10s to 0 (LOW-PASS2-2)
+- `TestHttpLiveness` in `test_smoke.py` — socket + urllib probe to
+  `http://127.0.0.1:8012/...` catches "container Up but Flask dead" cases
+  that in-process `test_client()` misses
+
+---
+
+## Post-Wave hotfixes (2 commits)
+
+### `ab681bd` — Xvfb survival under tini
+After Wave 4 rebuild, live validation found Xvfb died immediately after
+`docker-entrypoint.sh` did `exec python -m app.main`. With tini as PID 1
+and the shell `exec`-replacing itself, background `&`-started Xvfb got
+SIGHUP'd. Fix: `setsid -f Xvfb ...` detaches Xvfb into its own session.
+
+### `dfe6604` — Entrypoint stale-socket cleanup + liveness verify
+`docker restart` preserves `/tmp/.X11-unix/X99` from prior Xvfb.  New Xvfb
+silently fails ("already in use"). Added `rm -f` cleanup before Xvfb
+launch + pgrep liveness loop (5s) + exit-1-with-error if Xvfb fails to
+start. Also bumped MFA timeout 5→10 minutes.
+
+---
+
+## Phase 10A — Cookie persistence helpers (2 commits)
+
+### `5564ec6` + `5047da2` + `6df358a`
+Base helpers `save_auth_cookies(context, bank_slug, log)` and
+`load_auth_cookies(bank_slug)` in `base_bank_importer.py`. Each helper is
+~15 lines. Adopted across all 6 Playwright-based bank importers with a
+one-line call post-`Logged in` checkpoint:
+  usalliance_importer, usbank_importer, chime_importer,
+  merrick_importer, capitalone_importer, verizon_importer
+
+Importers already had matching `cookies=` param in their `_login()`
+signature + cookie injection via `context.add_cookies(...)`, so the
+save+load pair works end-to-end.
+
++10 tests in new `app/tests/test_auth_cookie_helpers.py`: roundtrip,
+slug isolation, malformed JSON → None, empty list → None, etc.
+
+---
+
+## Phase 10B — CDP-level webdriver mask (1 commit)
+
+### `5f0c2a3` — MED-PASS2-2
+patchright + `channel="chrome"` leaves `navigator.webdriver` as boolean
+`false` rather than the `undefined` a real human browser returns. Strict
+anti-bot vendors (DataDome, Akamai aggressive) check for
+`=== undefined`. Added `context.add_init_script()` in `launch_browser()`
+that redefines:
+  - `navigator.webdriver` → `undefined`
+  - `navigator.plugins` → `[1,2,3,4,5]` (stub — length > 0)
+  - `navigator.languages` → `['en-US', 'en']`
+
+Applied in both `base_bank_importer.launch_browser()` AND
+`usalliance_importer.run_import()` (the latter has its own inline launch
+not yet folded onto base — scoped for Phase 10C).
+
+---
+
+## Canary validation findings (2026-04-24)
+
+First live test of Phase 9 + remediation stack against a real bank
+(US Alliance FCU). Result: **authentication layer works end-to-end**
+(patchright + real Chrome + Xvfb + tini + warm-up nav + MFA → authenticated
+session reached). Two follow-up findings logged:
+
+1. **Statement-download bug** (tracked in
+   `qa/bug-statement-download-usalliance.md`) — every row click either
+   leaves URL unchanged or intercepts a 536-byte stub response. Real PDF
+   content presumably loaded by viewer iframe via follow-up fetches we're
+   not capturing. Scoped for a dedicated session with HAR capture from a
+   real user session.
+2. **Cookie persistence not session-restoring** — saved cookies re-injected
+   into a fresh context land on a page titled "Login". US Alliance's
+   session model is NOT pure cookie-based (likely localStorage + device
+   fingerprint + ThreatMetrix tmx_guid binding). Documented in bug-log.
+
+---
+
+## Deferred targets (explicit, with rationale)
+
+- **`setup_modals.js` factory consolidation** — Phase 10 Track B (skipped
+  this session for risk budget; banking modals already have partial
+  factory via `makePoller` + `makeBankHelpers` for 5 banks — folding US
+  Alliance into the same factory would be a medium-risk ~200 LOC shrink
+  worth a dedicated commit)
+- **usalliance inline Playwright launch → base** — Phase 10C (US Alliance
+  has its own `sync_playwright()` block; consolidating to
+  `launch_browser()` requires careful preservation of its SSE-streaming
+  stealth config)
+- **Shared `download_statement_pdf()` helper** — Phase 10D (would save
+  ~600 LOC across 5 bank importers, but risks masking the current
+  statement-download bug being investigated)
+- **`navigator.webdriver` CDP override verification** — init-script works
+  but A/B testing against a real detector has not been run. Deferred
+  until a specific bank importer fails at this fingerprint signal.
+
+---
+
+## Session totals (2026-04-24)
+
+- 17 commits since `e4b225c` (pre-session baseline)
+- pytest: 73 → **126 tests**, all green
+- 2 Docker image rebuilds + Docker Hub push
+- 3 git tags pushed (`pre-remediation-*`, `post-phase9-*`, `post-canary-*`)
+- 6 data-snapshot tarballs archived
+- 18 QA findings resolved + 2 deferred with documented rationale
+
 
 

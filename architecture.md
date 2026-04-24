@@ -48,43 +48,59 @@ app/
 │   └── __init__.py     — Re-exports all public symbols
 │
 ├── routes/             — Flask Blueprint modules (one domain per file)
-│   ├── importers/      — Import-source route package (moved from flat routes/ in Phase 8)
-│   │   ├── import_.py, import_jobs.py, import_cloud.py, import_gmail.py,
-│   │   ├── import_imap.py, import_paypal.py, import_usalliance.py,
-│   │   ├── import_capitalone.py, import_simplefin.py, import_plaid.py,
-│   │   ├── import_usbank.py, import_merrick.py, import_chime.py,
-│   │   └── import_verizon.py
 │   ├── _state.py       — Shared in-process mutable globals (job logs, stop events)
 │   ├── helpers.py      — Shared decorators, helper functions, setup_chat_stream SSE factory
 │   ├── __init__.py     — register_blueprints(app) wiring function
-│   ├── auth.py         — /login, /logout
+│   ├── auth.py         — /login, /logout (+ rate limiter + _safe_next open-redirect guard, Wave 3)
 │   ├── pages.py        — SPA shell routes (render dashboard.html per tab)
 │   ├── stats.py        — /api/stats, /api/activity, /api/health, filed returns
-│   ├── entities.py     — /api/entities/*, /api/user/profile
-│   ├── documents.py    — /api/documents/*
+│   ├── entities.py     — /api/entities/*, /api/user/profile (+ hex-color validator, Wave 2)
+│   ├── documents.py    — /api/documents/* (+ 404 branch for missing ids, Wave 2)
 │   ├── transactions.py — /api/transactions/*
-│   ├── import_.py      — /api/import/*: CSV (PayPal/Venmo/Bank), URL, OFX, LocalFS
-│   ├── import_jobs.py  — /api/import/jobs/*: job CRUD, log polling, cancel
-│   ├── import_cloud.py — /api/cloud/*: GDrive, Dropbox, S3; /api/filed-returns/import-from-folder
-│   ├── import_gmail.py — /api/import/gmail/*, /import/gmail/*: OAuth + import
-│   ├── import_paypal.py— /api/import/paypal/*: API pull + setup chat
-│   ├── import_usalliance.py— /api/import/usalliance/*: Playwright scraper
-│   ├── export_.py      — /api/export/*, /export/<year>/<slug>
+│   ├── export_.py      — /api/export/*, /export/<year>/<slug> (filename-dispatch reformat, Wave 1)
 │   ├── tax_review.py   — /api/tax-review (SSE streaming)
-│   ├── settings.py     — /api/settings/*, LLM/Paperless test endpoints
+│   ├── settings.py     — /api/settings/* (+ suffix-based credential mask, Wave A)
 │   ├── analyze.py      — /api/analyze/trigger, /api/analyze/status
 │   ├── users.py        — /api/users/*, user entity-access management
 │   ├── chat.py         — /api/chat/sessions/* (SSE streaming, sharing, PDF export)
 │   ├── ai_costs.py     — /api/ai-costs/*
-│   └── folder_manager.py— /api/folder-manager/*
+│   ├── folder_manager.py— /api/folder-manager/*
+│   ├── accountant.py   — /accountant/* (token-scoped read-only view)
+│   ├── mileage.py      — /api/mileage/* (+ isfinite + ISO-date validation, Wave-A MED-1)
+│   ├── reports.py      — /api/reports/*
+│   ├── vendors.py      — /api/vendors/*
+│   │
+│   └── importers/      — Import-source route sub-package (Phase 8B)
+│       ├── __init__.py — package marker
+│       ├── import_.py            — /api/import/*: CSV, URL, OFX, LocalFS
+│       ├── import_jobs.py        — /api/import/jobs/*: job CRUD + log polling + cancel
+│       ├── import_cloud.py       — /api/cloud/*: GDrive, Dropbox, S3 (+ OAuth state verify, Wave B)
+│       ├── import_gmail.py       — /api/import/gmail/*: OAuth + import
+│       ├── import_imap.py        — /api/import/imap/*: generic IMAP
+│       ├── import_paypal.py      — /api/import/paypal/*: API pull + setup chat
+│       ├── import_usalliance.py  — /api/import/usalliance/*: Playwright scraper
+│       ├── import_capitalone.py  — /api/import/capitalone/*
+│       ├── import_simplefin.py   — /api/import/simplefin/*
+│       ├── import_plaid.py       — /api/import/plaid/*
+│       ├── import_usbank.py      — /api/import/usbank/*
+│       ├── import_merrick.py     — /api/import/merrick/*
+│       ├── import_chime.py       — /api/import/chime/*
+│       └── import_verizon.py     — /api/import/verizon/*
 │
 ├── importers/          — Data source importers (one per source)
+│   ├── base_bank_importer.py  — Shared Playwright launch, CAPTCHA handling,
+│   │                            MFA registry, `save_auth_cookies()` +
+│   │                            `load_auth_cookies()` helpers (Phase 10A)
+│   ├── mfa_registry.py — OTP-code bucket keyed by job_id, populated by user POSTs
+│   ├── entity_router.py — Rule-based entity tagger for imported docs
 │   ├── csv_runner.py   — parse_csv() + run_csv_job() shared by all CSV import routes
-│   ├── gmail_importer.py
-│   ├── paypal_api.py
-│   ├── usalliance_importer.py
-│   ├── ofx_importer.py
-│   └── local_fs.py
+│   ├── bank_csv.py     — Generic bank CSV parser
+│   ├── gmail_importer.py, paypal_api.py, paypal_importer.py
+│   ├── usalliance_importer.py (own inline Playwright launch — not yet folded onto base)
+│   ├── usbank_importer.py, chime_importer.py, merrick_importer.py,
+│   ├── capitalone_importer.py, verizon_importer.py (all use base launch_browser)
+│   ├── plaid_importer.py, simplefin_importer.py, imap_importer.py, venmo_importer.py
+│   ├── ofx_importer.py, local_fs.py
 │
 ├── export/             — Export formatters
 │   ├── csv_exporter.py, pdf_report.py, quickbooks.py, ofx_exporter.py, txf_exporter.py
@@ -176,3 +192,40 @@ Flask-Login with bcrypt-hashed passwords. Three roles: `admin`, `standard`, and 
 Chat (`/api/chat/sessions/<id>/send`) and tax review (`/api/tax-review`) use Server-Sent Events (SSE) via Flask `Response(stream_with_context(...), mimetype="text/event-stream")`. Import job logs are polled (not streamed) via `/api/import/jobs/<id>/logs`.
 
 Stop signals for active chat streams are stored in `_state._chat_stop_events` (dict of `session_id → threading.Event`). Stop signals for import jobs use `_state._job_stop_events`.
+
+## Container runtime (Phase 9 + Wave 4)
+
+The container process tree:
+
+```
+tini (PID 1) — reaps zombie Chrome crashpad helpers, forwards SIGTERM
+  └── docker-entrypoint.sh (briefly)
+        ├── Xvfb :99 (detached via setsid -f; -ac disables access control)
+        └── python -m app.main (replaces the shell via `exec`)
+```
+
+Key files:
+- `Dockerfile` — python:3.11-slim base + Xvfb + tini + real Google Chrome via `patchright install chrome` + `ENV DISPLAY=:99`.
+- `docker-entrypoint.sh` — cleans stale `/tmp/.X11-unix/X99` socket, starts Xvfb via `setsid -f`, verifies Xvfb is alive (5s pgrep loop), then `exec python -m app.main`.
+- `tools/` — ops scripts COPY'd into the image at build time (`diag_usalliance.py`, `diag_usalliance_statement_dom.py`). Not auto-invoked; run via `docker exec`.
+
+## Bank importer anti-detection stack (Phase 9)
+
+All Playwright-based bank importers (US Bank, Chime, Merrick, Capital One, Verizon, US Alliance) use the following stack, shared via `base_bank_importer.launch_browser()`:
+
+- `patchright` (hardened Playwright fork) — patches CDP Runtime.Enable leak at driver level
+- `channel="chrome"` — real Google Chrome 147, not bundled Chromium
+- `headless=False` + Xvfb framebuffer — headful browser is a much lower fingerprint
+- `no_viewport=True` — screen size from Xvfb, not a fixed viewport arg
+- `context.add_init_script(...)` — redefines `navigator.webdriver` to `undefined`, stubs `plugins` + `languages` (MED-PASS2-2)
+- Auto-save of `context.cookies()` post-successful-login via `save_auth_cookies(context, bank_slug, log)` — next run can skip MFA
+
+## Security posture (post-remediation Waves)
+
+- `SESSION_COOKIE_SAMESITE=Lax` + `HttpOnly` + `Secure` (HIGH-1)
+- `SESSION_COOKIE_SECURE=True` — cookies only over HTTPS; localhost works due to browser secure-context carve-out
+- `@app.after_request` adds 5 headers: CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy (MED-4)
+- In-memory rate limiter: 10 failed logins per IP per 5 min; XFF spoofing defeated by ProxyFix gating on `TRUST_PROXY_HEADERS` env var (CRIT-PASS2-1)
+- `/login?next=...` sanitized via `_safe_next()` — only same-origin paths accepted (CRIT-NEW-3)
+- `ADMIN_INITIAL_PASSWORD` env-var gate on fresh-DB bootstrap (HIGH-2 / HIGH-NEW-1)
+- `/api/settings` credential mask uses suffix-based predicate (`_password|_pass|_secret|_token|_key`) — not a hardcoded allow-list (CRIT-1)
