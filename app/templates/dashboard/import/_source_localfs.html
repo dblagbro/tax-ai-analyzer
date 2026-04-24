@@ -1,0 +1,24 @@
+  <div id="ip-localfs" class="imp-panel">
+    <div class="card" style="max-width:640px">
+      <div class="card-title">Import from Local Folder</div>
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+        Scan a directory path on the server for PDFs, CSVs, and OFX files.<br>
+        PDFs are queued into Paperless-ngx. CSVs and OFX files are imported as transactions.
+      </p>
+      <div class="form-group">
+        <label>Directory Path (on server)</label>
+        <input id="lf-path" class="form-control" type="text"
+               value="/mnt/s/documents/doc_backup/devin_backup/devin_personal/tax"
+               placeholder="/mnt/s/documents/...">
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Entity</label><select id="lf-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Default Year</label><select id="lf-year" class="form-control"><option value="">Auto-detect from filenames</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+      </div>
+      <div id="lf-preview" style="display:none;background:var(--surface2);border-radius:6px;padding:10px;margin-bottom:12px;font-size:.85rem"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="scanLocalFs()">Scan (Preview)</button>
+        <button class="btn btn-primary" onclick="runLocalFs()">Import All</button>
+      </div>
+    </div>
+  </div>

@@ -1,0 +1,41 @@
+  <div id="ip-bank" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">Import OFX / QFX (US Alliance FCU &amp; most banks)</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          In your online banking: <strong>Export Transactions → QuickBooks (OFX/QFX)</strong>.<br>
+          US Alliance FCU: Accounts → [account] → Export → QuickBooks
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Entity</label><select id="ofx-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label>Year (optional)</label><select id="ofx-year" class="form-control"><option value="">Auto-detect from file</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="upload-area" onclick="document.getElementById('ofxFile').click()">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span id="ofxName">Click to select .ofx or .qfx file</span>
+        </div>
+        <input type="file" id="ofxFile" style="display:none" accept=".ofx,.qfx,.qbo" onchange="document.getElementById('ofxName').textContent=this.files[0].name">
+        <br><button class="btn btn-primary" onclick="importOFX()">Import OFX</button>
+      </div>
+      <div class="card">
+        <div class="card-title">Import Bank CSV</div>
+        <div class="form-row">
+          <div class="form-group"><label>Entity</label><select id="bk-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label>Year</label><select id="bk-year" class="form-control"><option value="">Auto-detect</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Date Column</label><input id="bk-date" class="form-control" value="Date"></div>
+          <div class="form-group"><label>Description Column</label><input id="bk-desc" class="form-control" value="Description"></div>
+          <div class="form-group"><label>Amount Column</label><input id="bk-amt" class="form-control" value="Amount"></div>
+        </div>
+        <div class="upload-area" onclick="document.getElementById('bkFile').click()">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span id="bkName">Click to select Bank CSV</span>
+        </div>
+        <input type="file" id="bkFile" style="display:none" accept=".csv" onchange="document.getElementById('bkName').textContent=this.files[0].name">
+        <br><button class="btn btn-primary" onclick="importBank()">Import CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Local Folder -->

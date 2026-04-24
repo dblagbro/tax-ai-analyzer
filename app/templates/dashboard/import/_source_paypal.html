@@ -1,0 +1,30 @@
+  <div id="ip-paypal" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">Connect PayPal API</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Get credentials at <strong>developer.paypal.com</strong> → My Apps &amp; Credentials → Create App → Live.<br>
+          Paste Client ID and Secret below — we use the Transactions API to pull data directly.
+        </p>
+        <div id="pp-status-badge" style="margin-bottom:10px"></div>
+        <div class="form-group"><label>Client ID</label><input id="pp-cid" class="form-control" type="text" placeholder="AXxxx…" autocomplete="off"></div>
+        <div class="form-group"><label>Client Secret</label><input id="pp-csec" class="form-control" type="password" placeholder="EKxxx…" autocomplete="off"></div>
+        <div class="form-group"><label><input type="checkbox" id="pp-sandbox"> Sandbox / test mode</label></div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn btn-outline btn-sm" onclick="savePaypalCreds()">Save &amp; Test Credentials</button>
+          <button class="btn btn-secondary btn-sm" onclick="openPaypalSetupModal()">&#128172; Setup Guide</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pull Transactions</div>
+        <div class="form-row">
+          <div class="form-group"><label>Entity</label><select id="pp-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label>Years (comma-separated)</label><input id="pp-years" class="form-control" value="2022,2023,2024,2025"></div>
+        </div>
+        <button class="btn btn-primary" onclick="pullPaypal()">Pull from PayPal</button>
+        <p style="font-size:.8rem;color:var(--muted);margin-top:8px">Pulls all transactions for the selected years directly from PayPal's API. Deduplicates automatically.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- US Alliance FCU — Playwright scraper -->

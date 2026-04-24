@@ -48,6 +48,12 @@ app/
 │   └── __init__.py     — Re-exports all public symbols
 │
 ├── routes/             — Flask Blueprint modules (one domain per file)
+│   ├── importers/      — Import-source route package (moved from flat routes/ in Phase 8)
+│   │   ├── import_.py, import_jobs.py, import_cloud.py, import_gmail.py,
+│   │   ├── import_imap.py, import_paypal.py, import_usalliance.py,
+│   │   ├── import_capitalone.py, import_simplefin.py, import_plaid.py,
+│   │   ├── import_usbank.py, import_merrick.py, import_chime.py,
+│   │   └── import_verizon.py
 │   ├── _state.py       — Shared in-process mutable globals (job logs, stop events)
 │   ├── helpers.py      — Shared decorators, helper functions, setup_chat_stream SSE factory
 │   ├── __init__.py     — register_blueprints(app) wiring function
@@ -90,6 +96,24 @@ app/
 ├── checks/             — Deterministic classification rules
 │   └── financial_rules.py  — validate_document(), check_*, apply_business_rules()
 │
+├── static/             — Served at {URL_PREFIX}/static/ via Flask static_url_path config
+│   └── js/dashboard/   — Dashboard JS modules (Phase 6 extraction)
+│       ├── core.js             — Utilities, health polling, job-log modal, tab switcher
+│       ├── table_manager.js    — Sortable/filterable/resizable column class
+│       ├── dashboard.js        — Overview tab: stat cards, activity, recent jobs, jump helpers
+│       ├── transactions.js     — Transactions tab: list, reconcile, bulk-edit, vendor merge
+│       ├── documents.js        — Documents tab: table, file browser, override modal
+│       ├── import_hub.js       — Import Hub tab: source selectors, jobs list, Gmail import polling
+│       ├── setup_modals.js     — Gmail/PayPal/all bank setup modal IIFEs
+│       ├── chat.js             — AI Chat tab: sessions, messages, sharing, PDF export
+│       ├── tax_review.js       — Tax Review tab: filed returns, SSE stream, Q&A followups
+│       ├── reports.js          — Reports tab: export generate/download, Year-over-Year
+│       ├── admin.js            — Settings, Users, Analysis trigger, Activity-log filter view, Profile, Help/About (Phase 8)
+│       ├── mileage.js          — Mileage tab
+│       ├── entities.js         — Entity Management tab (Phase 8, from _modal_paypal.html)
+│       ├── ai_costs.js         — AI Costs tab (Phase 8)
+│       └── folder_manager.js   — File Organizer tab (Phase 8)
+│
 └── templates/          — Jinja2 templates
     ├── dashboard.html  — SPA shell (31-line wrapper; all content via {% include %})
     ├── dashboard/      — Tab and modal partials for dashboard.html
@@ -98,7 +122,7 @@ app/
     │   ├── _tab_dashboard.html     — Overview tab
     │   ├── _tab_transactions.html  — Transactions tab
     │   ├── _tab_documents.html     — Documents tab
-    │   ├── _tab_import.html        — Import Hub tab
+    │   ├── _tab_import.html        — Import Hub shell (51 lines; per-source panels via {% include %}, Phase 7)
     │   ├── _tab_chat.html          — AI Chat tab + share modal
     │   ├── _tab_tax_review.html    — Tax Review tab
     │   ├── _tab_reports.html       — Reports & Exports tab
@@ -108,8 +132,15 @@ app/
     │   ├── _tab_folder_manager.html— File Organizer tab
     │   ├── _tab_ai_costs.html      — AI Costs tab
     │   ├── _modals.html            — Shared modals (job log, txn, users, Gmail, profile, help, about…)
-    │   ├── _scripts.html           — Main JS + US Alliance importer JS
-    │   └── _modal_paypal.html      — PayPal Setup modal + its JS
+    │   ├── _scripts.html           — Thin bootstrap (~42 lines): Jinja globals + ordered <script src="..."> (Phase 6)
+    │   ├── _modal_paypal.html      — PayPal Setup modal HTML only (trimmed to 28 lines in Phase 8; JS moved to entities.js/ai_costs.js/folder_manager.js/admin.js)
+    │   └── import/                 — Per-source Import Hub panels (Phase 7)
+    │       ├── _source_gmail.html, _source_imap.html, _source_paypal.html
+    │       ├── _source_usalliance.html, _source_capitalone.html, _source_usbank.html
+    │       ├── _source_merrick.html, _source_chime.html, _source_verizon.html
+    │       ├── _source_simplefin.html, _source_plaid.html, _source_venmo.html
+    │       ├── _source_bank.html, _source_localfs.html, _source_url.html
+    │       └── _source_cloud.html
     ├── login.html
     ├── gmail_setup.html
     └── docs.html

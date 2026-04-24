@@ -1,0 +1,64 @@
+  <div id="ip-simplefin" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">&#127760; SimpleFIN Bridge</div>
+        <div id="sfin-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          SimpleFIN Bridge connects to <strong>16,000+ financial institutions</strong> via MX Financial's data network.
+          No credentials stored here — you authenticate directly with your bank.
+        </p>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:8px"><strong>How to connect:</strong></p>
+        <ol style="font-size:.82rem;color:var(--muted);padding-left:18px;line-height:1.9;margin-bottom:14px">
+          <li>Go to <a href="https://beta-bridge.simplefin.org/auth" target="_blank" style="color:var(--accent)">beta-bridge.simplefin.org</a></li>
+          <li>Sign in or create a free account</li>
+          <li>Click <strong>+ Connect an Account</strong> and link your bank</li>
+          <li>Click <strong>Get API Token</strong> → copy the token URL</li>
+          <li>Paste it below and click <strong>Claim Token</strong></li>
+        </ol>
+        <div class="form-group">
+          <label>Setup Token or URL</label>
+          <input id="sfin-token" class="form-control" type="text" autocomplete="off"
+                 placeholder="https://beta-bridge.simplefin.org/simplefin/claim/…">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Paste the full claim URL or just the token portion</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="claimSimpleFin()">&#128279; Claim Token</button>
+        <div id="sfin-claim-result" style="margin-top:8px;font-size:.8rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pull Transactions</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="sfin-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="sfin-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Account Filter <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(optional — leave blank for all)</span></label>
+          <input id="sfin-account-filter" class="form-control" type="text" placeholder="e.g. Checking, Savings">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Comma-separated partial account name matches</div>
+        </div>
+        <button class="btn btn-primary" id="sfin-start-btn" onclick="startSfinImport()">&#9654; Pull Transactions</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Fetches transactions in 90-day chunks (API limit). Deduplicates automatically by transaction ID.
+          Rate limit: 24 requests/day.
+        </p>
+      </div>
+    </div>
+    <div id="sfin-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a3c5e;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; SimpleFIN Import Log — <span id="sfin-log-status">running</span></span>
+          <button onclick="document.getElementById('sfin-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="sfin-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plaid -->

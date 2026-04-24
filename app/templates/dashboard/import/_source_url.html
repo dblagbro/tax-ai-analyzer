@@ -1,0 +1,10 @@
+  <div id="ip-url" class="imp-panel">
+    <div class="card" style="max-width:560px">
+      <div class="card-title">Import from URL</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>URL</label><input id="urlInput" class="form-control" type="url" placeholder="https://…"></div>
+        <div class="form-group"><label>Entity</label><select id="url-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+      </div>
+      <button class="btn btn-primary" onclick="importUrl()">Fetch &amp; Import</button>
+    </div>
+  </div>

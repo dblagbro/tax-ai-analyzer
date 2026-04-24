@@ -51,12 +51,12 @@ class TestImports:
         from app.routes.documents import bp as docs_bp
         from app.routes.entities import bp as entities_bp
         from app.routes.export_ import bp as export_bp
-        from app.routes.import_ import bp as import_bp
-        from app.routes.import_cloud import bp as import_cloud_bp
-        from app.routes.import_gmail import bp as import_gmail_bp
-        from app.routes.import_jobs import bp as import_jobs_bp
-        from app.routes.import_paypal import bp as import_paypal_bp
-        from app.routes.import_usalliance import bp as import_usalliance_bp
+        from app.routes.importers.import_ import bp as import_bp
+        from app.routes.importers.import_cloud import bp as import_cloud_bp
+        from app.routes.importers.import_gmail import bp as import_gmail_bp
+        from app.routes.importers.import_jobs import bp as import_jobs_bp
+        from app.routes.importers.import_paypal import bp as import_paypal_bp
+        from app.routes.importers.import_usalliance import bp as import_usalliance_bp
         from app.routes.stats import bp as stats_bp
         from app.routes.transactions import bp as txn_bp
         from app.routes.users import bp as users_bp

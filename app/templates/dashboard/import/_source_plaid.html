@@ -1,0 +1,61 @@
+  <div id="ip-plaid" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#00a651">&#127974; Plaid</div>
+        <div id="plaid-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
+          Plaid covers <strong>12,000+ US &amp; Canadian institutions</strong> with OAuth-based access.
+          Credentials go directly to the bank — we store only the access token.
+        </p>
+        <div style="border:1px solid #e0e4ea;border-radius:7px;padding:12px;background:#f8f9fb;margin-bottom:10px">
+          <div style="font-size:.78rem;font-weight:600;color:#555;margin-bottom:6px">API Credentials (from dashboard.plaid.com)</div>
+          <div class="form-group">
+            <label>Client ID</label>
+            <input id="plaid-client-id" class="form-control" type="text" autocomplete="off" placeholder="65abc…">
+          </div>
+          <div class="form-group">
+            <label>Secret</label>
+            <input id="plaid-secret" class="form-control" type="password" autocomplete="new-password" placeholder="secret…">
+          </div>
+          <div class="form-group">
+            <label>Environment</label>
+            <select id="plaid-env" class="form-control">
+              <option value="sandbox">Sandbox (test data)</option>
+              <option value="development">Development</option>
+              <option value="production">Production</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="savePlaidSettings()">&#128274; Save Credentials</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Connect a Bank</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Click below to open the Plaid Link widget and authenticate with your bank.
+        </p>
+        <div class="form-group">
+          <label>Entity</label>
+          <select id="plaid-entity" class="form-control">
+            {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <button class="btn btn-primary" id="plaid-connect-btn" onclick="openPlaidLink()">&#128279; Connect Bank</button>
+        <div id="plaid-connect-msg" style="font-size:.79rem;color:var(--muted);margin-top:8px"></div>
+
+        <div style="border-top:1px solid var(--border);margin:16px 0 10px"></div>
+        <div style="font-size:.84rem;font-weight:600;margin-bottom:8px">Connected Institutions</div>
+        <div id="plaid-items-list" style="font-size:.82rem">Loading…</div>
+        <button class="btn btn-primary" id="plaid-sync-btn" onclick="syncAllPlaid()" style="margin-top:10px">&#128260; Sync All Transactions</button>
+      </div>
+    </div>
+    <div id="plaid-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#003d1f;color:#a8e6cf;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Plaid Import Log — <span id="plaid-log-status">running</span></span>
+          <button onclick="document.getElementById('plaid-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="plaid-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+

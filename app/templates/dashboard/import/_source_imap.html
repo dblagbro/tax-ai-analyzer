@@ -1,0 +1,91 @@
+  <div id="ip-imap" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">&#128231; IMAP Email</div>
+        <div id="imap-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Pull tax-relevant emails from <strong>any IMAP provider</strong> — Outlook, Yahoo, iCloud, AOL, or any custom server.
+          Use an <strong>app password</strong> (not your regular password). All major providers support this.
+        </p>
+        <div class="form-group">
+          <label>Provider</label>
+          <select id="imap-provider" class="form-control" onchange="imapApplyPreset()">
+            <option value="generic">Generic IMAP</option>
+            <option value="yahoo">Yahoo Mail</option>
+            <option value="icloud">iCloud Mail</option>
+            <option value="outlook">Outlook.com / Office 365</option>
+            <option value="aol">AOL Mail</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>IMAP Host</label>
+            <input id="imap-host" class="form-control" type="text" placeholder="imap.mail.yahoo.com">
+          </div>
+          <div class="form-group" style="max-width:100px">
+            <label>Port</label>
+            <input id="imap-port" class="form-control" type="number" value="993">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Username (full email address)</label>
+          <input id="imap-username" class="form-control" type="email" autocomplete="off" placeholder="you@yahoo.com">
+        </div>
+        <div class="form-group">
+          <label>App Password <span style="font-size:.72rem;color:var(--muted)">(leave blank to keep existing)</span></label>
+          <input id="imap-password" class="form-control" type="password" autocomplete="new-password" placeholder="generated app password">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Folder</label>
+            <input id="imap-folder" class="form-control" type="text" value="INBOX">
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;padding-top:24px">
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+              <input id="imap-use-ssl" type="checkbox" checked> Use SSL (IMAPS)
+            </label>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="imapSaveSettings()">&#128274; Save Settings</button>
+          <button class="btn btn-outline btn-sm" onclick="imapTestConnection()">&#128279; Test Connection</button>
+        </div>
+        <div id="imap-test-result" style="margin-top:10px;font-size:.82rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Run IMAP Import</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="imap-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years</label>
+            <input id="imap-years" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Search Terms <span style="font-size:.72rem;color:var(--muted)">(space-separated; defaults used if blank)</span></label>
+          <input id="imap-search-terms" class="form-control" type="text" placeholder="receipt invoice statement 1099 W-2 tax billing">
+        </div>
+        <button class="btn btn-primary" id="imap-start-btn" onclick="startImapImport()">&#9654; Start Import</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Scans each year's matching emails, downloads PDF attachments to the consume path,
+          and runs the same AI review pipeline as Gmail. Transactions land in the transactions table with source=<code>imap:&lt;provider&gt;</code>.
+        </p>
+      </div>
+    </div>
+    <div id="imap-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a1a2e;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; IMAP Import Log — <span id="imap-log-status">running</span></span>
+          <button onclick="document.getElementById('imap-log-panel').style.display='none'" style="background:none;border:none;color:#888;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="imap-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PayPal API -->

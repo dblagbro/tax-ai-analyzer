@@ -1,0 +1,75 @@
+  <div id="ip-capitalone" class="imp-panel">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:#d03027">&#128179; Capital One</div>
+        <div id="co-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Enter your Capital One online banking credentials. Downloads transaction CSVs
+          via the native "Download Transactions" UI — no PDF scraping.
+        </p>
+        <div class="form-group">
+          <label>Username</label>
+          <input id="co-username" class="form-control" type="text" autocomplete="off" placeholder="Your username or email">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input id="co-password" class="form-control" type="password" autocomplete="new-password" placeholder="Your password">
+            <span class="pw-eye" onclick="togglePw('co-password',this)" title="Show/hide">&#128065;</span>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="saveCoOneCreds()">Save Credentials</button>
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">&#127850; Cookie Auth <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(bypasses bot detection)</span></div>
+        <div id="co-cookie-status" style="margin-bottom:8px;font-size:.8rem;color:var(--muted)"></div>
+        <p style="font-size:.79rem;color:var(--muted);margin-bottom:8px">Log in to Capital One in your real browser, export cookies with Cookie-Editor extension, paste below.</p>
+        <div class="form-group">
+          <textarea id="co-cookies-input" class="form-control" rows="3" style="font-family:monospace;font-size:.72rem" placeholder='[{"name":"...","value":"...","domain":"capitalone.com",...}]'></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveCoCookies()">&#128190; Save Cookies</button>
+          <button class="btn btn-outline btn-sm" onclick="clearCoCookies()" style="color:#d32f2f">&#128465; Clear</button>
+        </div>
+        <div id="co-cookie-result" style="margin-top:6px;font-size:.8rem"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Download Transactions</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="co-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated)</span></label>
+            <input id="co-years-input" class="form-control" type="text" value="2022,2023,2024,2025">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="co-start-btn" onclick="startCoOneImport()">&#9654; Download Transactions</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Downloads CSV exports in 90-day chunks, parses and imports all transactions to the database.
+          MFA prompt appears below if triggered.
+        </p>
+        <div id="co-mfa-box" style="display:none;margin-top:12px;background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0">
+          <strong style="font-size:.85rem">&#128274; MFA Required</strong>
+          <p style="font-size:.82rem;margin:4px 0 8px">Check your phone for a code from Capital One.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="co-mfa-code" class="form-control" type="text" placeholder="6-digit code" style="max-width:160px;font-family:monospace;letter-spacing:.1em">
+            <button class="btn btn-primary btn-sm" onclick="submitCoMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="co-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#8b0000;color:#ffcdd2;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Capital One Import Log — <span id="co-log-status">running</span></span>
+          <button onclick="document.getElementById('co-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="co-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- US Bank -->

@@ -1,0 +1,21 @@
+  <div id="ip-venmo" class="imp-panel">
+    <div class="card" style="max-width:560px">
+      <div class="card-title">Import Venmo CSV</div>
+      <div style="background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0;margin-bottom:14px;font-size:.85rem">
+        <strong>Note:</strong> Venmo has no public API. CSV export is the only option.<br>
+        Download: Venmo app → Settings → Privacy → Download Your Data → transactions.csv
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Entity</label><select id="vm-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Year</label><select id="vm-year" class="form-control"><option value="">Auto-detect</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="upload-area" onclick="document.getElementById('vmFile').click()">
+        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        <span id="vmName">Click to select Venmo CSV</span>
+      </div>
+      <input type="file" id="vmFile" style="display:none" accept=".csv" onchange="document.getElementById('vmName').textContent=this.files[0].name">
+      <br><button class="btn btn-primary" onclick="importVenmo()">Import</button>
+    </div>
+  </div>
+
+  <!-- Bank: OFX/QFX + CSV -->

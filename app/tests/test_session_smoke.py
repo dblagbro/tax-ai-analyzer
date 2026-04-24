@@ -120,13 +120,26 @@ class TestHtmlCrawl:
 
     def test_handler_functions_resolve(self):
         _, client = _client_with_admin()
-        all_html = ""
+        all_text = ""
         per_page = {}
+        loaded_srcs = set()
         for path in PAGES:
             body = client.get(path).data.decode("utf-8", errors="replace")
-            all_html += body
+            all_text += body
             per_page[path] = body
-        defined = _extract_defined_fns(all_html)
+            # Also fetch any external <script src="..."> files from this page so
+            # their function definitions count as reachable. Phase 6 split the
+            # dashboard JS into /static/js/dashboard/*.js — those must be crawled.
+            for src in re.findall(r'<script[^>]+src="([^"]+)"', body):
+                if src.startswith("http"):
+                    continue  # skip CDN scripts (Plaid etc.)
+                if src in loaded_srcs:
+                    continue
+                loaded_srcs.add(src)
+                resp = client.get(src)
+                if resp.status_code == 200:
+                    all_text += "\n" + resp.data.decode("utf-8", errors="replace")
+        defined = _extract_defined_fns(all_text)
         for path, body in per_page.items():
             missing = _extract_fn_calls(body) - defined
             assert not missing, f"{path}: unresolved handler fns: {sorted(missing)}"

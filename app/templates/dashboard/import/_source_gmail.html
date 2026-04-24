@@ -1,0 +1,51 @@
+  <div id="ip-gmail" class="imp-panel active">
+    <div class="card" style="max-width:680px">
+      <div class="card-title">Gmail Import</div>
+      <div id="gm-import-status" style="margin-bottom:12px;font-size:.82rem;color:var(--muted)">Checking status…</div>
+      <div class="form-row">
+        <div class="form-group"><label>Entity</label>
+          <select id="gm-entity" class="form-control">
+            <option value="">Auto-detect</option>
+            {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated, any year)</span></label>
+          <input id="gm-years-input" class="form-control" type="text" placeholder="e.g. 2020,2021,2022,2023" value="2021,2022,2023,2024">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Enter any years you want to import. Year is auto-detected from email date.</div>
+        </div>
+      </div>
+      <div style="margin-bottom:12px;background:#f8f9fb;border:1px solid #e0e4ea;border-radius:7px;padding:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:.78rem;font-weight:600;color:#555">Gmail Search Terms</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm btn-outline" onclick="editSearchTerms()" id="gm-terms-edit-btn" style="padding:2px 8px;font-size:.75rem">&#9998; Edit</button>
+            <button class="btn btn-sm btn-primary" onclick="saveSearchTerms()" id="gm-terms-save-btn" style="padding:2px 8px;font-size:.75rem;display:none">&#10003; Save</button>
+            <button class="btn btn-sm btn-outline" onclick="cancelSearchTerms()" id="gm-terms-cancel-btn" style="padding:2px 8px;font-size:.75rem;display:none">&#10005;</button>
+          </div>
+        </div>
+        <div id="gm-search-terms" style="font-size:.78rem;color:var(--muted);line-height:1.8">Loading…</div>
+        <textarea id="gm-terms-editor" class="form-control" rows="3" style="display:none;font-family:monospace;font-size:.78rem;margin-top:6px" placeholder="Space-separated search terms, e.g: receipt invoice statement 1099 W-2 from:iactaxes.com"></textarea>
+        <div id="gm-terms-hint" style="display:none;font-size:.72rem;color:var(--muted);margin-top:4px">Space-separated. Use <code>from:domain.com</code> to include all emails from a sender. Accountant emails (iactaxes.com) are always included automatically.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="gm-start-btn" onclick="startGmail()">▶ Start Import</button>
+        <button class="btn btn-outline" onclick="openGmailSetupModal()">&#9881; Setup / Credentials</button>
+      </div>
+    </div>
+    <!-- Live log terminal -->
+    <div id="gm-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a1a2e;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; Import Log — <span id="gm-log-status">running</span></span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="gm-cancel-btn" onclick="cancelGmailImport()" style="background:#e53e3e;border:none;color:#fff;cursor:pointer;font-size:.72rem;padding:2px 8px;border-radius:4px;display:none">&#9632; Cancel</button>
+            <button onclick="document.getElementById('gm-log-panel').style.display='none'" style="background:none;border:none;color:#888;cursor:pointer;font-size:1rem">&times;</button>
+          </div>
+        </div>
+        <div id="gm-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMAP (Outlook / Yahoo / iCloud / generic) -->

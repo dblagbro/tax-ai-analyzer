@@ -8,20 +8,20 @@ def register_blueprints(app):
     from app.routes.entities import bp as entities_bp
     from app.routes.documents import bp as documents_bp
     from app.routes.transactions import bp as transactions_bp
-    from app.routes.import_ import bp as import_bp
-    from app.routes.import_jobs import bp as import_jobs_bp
-    from app.routes.import_cloud import bp as import_cloud_bp
-    from app.routes.import_gmail import bp as import_gmail_bp
-    from app.routes.import_imap import bp as import_imap_bp
-    from app.routes.import_paypal import bp as import_paypal_bp
-    from app.routes.import_usalliance import bp as import_usalliance_bp
-    from app.routes.import_capitalone import bp as import_capitalone_bp
-    from app.routes.import_simplefin import bp as import_simplefin_bp
-    from app.routes.import_plaid import bp as import_plaid_bp
-    from app.routes.import_usbank import bp as import_usbank_bp
-    from app.routes.import_merrick import bp as import_merrick_bp
-    from app.routes.import_chime import bp as import_chime_bp
-    from app.routes.import_verizon import bp as import_verizon_bp
+    from app.routes.importers.import_ import bp as import_bp
+    from app.routes.importers.import_jobs import bp as import_jobs_bp
+    from app.routes.importers.import_cloud import bp as import_cloud_bp
+    from app.routes.importers.import_gmail import bp as import_gmail_bp
+    from app.routes.importers.import_imap import bp as import_imap_bp
+    from app.routes.importers.import_paypal import bp as import_paypal_bp
+    from app.routes.importers.import_usalliance import bp as import_usalliance_bp
+    from app.routes.importers.import_capitalone import bp as import_capitalone_bp
+    from app.routes.importers.import_simplefin import bp as import_simplefin_bp
+    from app.routes.importers.import_plaid import bp as import_plaid_bp
+    from app.routes.importers.import_usbank import bp as import_usbank_bp
+    from app.routes.importers.import_merrick import bp as import_merrick_bp
+    from app.routes.importers.import_chime import bp as import_chime_bp
+    from app.routes.importers.import_verizon import bp as import_verizon_bp
     from app.routes.accountant import bp as accountant_bp
     from app.routes.mileage import bp as mileage_bp
     from app.routes.reports import bp as reports_bp

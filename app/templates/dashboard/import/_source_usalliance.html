@@ -1,0 +1,115 @@
+  <div id="ip-usalliance" class="imp-panel">
+
+    <!-- Bot detection notice -->
+    <div id="usa-bot-notice" style="background:#fff3cd;border-left:4px solid #ff9800;padding:12px 16px;border-radius:0 6px 6px 0;margin-bottom:14px;font-size:.84rem;display:none">
+      <strong>&#9888; Bot Detection Active</strong> — US Alliance's security system is blocking automated logins from this server's IP address.
+      Use <strong>Cookie Authentication</strong> below to bypass this: log in from your real browser, export your session cookies, and paste them here.
+    </div>
+
+    <div class="two-col">
+
+      <!-- Credentials card -->
+      <div class="card">
+        <div class="card-title" style="color:#1a3d7c">&#127968; US Alliance FCU</div>
+        <div id="usa-status-badge" style="margin-bottom:10px;font-size:.82rem">Checking…</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          Enter your US Alliance online banking login. Credentials are stored
+          locally and never leave your server.
+        </p>
+        <div class="form-group">
+          <label>Online Banking Username</label>
+          <input id="usa-username" class="form-control" type="text" autocomplete="off" placeholder="Your username">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input id="usa-password" class="form-control" type="password" autocomplete="new-password" placeholder="Your password">
+            <span class="pw-eye" onclick="togglePw('usa-password',this)" title="Show/hide">&#128065;</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveUsaCreds()">Save Credentials</button>
+          <button class="btn btn-outline btn-sm" id="usa-test-btn" onclick="testUsaCreds()">&#9654; Test Login</button>
+        </div>
+        <div id="usa-test-result" style="margin-top:8px;font-size:.8rem"></div>
+
+        <!-- Cookie Authentication -->
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">&#127850; Cookie Authentication <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(bypasses bot detection)</span></div>
+        <div id="usa-cookie-status" style="margin-bottom:8px;font-size:.8rem;color:var(--muted)"></div>
+        <p style="font-size:.79rem;color:var(--muted);margin-bottom:8px">
+          Log in to US Alliance from your real browser, then use <strong>one</strong> of these methods:
+        </p>
+        <div style="background:#f8f9fa;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:.78rem">
+          <strong>Method A — Console snippet (no extension needed):</strong><br>
+          Open DevTools (F12) → Console tab, then click the button below to copy the snippet, paste it in the console, and press Enter:<br>
+          <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
+            <code id="usa-cookie-snippet" style="flex:1;display:block;background:#1e1e1e;color:#9cdcfe;padding:6px 8px;border-radius:4px;word-break:break-all;font-size:.72rem;overflow-x:auto;white-space:pre-wrap;min-width:0">copy(JSON.stringify(document.cookie.split(';').map(c=>{var p=c.trim().indexOf('=');return{name:c.trim().slice(0,p),value:c.trim().slice(p+1),domain:'account.usalliance.org',path:'/'};}).filter(c=>c.name)))</code>
+            <button class="btn btn-outline btn-sm" onclick="usaCopySnippet()" id="usa-snippet-copy-btn" style="white-space:nowrap;flex-shrink:0">&#128203; Copy</button>
+          </div>
+          Then paste (Ctrl+V) into the console and hit Enter, then paste the result into the box below.<br>
+          <em style="color:#888">Note: this only captures non-HttpOnly cookies. If import still fails, use Method B.</em>
+        </div>
+        <div style="background:#f8f9fa;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:.78rem">
+          <strong>Method B — Cookie-Editor extension (gets all cookies including HttpOnly):</strong><br>
+          1. Install <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" style="color:var(--accent)">Cookie-Editor</a> from Chrome Web Store<br>
+          2. While logged in to US Alliance, click the Cookie-Editor icon in your toolbar<br>
+          3. Click the <strong>Export</strong> button at the bottom → JSON is copied to clipboard<br>
+          4. Paste into the box below
+        </div>
+        <div class="form-group">
+          <textarea id="usa-cookies-input" class="form-control" rows="3" style="font-family:monospace;font-size:.72rem" placeholder='[{"name":"session","value":"...","domain":"account.usalliance.org",...}]'></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="saveUsaCookies()">&#128190; Save Cookies</button>
+          <button class="btn btn-outline btn-sm" id="usa-clear-cookies-btn" onclick="clearUsaCookies()" style="color:#d32f2f">&#128465; Clear Cookies</button>
+        </div>
+        <div id="usa-cookie-result" style="margin-top:6px;font-size:.8rem"></div>
+      </div>
+
+      <!-- Run import card -->
+      <div class="card">
+        <div class="card-title">Download Statements</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entity</label>
+            <select id="usa-entity" class="form-control">
+              {% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Years <span style="font-size:.75rem;color:var(--muted)">(comma-separated)</span></label>
+            <input id="usa-years-input" class="form-control" type="text" placeholder="e.g. 2020,2021,2022" value="2021,2022,2023">
+            <div style="font-size:.72rem;color:var(--muted);margin-top:3px">Any years — not limited to a preset list</div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="usa-start-btn" onclick="startUsaImport()">&#9654; Download Statements</button>
+        <p style="font-size:.79rem;color:var(--muted);margin-top:8px">
+          Downloads PDF bank statements directly from the portal. Statements land in
+          Paperless consume folder and are auto-tagged by year. MFA prompt appears below if triggered.
+        </p>
+        <!-- MFA entry (shown on demand) -->
+        <div id="usa-mfa-box" style="display:none;margin-top:12px;background:#fff8e1;border-left:3px solid #ffc107;padding:10px 14px;border-radius:0 4px 4px 0">
+          <strong style="font-size:.85rem">&#128274; MFA Required</strong>
+          <p style="font-size:.82rem;margin:4px 0 8px">Check your email/SMS/authenticator for a code from US Alliance FCU.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="usa-mfa-code" class="form-control" type="text" placeholder="Enter code" style="max-width:160px;font-family:monospace;letter-spacing:.1em">
+            <button class="btn btn-primary btn-sm" onclick="submitUsaMfa()">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live log terminal -->
+    <div id="usa-log-panel" style="display:none;margin-top:12px">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="background:#1a3d7c;color:#a0c4ff;padding:8px 14px;font-size:.75rem;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+          <span>&#128196; US Alliance Import Log — <span id="usa-log-status">running</span></span>
+          <button onclick="document.getElementById('usa-log-panel').style.display='none'" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem">&times;</button>
+        </div>
+        <div id="usa-log-lines" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:.75rem;line-height:1.6;padding:10px 14px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Venmo CSV (no public API exists) -->
