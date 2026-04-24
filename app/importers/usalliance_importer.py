@@ -178,19 +178,19 @@ def run_import(
                 if _is_push_mfa_page(page):
                     mfa_url = page.url
                     log("📱 Push MFA detected — check your US Alliance app and tap Approve.")
-                    log(f"⏳ Waiting up to 5 minutes (MFA page: {mfa_url})…")
+                    log(f"⏳ Waiting up to 10 minutes (MFA page: {mfa_url})…")
                     _save_debug_screenshot(page, "mfa_push")
                     # Wait for URL to change away from the MFA/login page — happens
                     # automatically the moment the user approves in the app.
                     try:
                         page.wait_for_url(
                             lambda url: url != mfa_url and "/login" not in url,
-                            timeout=300000,
+                            timeout=600000,
                         )
                     except Exception:
                         _save_debug_screenshot(page, "mfa_push_timeout")
                         raise RuntimeError(
-                            "MFA timeout — push notification not approved within 5 minutes. "
+                            "MFA timeout — push notification not approved within 10 minutes. "
                             "Check your US Alliance app and try again."
                         )
                     # URL changed — user approved. Wait for page to settle (best-effort;
