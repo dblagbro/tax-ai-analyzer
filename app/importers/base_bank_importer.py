@@ -220,6 +220,24 @@ def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logge
         pw.stop()
         raise
 
+    # MED-PASS2-2: patchright + channel="chrome" leaves navigator.webdriver
+    # exposed as `false` (boolean) rather than `undefined`. Stricter anti-bot
+    # vendors (DataDome, Akamai in aggressive mode) check for
+    # `=== undefined` as a humanity signal. add_init_script runs too late for
+    # some pages; we override at the CONTEXT level so every new document
+    # navigation applies it before any detector script runs.
+    try:
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {"
+            "get: () => undefined, configurable: true});"
+            "Object.defineProperty(navigator, 'plugins', {"
+            "get: () => [1,2,3,4,5], configurable: true});"
+            "Object.defineProperty(navigator, 'languages', {"
+            "get: () => ['en-US', 'en'], configurable: true});"
+        )
+    except Exception as _e:
+        log(f"  (webdriver-mask init-script install failed: {_e!r})")
+
     page = context.new_page()
     return pw, context, page
 

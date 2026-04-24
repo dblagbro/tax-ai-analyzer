@@ -137,6 +137,17 @@ def run_import(
             log(f"Injecting {len(cookies)} browser cookies…")
             context.add_cookies(cookies)
 
+        # MED-PASS2-2 fingerprint hardening — override navigator.webdriver to
+        # undefined (patchright leaves it as boolean false by default).
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {"
+            "get: () => undefined, configurable: true});"
+            "Object.defineProperty(navigator, 'plugins', {"
+            "get: () => [1,2,3,4,5], configurable: true});"
+            "Object.defineProperty(navigator, 'languages', {"
+            "get: () => ['en-US', 'en'], configurable: true});"
+        )
+
         page = context.new_page()
 
         try:
