@@ -35,10 +35,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY app/ ./app/
 COPY profiles/ ./profiles/
+COPY tools/ ./tools/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8012
 
-# Wrap with xvfb-run so patchright can launch a headful real-Chrome browser
-# (much harder to fingerprint than --headless=new). Without Xvfb, headless=False
-# fails with "DISPLAY not set".
-CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x900x24", "python", "-m", "app.main"]
+# Start Xvfb in background then exec the Python app. Replaces `xvfb-run`
+# wrapper, which hangs on its SIGUSR1 ready-signal sync under Docker and
+# never exec's the wrapped command.
+CMD ["/usr/local/bin/docker-entrypoint.sh"]
