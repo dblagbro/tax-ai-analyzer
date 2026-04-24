@@ -429,198 +429,108 @@
 })();
 
 /* ── US Alliance FCU importer ─────────────────────────────────────────── */
+/*  Refactored in Phase 10B to reuse the makePoller + makeBankHelpers
+    factories defined in the sibling IIFE below. Only US-Alliance-specific
+    behavior (cookie-snippet clipboard copy, test-login endpoint,
+    bot-notice toggle, impTab auto-load hook) stays inline. */
 (function() {
-  var _usaJobId = null;
-  var _usaLogTimer = null;
-  var _usaLogOffset = 0;
+  // The factory IIFE (sibling below) installs `window.__bankFactory` with
+  // { makePoller, makeBankHelpers } so code outside its closure can reuse
+  // them. Wait until it runs, then wire US Alliance via the factory.
+  function _init() {
+    if (!window.__bankFactory) { setTimeout(_init, 50); return; }
+    const {makePoller, makeBankHelpers} = window.__bankFactory;
 
-  window.usaCopySnippet = function() {
-    var el = document.getElementById('usa-cookie-snippet');
-    var btn = document.getElementById('usa-snippet-copy-btn');
-    if (!el) return;
-    var text = el.textContent;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        btn.textContent = '✓ Copied!';
-        setTimeout(function(){ btn.innerHTML = '&#128203; Copy'; }, 2000);
-      }).catch(function() {
-        _usaFallbackCopy(text, btn);
-      });
-    } else {
-      _usaFallbackCopy(text, btn);
-    }
-  };
+    const usaPoller = makePoller('usa', 'usa-mfa-box');
+    const usaHelper = makeBankHelpers('usalliance', 'usa', 'usa-status-badge',
+                                      'usa-cookie-status', 'usa-cookie-result');
 
-  function _usaFallbackCopy(text, btn) {
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.focus(); ta.select();
-    try {
-      document.execCommand('copy');
-      if (btn) { btn.textContent = '✓ Copied!'; setTimeout(function(){ btn.innerHTML = '&#128203; Copy'; }, 2000); }
-    } catch(e) {
-      alert('Copy failed — please select the snippet text manually.');
-    }
-    document.body.removeChild(ta);
-  }
-
-  window.saveUsaCreds = async function() {
-    var u = document.getElementById('usa-username').value.trim();
-    var p = document.getElementById('usa-password').value.trim();
-    if (!u || !p) { alert('Enter both username and password.'); return; }
-    var r = await post('/api/import/usalliance/credentials', {username: u, password: p});
-    if (r.status === 'saved') {
-      document.getElementById('usa-status-badge').innerHTML =
-        '<span style="color:#4caf50">&#10003; Credentials saved</span>';
-      document.getElementById('usa-password').value = '';
-    } else {
-      alert(r.error || 'Save failed.');
-    }
-  };
-
-  window.loadUsaStatus = async function() {
-    var r = await fetch(P + '/api/import/usalliance/status').then(r => r.json()).catch(() => ({}));
-    var badge = document.getElementById('usa-status-badge');
-    if (!badge) return;
-    if (r.configured) {
-      badge.innerHTML = '<span style="color:#4caf50">&#10003; Credentials configured (' + (r.username_preview||'') + ')</span>';
-    } else {
-      badge.innerHTML = '<span style="color:#f57c00">&#9888; No credentials saved — enter them below</span>';
-    }
-    // Cookie status
-    var ckEl = document.getElementById('usa-cookie-status');
-    if (ckEl) {
-      if (r.cookies_saved) {
-        ckEl.innerHTML = '<span style="color:#4caf50">&#10003; ' + r.cookies_count + ' cookies saved — cookie auth active</span>';
-        // Show bot notice as info, not warning
-        var notice = document.getElementById('usa-bot-notice');
+    window.saveUsaCreds = () => usaHelper.saveCreds();
+    window.saveUsaCookies = () => {
+      usaHelper.saveCookies('usa-cookies-input').then(() => {
+        // Hide bot notice once cookies exist
+        const notice = document.getElementById('usa-bot-notice');
         if (notice) notice.style.display = 'none';
-      } else {
-        ckEl.innerHTML = '<span style="color:var(--muted)">No cookies saved — using credential login</span>';
-      }
-    }
+      });
+    };
+    window.clearUsaCookies = () => usaHelper.clearCookies();
+
+    window.loadUsaStatus = async function() {
+      await usaHelper.loadStatus();
+      // Bot-notice integration: hide when cookies are saved.
+      const r = await fetch(P + '/api/import/usalliance/status').then(r=>r.json()).catch(()=>({}));
+      const notice = document.getElementById('usa-bot-notice');
+      if (notice) notice.style.display = r.cookies_saved ? 'none' : '';
+    };
+
+    window.startUsaImport = async function() {
+      const years = (document.getElementById('usa-years-input').value||'')
+                      .split(/[\s,]+/).filter(Boolean);
+      const eid = document.getElementById('usa-entity').value;
+      if (!years.length) { alert('Enter at least one year (e.g. 2021,2022).'); return; }
+      const r = await post('/api/import/usalliance/start', {entity_id: eid||null, years});
+      if (r.error) { alert(r.error); return; }
+      usaPoller.start(r.job_id);
+      toast('US Alliance import started. Job #'+r.job_id, 'success');
+    };
+
+    window.submitUsaMfa = async function() {
+      const code = document.getElementById('usa-mfa-code').value.trim();
+      const jid = usaPoller.getJobId();
+      if (!code || !jid) return;
+      const r = await post('/api/import/usalliance/mfa', {job_id: jid, code});
+      if (r.status === 'ok') {
+        document.getElementById('usa-mfa-code').value = '';
+        document.getElementById('usa-mfa-box').style.display = 'none';
+      } else { alert(r.error || 'Failed to submit MFA code.'); }
+    };
+
+    // impTab auto-load hook — runs loadUsaStatus when the US Alliance tab activates.
+    const _origImpTab = window.impTab;
+    window.impTab = function(name, btn) {
+      if (_origImpTab) _origImpTab(name, btn);
+      if (name === 'usalliance') loadUsaStatus();
+    };
+  }
+  _init();
+
+  // ── US-Alliance-specific: cookie-snippet clipboard copy ───────────────
+  window.usaCopySnippet = function() {
+    const el = document.getElementById('usa-cookie-snippet');
+    const btn = document.getElementById('usa-snippet-copy-btn');
+    if (!el) return;
+    const text = el.textContent;
+    const confirm = () => { if (btn) { btn.textContent = '✓ Copied!';
+      setTimeout(()=>{ btn.innerHTML = '&#128203; Copy'; }, 2000); } };
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { document.execCommand('copy'); confirm(); }
+      catch(e) { alert('Copy failed — select the snippet manually.'); }
+      document.body.removeChild(ta);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(confirm).catch(fallback);
+    } else { fallback(); }
   };
 
-  window.saveUsaCookies = async function() {
-    var raw = document.getElementById('usa-cookies-input').value.trim();
-    if (!raw) { alert('Paste your cookies JSON first.'); return; }
-    var res = document.getElementById('usa-cookie-result');
-    res.innerHTML = '<span style="color:var(--muted)">Saving…</span>';
-    var r = await post('/api/import/usalliance/cookies', {cookies: raw});
-    if (r.status === 'saved') {
-      res.innerHTML = '<span style="color:#4caf50">&#10003; ' + esc(r.message) + '</span>';
-      document.getElementById('usa-cookies-input').value = '';
-      document.getElementById('usa-bot-notice').style.display = 'none';
-      await loadUsaStatus();
-    } else {
-      res.innerHTML = '<span style="color:#d32f2f">&#10007; ' + esc(r.error || 'Failed to save cookies') + '</span>';
-    }
-  };
-
-  window.clearUsaCookies = async function() {
-    if (!confirm('Clear saved browser cookies?')) return;
-    var r = await fetch(P + '/api/import/usalliance/cookies', {method:'DELETE'}).then(r=>r.json()).catch(()=>({}));
-    document.getElementById('usa-cookie-status').innerHTML = '<span style="color:var(--muted)">Cookies cleared</span>';
-    document.getElementById('usa-cookie-result').innerHTML = '';
-    await loadUsaStatus();
-  };
-
+  // ── US-Alliance-specific: test-login button (no other bank has this) ──
   window.testUsaCreds = async function() {
-    var u = document.getElementById('usa-username').value.trim();
-    var p = document.getElementById('usa-password').value.trim();
-    var btn = document.getElementById('usa-test-btn');
-    var res = document.getElementById('usa-test-result');
-    // Save first if fields are filled
-    if (u && p) { await post('/api/import/usalliance/credentials', {username: u, password: p}); }
+    const u = document.getElementById('usa-username').value.trim();
+    const p = document.getElementById('usa-password').value.trim();
+    const btn = document.getElementById('usa-test-btn');
+    const res = document.getElementById('usa-test-result');
+    if (u && p) await post('/api/import/usalliance/credentials', {username:u, password:p});
     btn.disabled = true; btn.textContent = 'Testing…';
     res.innerHTML = '<span style="color:var(--muted)">Attempting login…</span>';
-    var r = await post('/api/import/usalliance/test', {}).catch(() => ({error: 'Request failed'}));
+    const r = await post('/api/import/usalliance/test', {}).catch(() => ({error: 'Request failed'}));
     btn.disabled = false; btn.innerHTML = '&#9654; Test Login';
-    if (r && r.status === 'ok') {
+    if (r?.status === 'ok') {
       res.innerHTML = '<span style="color:var(--green)">&#10003; ' + (r.message || 'Login successful') + '</span>';
     } else {
-      res.innerHTML = '<span style="color:var(--red)">&#10007; ' + esc(r && r.error || 'Login failed — check credentials') + '</span>';
+      res.innerHTML = '<span style="color:var(--red)">&#10007; ' + esc(r?.error || 'Login failed — check credentials') + '</span>';
     }
-  };
-
-  window.startUsaImport = async function() {
-    var yearsRaw = document.getElementById('usa-years-input').value.trim();
-    var years = yearsRaw.split(/[\s,]+/).filter(Boolean);
-    var eid = document.getElementById('usa-entity').value;
-    if (!years.length) { alert('Enter at least one year (e.g. 2021,2022).'); return; }
-    var r = await post('/api/import/usalliance/start', {entity_id: eid||null, years: years});
-    if (r.error) { alert(r.error); return; }
-    _usaJobId = r.job_id;
-    _usaLogOffset = 0;
-    document.getElementById('usa-log-panel').style.display = '';
-    document.getElementById('usa-log-lines').innerHTML = '';
-    document.getElementById('usa-log-status').textContent = 'running';
-    document.getElementById('usa-start-btn').disabled = true;
-    _pollUsaLogs();
-  };
-
-  function _pollUsaLogs() {
-    if (!_usaJobId) return;
-    fetch(P + '/api/import/jobs/' + _usaJobId + '/logs?offset=' + _usaLogOffset)
-      .then(r => r.json()).then(data => {
-        if (data.lines && data.lines.length) {
-          var box = document.getElementById('usa-log-lines');
-          data.lines.forEach(function(line) {
-            var div = document.createElement('div');
-            div.textContent = line;
-            // Highlight MFA prompt
-            if (line.toLowerCase().includes('mfa') || line.toLowerCase().includes('verification')) {
-              div.style.color = '#ffc107';
-              document.getElementById('usa-mfa-box').style.display = '';
-            }
-            // Highlight bot detection error
-            if (line.toLowerCase().includes('bot detection') || line.toLowerCase().includes('unable to log')) {
-              div.style.color = '#ff7043';
-              var notice = document.getElementById('usa-bot-notice');
-              if (notice) notice.style.display = '';
-            }
-            box.appendChild(div);
-          });
-          box.scrollTop = box.scrollHeight;
-          _usaLogOffset = data.total;
-        }
-        // Check job status
-        fetch(P + '/api/import/jobs/' + _usaJobId)
-          .then(r => r.json()).then(function(job) {
-            var done = job.status === 'completed' || job.status === 'error';
-            document.getElementById('usa-log-status').textContent = job.status || 'running';
-            if (done) {
-              document.getElementById('usa-start-btn').disabled = false;
-              document.getElementById('usa-mfa-box').style.display = 'none';
-              clearTimeout(_usaLogTimer);
-              _usaLogTimer = null;
-            } else {
-              _usaLogTimer = setTimeout(_pollUsaLogs, 2500);
-            }
-          }).catch(() => { _usaLogTimer = setTimeout(_pollUsaLogs, 5000); });
-      }).catch(() => { _usaLogTimer = setTimeout(_pollUsaLogs, 5000); });
-  }
-
-  window.submitUsaMfa = async function() {
-    var code = document.getElementById('usa-mfa-code').value.trim();
-    if (!code || !_usaJobId) return;
-    var r = await post('/api/import/usalliance/mfa', {job_id: _usaJobId, code: code});
-    if (r.status === 'ok') {
-      document.getElementById('usa-mfa-code').value = '';
-      document.getElementById('usa-mfa-box').style.display = 'none';
-    } else {
-      alert(r.error || 'Failed to submit MFA code.');
-    }
-  };
-
-  // Load status when tab is activated
-  var _origImpTab = window.impTab;
-  window.impTab = function(name, btn) {
-    if (_origImpTab) _origImpTab(name, btn);
-    if (name === 'usalliance') loadUsaStatus();
   };
 })();
 
@@ -677,6 +587,13 @@
     };
   }
 
+  // Expose factories so the US Alliance IIFE (which was written before the
+  // factory existed) can reuse them. Phase 10B refactor.
+  window.__bankFactory = {
+    makePoller: null,  // set after definition
+    makeBankHelpers: null,
+  };
+
   // Generic credential + cookie helpers
   function makeBankHelpers(bank, prefix, statusId, cookieStatusId, cookieResultId) {
     return {
@@ -727,6 +644,10 @@
       }
     };
   }
+
+  // Populate the cross-IIFE export (declared at top of this IIFE).
+  window.__bankFactory.makePoller = makePoller;
+  window.__bankFactory.makeBankHelpers = makeBankHelpers;
 
   // ── Capital One ──
   var _coPoller = makePoller('co', 'co-mfa-box');
