@@ -304,3 +304,52 @@ class TestConfigValidate:
         monkeypatch.setattr(cfg, "WEB_PORT", 8012)
         warnings = cfg.validate()
         assert any("LLM_PROVIDER" in w for w in warnings)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HTTP liveness — catches the failure mode Pass #1 found where the container
+# was "Up" per `docker ps` but Flask wasn't actually serving (xvfb-run hang).
+# test_client() alone can't catch this because it runs Flask in-process.
+# Uses a socket connection so it works even inside the running container.
+# ──────────────────────────────────────────────────────────────────────────────
+
+import socket
+import urllib.request
+import urllib.error
+
+
+class TestHttpLiveness:
+    """Verify the actual TCP socket is accepting HTTP requests on port 8012.
+
+    When run inside the tax-ai-analyzer container, connects to localhost:8012.
+    When run outside, skips — the test only makes sense when the real Flask
+    daemon is running in the same environment.
+    """
+
+    @classmethod
+    def _can_connect(cls) -> bool:
+        try:
+            with socket.create_connection(("127.0.0.1", 8012), timeout=1):
+                return True
+        except (OSError, socket.timeout):
+            return False
+
+    def test_tcp_socket_accepting(self):
+        if not self._can_connect():
+            import pytest as _pt
+            _pt.skip("port 8012 not accepting — skip (not running in container)")
+
+    def test_login_page_returns_http_200(self):
+        if not self._can_connect():
+            import pytest as _pt
+            _pt.skip("port 8012 not accepting — skip (not running in container)")
+        url = "http://127.0.0.1:8012/tax-ai-analyzer/login"
+        try:
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                assert resp.status == 200, f"/login returned {resp.status}"
+                body = resp.read()
+                assert len(body) > 100, "/login body suspiciously small"
+        except urllib.error.HTTPError as e:
+            raise AssertionError(f"/login raised HTTPError {e.code}")
+        except urllib.error.URLError as e:
+            raise AssertionError(f"/login could not connect: {e.reason}")

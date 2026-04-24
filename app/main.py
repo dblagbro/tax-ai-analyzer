@@ -12,6 +12,12 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     stream=sys.stdout
 )
+# LOW-PASS2-2: httpx/urllib3 emit an INFO line per HTTP request; the analysis
+# daemon polls Paperless every ~60s which produced ~26 MB/day of logs when
+# idle. WARNING+ is enough for diagnostics — errors still surface.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Activity log for web UI

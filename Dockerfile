@@ -14,7 +14,13 @@ RUN apt-get update && apt-get install -y \
     curl \
     fonts-liberation \
     xvfb \
+    tini \
     && rm -rf /var/lib/apt/lists/*
+
+# DISPLAY available to any docker-exec subshell (LOW-NEW-1). The runtime entry
+# also exports this, but setting it at image level makes `docker exec container
+# python3 -c 'patchright launch'` work without needing `-e DISPLAY=:99`.
+ENV DISPLAY=:99
 
 WORKDIR /app
 
@@ -40,6 +46,12 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8012
+
+# tini as PID 1 reaps zombie children (LOW-PASS2-1). Every Chrome launch
+# leaves at least one [chrome_crashpad] <defunct> helper; without a proper
+# init they accumulate. tini also forwards SIGTERM cleanly for graceful
+# shutdown.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Start Xvfb in background then exec the Python app. Replaces `xvfb-run`
 # wrapper, which hangs on its SIGUSR1 ready-signal sync under Docker and
