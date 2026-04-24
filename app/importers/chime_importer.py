@@ -26,7 +26,7 @@ from typing import Callable, Optional
 from app.importers.base_bank_importer import (
     find_element, find_in_frames, find_all_in_frames,
     human_click, human_move, human_type,
-    launch_browser, save_debug_screenshot,
+    launch_browser, save_auth_cookies, save_debug_screenshot,
     wait_for_element, wait_for_mfa_code,
 )
 
@@ -197,6 +197,7 @@ def _login(page, email: str, password: str, log: Callable,
         return False
 
     log(f"Logged in — at {page.url}")
+    save_auth_cookies(page.context, "chime", log)
     return True
 
 

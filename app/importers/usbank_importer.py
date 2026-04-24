@@ -28,7 +28,7 @@ from app.importers.base_bank_importer import (
     find_element, find_in_frames, find_all_in_frames,
     handle_captcha_if_present,
     human_click, human_move, human_type,
-    launch_browser, save_debug_screenshot,
+    launch_browser, save_auth_cookies, save_debug_screenshot,
     wait_for_element, wait_for_mfa_code,
 )
 
@@ -297,6 +297,7 @@ def _login(page, username: str, password: str, log: Callable,
         )
 
     log(f"Logged in — at {page.url}")
+    save_auth_cookies(page.context, "usbank", log)
     return True
 
 

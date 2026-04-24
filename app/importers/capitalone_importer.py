@@ -32,7 +32,7 @@ from typing import Callable, Optional
 from app.importers.base_bank_importer import (
     find_element, find_in_frames, find_all_in_frames,
     human_click, human_type,
-    launch_browser, save_debug_screenshot,
+    launch_browser, save_auth_cookies, save_debug_screenshot,
     wait_for_element, wait_for_mfa_code,
 )
 
@@ -195,6 +195,7 @@ def _login(page, username: str, password: str, log: Callable,
         raise RuntimeError(f"Still on sign-in page ({url}). Try cookie-based auth.")
 
     log(f"Logged in — at {page.url}")
+    save_auth_cookies(page.context, "capitalone", log)
 
 
 def _is_mfa_page(page) -> bool:
