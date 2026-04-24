@@ -333,3 +333,5 @@ function fbToggle(id) {
   if (caret) caret.innerHTML = wasCollapsed ? '&#9650;' : '&#9660;';
 }
 
+
+registerTabLoader("documents", docReload);

@@ -80,7 +80,7 @@ def run_import(
     Returns {"imported": int, "skipped": int, "errors": int}.
     """
     try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+        from patchright.sync_api import sync_playwright, TimeoutError as PWTimeout
     except ImportError:
         raise RuntimeError(
             "playwright is not installed. Add it to requirements.txt and rebuild."
@@ -88,49 +88,17 @@ def run_import(
 
     imported = skipped = errors = 0
 
-    # Apply playwright-stealth to hide automation fingerprints
-    try:
-        from playwright_stealth import Stealth
-        _stealth = Stealth(
-            navigator_webdriver=True,
-            navigator_plugins=True,
-            navigator_languages=True,
-            navigator_platform=True,
-            navigator_user_agent=True,
-            navigator_vendor=True,
-            chrome_app=True,
-            chrome_csi=True,
-            chrome_load_times=True,
-            webgl_vendor=True,
-            hairline=True,
-            media_codecs=True,
-            navigator_hardware_concurrency=True,
-            navigator_permissions=True,
-            error_prototype=True,
-            sec_ch_ua=True,
-            iframe_content_window=True,
-            navigator_platform_override="Win32",
-            navigator_languages_override=("en-US", "en"),
-        )
-        log("Stealth mode enabled.")
-    except ImportError:
-        _stealth = None
-        log("Warning: playwright-stealth not available — bot detection risk.")
-
+    # patchright replaces playwright + playwright-stealth: CDP Runtime.Enable
+    # leak and driver-level fingerprint issues are patched at build time, so no
+    # explicit stealth hook is needed here.
     with sync_playwright() as pw:
-        # Hook stealth into the playwright instance before launching
-        if _stealth is not None:
-            _stealth.hook_playwright_context(pw)
-        log("Launching headless Chromium…")
+        log("Launching real Chrome via patchright (visible under Xvfb)…")
         browser = pw.chromium.launch(
-            headless=True,
+            headless=False,
+            channel="chrome",  # real Chrome binary, not bundled Chromium
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-gpu",
-                # Use the new headless mode — much harder to fingerprint than the old one
-                "--headless=new",
-                # Hide automation indicators
                 "--disable-blink-features=AutomationControlled",
                 "--disable-infobars",
                 "--disable-extensions",
@@ -142,15 +110,13 @@ def run_import(
                 "--no-first-run",
                 "--password-store=basic",
                 "--use-mock-keychain",
-                "--window-size=1280,900",
-                # Make Chrome look more real
                 "--lang=en-US",
                 "--accept-lang=en-US",
             ],
         )
         context = browser.new_context(
             accept_downloads=True,
-            viewport={"width": 1280, "height": 900},
+            no_viewport=True,  # let Xvfb framebuffer drive size
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -166,18 +132,11 @@ def run_import(
             },
         )
 
-        # (stealth already hooked at playwright level above — no context-level call needed)
-
-        # Inject browser cookies if provided
         if cookies:
             log(f"Injecting {len(cookies)} browser cookies…")
             context.add_cookies(cookies)
 
         page = context.new_page()
-
-        # Apply stealth to the page as well (belt-and-suspenders)
-        if _stealth is not None:
-            _stealth.apply_stealth_sync(page)
 
         try:
             # ── 1. Login ──────────────────────────────────────────────────────
@@ -327,7 +286,7 @@ def run_import(
 
 def _fill_login(page, username: str, password: str, log: Callable):
     """Fill the US Alliance login form with human-like typing."""
-    from playwright.sync_api import TimeoutError as PWTimeout
+    from patchright.sync_api import TimeoutError as PWTimeout
     import random
 
     # account.usalliance.org uses randomised input name/id — only type selectors work
@@ -480,7 +439,7 @@ def _is_push_mfa_page(page) -> bool:
 
 def _submit_mfa(page, code: str, log: Callable):
     """Type the OTP code and submit."""
-    from playwright.sync_api import TimeoutError as PWTimeout
+    from patchright.sync_api import TimeoutError as PWTimeout
 
     otp_selectors = [
         'input[name*="otp" i]',
@@ -690,7 +649,7 @@ def _download_year(
     session_pdf_cache: list = None, session_requests: list = None,
 ) -> tuple[int, int, int]:
     """Select the given year in the eStatements portal and download each statement."""
-    from playwright.sync_api import TimeoutError as PWTimeout
+    from patchright.sync_api import TimeoutError as PWTimeout
 
     imported = skipped = errors = 0
     dest_dir = Path(consume_path) / entity_slug / year
@@ -956,7 +915,7 @@ def _download_statement(page, context, stmt: dict, log: Callable,
     Uses a global response interceptor (started at login time) plus
     per-click interception as backup.
     """
-    from playwright.sync_api import TimeoutError as PWTimeout
+    from patchright.sync_api import TimeoutError as PWTimeout
 
     el = stmt.get("element")
     if not el:

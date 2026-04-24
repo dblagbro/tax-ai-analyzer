@@ -289,3 +289,5 @@ async function importFiledReturnFromFolder() {
     toast('Import failed: '+(r?.error||'?'), 'error');
   }
 }
+
+registerTabLoader("folder_manager", foLoadMigration);

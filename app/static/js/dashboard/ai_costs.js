@@ -30,3 +30,5 @@ async function loadAiCosts() {
   ).join('') : '<tr><td colspan="8"><div class="empty">No recent calls.</div></td></tr>';
 }
 
+
+registerTabLoader("ai_costs", loadAiCosts);

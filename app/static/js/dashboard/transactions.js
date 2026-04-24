@@ -559,3 +559,5 @@ async function renameVendor(currentName) {
   }
 }
 
+
+registerTabLoader("transactions", loadTxns);

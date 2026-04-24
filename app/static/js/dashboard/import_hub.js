@@ -367,3 +367,5 @@ window.saveSearchTerms = async function() {
   }
 };
 
+
+registerTabLoader("import", () => { loadJobs(); loadGmailImportStatus(); loadUsaStatus(); startJobRefresh(); });

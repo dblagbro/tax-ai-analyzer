@@ -121,17 +121,15 @@ function sw(t) {
   history.replaceState(null,'', P + (t==='dashboard' ? '/' : '/'+urlSlug));
 }
 
+/* Tab-loader registry — each tab module registers its init function here
+   (see registerTabLoader below). Keeps core.js decoupled from tab contents. */
+const _tabLoaders = {};
+function registerTabLoader(name, fn) { _tabLoaders[name] = fn; }
+
 function loadTab(t) {
-  const m = {dashboard:()=>{loadStats();loadAct();loadRecentJobs();loadFiledReturns();},transactions:loadTxns,documents:docReload,
-    import:()=>{loadJobs();loadGmailImportStatus();loadUsaStatus();startJobRefresh();},
-    tax_review:()=>{loadTaxReviewYears();},
-    mileage:loadMileage,
-    activity:loadActivity,
-    ai_costs:loadAiCosts,
-    folder_manager:foLoadMigration,
-    chat:loadSessions,reports:loadExports,settings:loadSettings,users:loadUsers};
-  if(t!=='import') stopJobRefresh();
-  m[t]?.();
+  // The Import tab owns a refresh interval; any other tab must stop it.
+  if (t !== 'import' && typeof stopJobRefresh === 'function') stopJobRefresh();
+  _tabLoaders[t]?.();
 }
 
 function applyGlobal() {

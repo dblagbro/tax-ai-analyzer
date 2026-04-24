@@ -244,3 +244,7 @@ function showHelpSection(id, btn) {
   document.getElementById('help-'+id).classList.add('active');
   btn.classList.add('active');
 }
+
+registerTabLoader("settings", loadSettings);
+registerTabLoader("users", loadUsers);
+registerTabLoader("activity", loadActivity);

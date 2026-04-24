@@ -310,4 +310,85 @@ Also covered:
 
 **Net**: test count 63 → 73 (+10 auth-boundary tests). All green.
 
+---
+
+## Phase 9 — Playwright anti-detection Steps 2-5 + lazy-load tab registry (completed)
+
+Finished the 5-step anti-detection ladder from `plans/usbank_playwright_rollout.md`.
+Step 1 already landed in commit `e4b225c`; Steps 2-5 executed here.
+
+### 9A — patchright swap (Step 2)
+
+**Before**: `playwright==1.44.0` + `playwright-stealth>=2.0.0`, explicit `Stealth` hook code in base_bank_importer.py (37 lines), usalliance_importer.py (26 lines), import_usalliance.py (10 lines), diag_usalliance.py (14 lines).
+
+**After**: `patchright>=1.48,<2` — a hardened fork that patches CDP Runtime.Enable leak and driver-level fingerprint issues at build time. All `from playwright.sync_api import ...` statements in 7 files swapped via sed to `from patchright.sync_api import ...`. All `Stealth()` hook blocks deleted — patchright handles it at the driver level, no call-site hook required.
+
+Files touched: `requirements.txt`, `Dockerfile` (playwright install → patchright install), `app/importers/base_bank_importer.py`, `usalliance_importer.py`, `usbank_importer.py`, `capitalone_importer.py`, `merrick_importer.py`, `app/routes/importers/import_usalliance.py`, `tools/diag_usalliance.py`.
+
+### 9B — Real Chrome channel (Step 3)
+
+`Dockerfile`: added `RUN python -m patchright install chrome` (brings in Google Chrome `.deb`, ~200MB layer growth).
+`base_bank_importer.py`: `pw.chromium.launch(channel="chrome", ...)`.
+`usalliance_importer.py`: same.
+
+Verification: `docker exec tax-ai-analyzer which google-chrome` → `/usr/bin/google-chrome` ✓.
+
+### 9C — Xvfb + headful browser (Step 4)
+
+`Dockerfile`: added `xvfb` to apt-get list; changed `CMD` to `["xvfb-run", "-a", "--server-args=-screen 0 1280x900x24", "python", "-m", "app.main"]`.
+`base_bank_importer.py` (and usalliance): `headless=False` default, `no_viewport=True` context arg, `--headless=new` + `--window-size=…` flags removed from `_STEALTH_ARGS` (Xvfb framebuffer drives size).
+
+Verification: `docker exec tax-ai-analyzer pgrep -a Xvfb` → `16 Xvfb :99 -screen 0 1280x900x24 -nolisten tcp ...` ✓.
+
+### 9D — Warm-up navigation (Step 5)
+
+`usbank_importer.py`: new `_warmup_navigation(page, log)` helper. Visits `https://www.usbank.com/`, jitters the mouse 3x, clicks a marketing nav link (Personal / Checking / Credit cards), idles, then clicks the "Log in" link to reach `/Auth/Login` organically. `_login()` calls this before the direct `page.goto(LOGIN_URL)` — direct goto becomes the fallback on any warm-up exception.
+
+**Still pending live validation**: US Bank account-lockout check from prior session. Code path: `_warmup_navigation` runs → fingerprints are now patchright + real Chrome + headful under Xvfb → credential rejection in job #61 was auth-backend, not bot detection, so this combination should resolve the bot-detection side. Auth rejection will need credential confirmation from the user.
+
+### 9E — Lazy-load tab-loader registry (independent)
+
+`core.js`: replaced hardcoded `loadTab()` dispatch map with a `_tabLoaders = {}` registry + `registerTabLoader(name, fn)` public function. Each tab module now self-registers at load time. Adding a new tab becomes an append to its own module instead of an edit to `core.js`.
+
+Per-module registrations added (one-liners appended):
+- `dashboard.js`, `transactions.js`, `documents.js`, `import_hub.js`
+- `tax_review.js`, `mileage.js`, `chat.js`, `reports.js`
+- `admin.js` (settings, users, activity — 3 registrations)
+- `ai_costs.js`, `folder_manager.js`
+
+Total: 13 `registerTabLoader(...)` calls across 12 files.
+
+### 9F — setup_modals.js HTML artifact cleanup
+
+Two stray `</script>` + `<script>` pairs (carryover from the original inline HTML) removed from `setup_modals.js` — the 4 IIFE blocks (Gmail, PayPal, US Alliance, combined banks) are now separated by pure JS comment dividers instead of HTML tag artifacts. No behavior change; pure file hygiene.
+
+### Verification
+
+- `docker compose build tax-ai-analyzer` — image built successfully (exit 0, no warnings).
+- `docker compose up -d --force-recreate --no-deps tax-ai-analyzer` — container healthy.
+- `pytest app/tests/` — 73/73 pass.
+- `patchright.sync_api` imports clean inside container.
+- `google-chrome --version` returns valid path.
+- `Xvfb :99 -screen 0 1280x900x24` running in-container.
+- App module imports exercise no `playwright.*` or `playwright_stealth` references (`grep -rn "from playwright\|playwright_stealth"` in `app/` + `tools/` returns only comment mentions).
+
+### Image rollback lever
+
+Previous working image still tagged as `dblagbro/tax-ai-analyzer:pre-remediation-2026-04-24_0107`. Compose `image:` points at `2026-04-24-qa-remediated` (the new build, SHA `93126135781d`). To roll back: edit compose image tag to the pre-remediation tag, `docker compose up -d --force-recreate --no-deps tax-ai-analyzer`.
+
+---
+
+## Still open (explicitly deferred from this session)
+
+- **Importer common-base extraction**: deferred because every bank importer (US Alliance / US Bank / Chime / Merrick / Capital One / Verizon) needs live validation against its target bank before consolidating shared patterns onto `base_bank_importer.py`. Steps 2-5 change the underlying browser lifecycle; any base-class merge ahead of live validation risks masking regressions. Concrete targets once live-green is confirmed:
+  1. US Alliance's inline `with sync_playwright() as pw: ...` block → switch to `launch_browser()`
+  2. Cookie save/load helper → move to base (currently duplicated in 5 files)
+  3. Statement-download + file-rename + dedup loop → extract to `download_and_import_year(page, year, ...)` on base
+  4. Login retry-with-MFA pattern → extract to `login_with_mfa(page, username, password, mfa_selector, ...)` on base
+
+- **Setup_modals.js factory refactor**: the Capital One / US Bank / Merrick / Chime / SimpleFIN block (lines 633-1226) already uses `makePoller(prefix, mfaBoxId)` and `makeBankHelpers(bank, prefix, statusId, cookieStatusId, cookieResultId)` factories. The US Alliance IIFE (lines 432-627) duplicates those patterns inline. Folding US Alliance into the factory would drop another ~150 LOC, but again needs a live-UI click-through per bank to verify no regression.
+
+- **Step 6 (residential proxy) and Step 7 (Camoufox)**: explicitly out of scope for this session. Step 6 requires the user to pick a proxy provider + commit to an ongoing cost. Step 7 is a last-resort if Steps 2-5 + residential proxy are insufficient.
+
+
 

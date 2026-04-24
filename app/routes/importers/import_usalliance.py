@@ -86,36 +86,25 @@ def api_usalliance_test():
     if not username or not password:
         return jsonify({"error": "Credentials not saved — enter username and password first"}), 400
     try:
-        from playwright.sync_api import sync_playwright
+        from patchright.sync_api import sync_playwright
     except ImportError:
-        return jsonify({"error": "Playwright not installed in this container"}), 500
-    try:
-        from playwright_stealth import Stealth
-        _stealth = Stealth(navigator_webdriver=True, navigator_plugins=True,
-                           chrome_app=True, chrome_csi=True, webgl_vendor=True,
-                           navigator_platform_override="Win32")
-    except ImportError:
-        _stealth = None
+        return jsonify({"error": "patchright not installed in this container"}), 500
     try:
         with sync_playwright() as p:
-            if _stealth:
-                _stealth.hook_playwright_context(p)
             browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                      "--headless=new", "--disable-blink-features=AutomationControlled",
-                      "--window-size=1280,900"],
+                headless=False,
+                channel="chrome",
+                args=["--no-sandbox", "--disable-dev-shm-usage",
+                      "--disable-blink-features=AutomationControlled"],
             )
             context = browser.new_context(
-                viewport={"width": 1280, "height": 900},
+                no_viewport=True,
                 user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                             "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
                 locale="en-US",
                 timezone_id="America/New_York",
             )
             page = context.new_page()
-            if _stealth:
-                _stealth.apply_stealth_sync(page)
             page.goto("https://account.usalliance.org/login",
                       wait_until="domcontentloaded", timeout=25000)
             page.wait_for_load_state("networkidle", timeout=15000)

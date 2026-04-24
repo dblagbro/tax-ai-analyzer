@@ -118,6 +118,41 @@ def run_import(
 
 # ── login ─────────────────────────────────────────────────────────────────────
 
+def _warmup_navigation(page, log: Callable) -> bool:
+    """Visit usbank.com homepage and click through to login organically — a cold
+    direct goto to /Auth/Login is itself a bot signal for Akamai/Shape."""
+    import random
+    try:
+        log("Warm-up: visiting usbank.com homepage…")
+        page.goto("https://www.usbank.com/", wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(3000 + random.randint(500, 2500))
+        vp = page.viewport_size or {"width": 1280, "height": 900}
+        for _ in range(3):
+            human_move(page, random.uniform(200, vp["width"] - 200),
+                      random.uniform(150, vp["height"] - 150))
+            page.wait_for_timeout(random.randint(400, 900))
+        for sel in ['a:has-text("Personal")', 'a:has-text("Checking")', 'a:has-text("Credit cards")']:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                log(f"Warm-up click: {sel}")
+                human_click(page, el)
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
+                page.wait_for_timeout(2000 + random.randint(500, 2000))
+                break
+        for sel in ['a:has-text("Log in")', 'a[href*="Auth/Login"]', 'button:has-text("Log in")']:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                log(f"Warm-up: clicking login link {sel}")
+                human_click(page, el)
+                page.wait_for_load_state("domcontentloaded", timeout=30000)
+                return True
+        log("Warm-up: no visible login link — falling back to direct goto")
+        return False
+    except Exception as e:
+        log(f"Warm-up navigation failed: {e!r} — falling back to direct goto")
+        return False
+
+
 def _login(page, username: str, password: str, log: Callable,
            cookies: Optional[list], job_id: int) -> bool:
     if cookies:
@@ -129,8 +164,9 @@ def _login(page, username: str, password: str, log: Callable,
             return True
         log("Cookies expired — falling back to credential login.")
 
-    log(f"Navigating to {LOGIN_URL}")
-    page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+    if not _warmup_navigation(page, log):
+        log(f"Navigating to {LOGIN_URL}")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(2500)
     save_debug_screenshot(page, "usb_login")
 
@@ -488,7 +524,7 @@ def _download_chunk(
     page, context, acct: dict, start_date, end_date, log: Callable
 ) -> Optional[bytes]:
     """Navigate to download UI, set date range, trigger QFX download."""
-    from playwright.sync_api import TimeoutError as PWTimeout
+    from patchright.sync_api import TimeoutError as PWTimeout
 
     # Navigate to "Download Transactions" page
     download_reached = _navigate_to_download(page, log)

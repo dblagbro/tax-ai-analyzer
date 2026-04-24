@@ -302,3 +302,5 @@ async function doShareChat() {
   openShareModal();
 }
 
+
+registerTabLoader("chat", loadSessions);

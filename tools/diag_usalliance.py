@@ -15,38 +15,23 @@ password = db.get_setting('usalliance_password')
 print(f"[*] Username: {username}")
 print(f"[*] Password set: {bool(password)}")
 
-from playwright.sync_api import sync_playwright
+from patchright.sync_api import sync_playwright
 
-try:
-    from playwright_stealth import Stealth
-    stealth = Stealth(navigator_webdriver=True, navigator_plugins=True,
-                      navigator_languages=True, navigator_platform=True,
-                      navigator_user_agent=True, chrome_app=True,
-                      navigator_platform_override="Win32")
-    print("[*] Stealth loaded")
-except ImportError:
-    stealth = None
-    print("[!] Stealth not available")
-
+# patchright ships with driver-level stealth; no separate playwright_stealth hook needed.
 with sync_playwright() as pw:
-    if stealth:
-        stealth.hook_playwright_context(pw)
-
     browser = pw.chromium.launch(
-        headless=True,
-        args=["--no-sandbox","--disable-dev-shm-usage","--disable-gpu",
-              "--headless=new","--disable-blink-features=AutomationControlled",
-              "--window-size=1280,900"],
+        headless=False,
+        channel="chrome",
+        args=["--no-sandbox","--disable-dev-shm-usage",
+              "--disable-blink-features=AutomationControlled"],
     )
     context = browser.new_context(
         accept_downloads=True,
-        viewport={"width":1280,"height":900},
+        no_viewport=True,
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         locale="en-US", timezone_id="America/New_York",
     )
     page = context.new_page()
-    if stealth:
-        stealth.apply_stealth_sync(page)
 
     # ── Login ──────────────────────────────────────────────────────────────────
     print("[*] Navigating to login...")

@@ -37,9 +37,10 @@ apscheduler==3.10.4
 # Vector store (optional — catches ImportError if GPU missing)
 chromadb==0.5.0
 
-# Browser automation (bank importers)
-playwright==1.44.0
-playwright-stealth==2.0.3
+# Browser automation (bank importers) — patchright is a hardened Playwright
+# drop-in that pre-patches CDP fingerprints (Runtime.Enable leak, etc.) at the
+# driver level, replacing the need for playwright-stealth at the call site.
+patchright>=1.48,<2
 
 # PDF parsing (Chime statement importer)
 pdfplumber==0.11.9

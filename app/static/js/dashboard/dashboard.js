@@ -83,3 +83,6 @@ function jumpToDocs(entityId) {
   if (gEl) { gEl.value = entityId; applyGlobal(); }
   sw('documents');
 }
+
+/* Register overview tab loader */
+registerTabLoader("dashboard", () => { loadStats(); loadAct(); loadRecentJobs(); loadFiledReturns(); });

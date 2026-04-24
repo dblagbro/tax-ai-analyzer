@@ -149,10 +149,9 @@ def find_all_in_frames(page, selector: str) -> list:
 _STEALTH_ARGS = [
     "--no-sandbox",
     "--disable-dev-shm-usage",
-    "--disable-gpu",
-    # New headless mode — much harder to fingerprint than classic headless
-    "--headless=new",
-    # Hide automation indicators
+    # Do NOT pass --headless= — patchright + channel=chrome + headless=False
+    # launches real visible Chrome under Xvfb, which has a much lower
+    # fingerprint than --headless=new in bundled Chromium.
     "--disable-blink-features=AutomationControlled",
     "--disable-infobars",
     "--disable-extensions",
@@ -164,13 +163,13 @@ _STEALTH_ARGS = [
     "--no-first-run",
     "--password-store=basic",
     "--use-mock-keychain",
-    "--window-size=1280,900",
+    # Window sizing is handled by Xvfb's --screen arg, not a Chrome flag.
     "--lang=en-US",
     "--accept-lang=en-US",
 ]
 
 
-def launch_browser(bank_slug: str, headless: bool = True, log: Callable = logger.info):
+def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logger.info):
     """
     Launch a hardened Chromium with the same anti-detection config that works
     for US Alliance FCU (see app/importers/usalliance_importer.py for provenance).
@@ -187,58 +186,25 @@ def launch_browser(bank_slug: str, headless: bool = True, log: Callable = logger
     Returns (pw, context, page). Caller closes context + calls pw.stop().
     """
     try:
-        from playwright.sync_api import sync_playwright
+        from patchright.sync_api import sync_playwright
     except ImportError:
-        raise RuntimeError("playwright not installed")
+        raise RuntimeError("patchright not installed")
 
-    # _CHROME_PROFILES_ROOT is no longer used for persistent contexts, but is
-    # retained for the visible-fallback helper and future user-data-dir use.
-
-    # Build stealth config BEFORE starting playwright so we can hook it at the
-    # pw-instance level (not just the context level).
-    _stealth = None
-    try:
-        from playwright_stealth import Stealth
-        _stealth = Stealth(
-            navigator_webdriver=True,
-            navigator_plugins=True,
-            navigator_languages=True,
-            navigator_platform=True,
-            navigator_user_agent=True,
-            navigator_vendor=True,
-            chrome_app=True,
-            chrome_csi=True,
-            chrome_load_times=True,
-            webgl_vendor=True,
-            hairline=True,
-            media_codecs=True,
-            navigator_hardware_concurrency=True,
-            navigator_permissions=True,
-            error_prototype=True,
-            sec_ch_ua=True,
-            iframe_content_window=True,
-            navigator_platform_override="Win32",
-            navigator_languages_override=("en-US", "en"),
-        )
-        log("Stealth config built")
-    except ImportError:
-        log("Warning: playwright-stealth not available — bot detection risk")
-
+    # patchright is a hardened Playwright drop-in that pre-patches CDP
+    # Runtime.Enable and driver-level fingerprints at build time — no need for
+    # a separate playwright_stealth hook. Use real Chrome channel + visible
+    # (headful) browser via Xvfb for the lowest fingerprint.
     pw = sync_playwright().start()
 
-    # Hook stealth at the pw level BEFORE launch
-    if _stealth is not None:
-        try:
-            _stealth.hook_playwright_context(pw)
-            log("Stealth hooked at pw instance level")
-        except Exception as e:
-            log(f"Warning: stealth hook failed: {e!r}")
-
     try:
-        browser = pw.chromium.launch(headless=headless, args=_STEALTH_ARGS)
+        browser = pw.chromium.launch(
+            headless=headless,
+            channel="chrome",  # Step 3: use real Google Chrome, not bundled Chromium
+            args=_STEALTH_ARGS,
+        )
         context = browser.new_context(
             accept_downloads=True,
-            viewport={"width": 1280, "height": 900},
+            no_viewport=True,  # Step 4: let Xvfb framebuffer drive size
             user_agent=_DEFAULT_UA,
             locale="en-US",
             timezone_id="America/New_York",
@@ -255,15 +221,6 @@ def launch_browser(bank_slug: str, headless: bool = True, log: Callable = logger
         raise
 
     page = context.new_page()
-
-    # Apply stealth to the page as well (belt-and-suspenders — covers signals
-    # that only get evaluated on a live page context)
-    if _stealth is not None:
-        try:
-            _stealth.apply_stealth_sync(page)
-        except Exception as e:
-            log(f"Warning: stealth page-apply failed: {e!r}")
-
     return pw, context, page
 
 

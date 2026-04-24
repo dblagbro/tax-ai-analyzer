@@ -427,10 +427,8 @@
     PP.initChat();
   };
 })();
-</script>
 
-<script>
-// ── US Alliance FCU importer ──────────────────────────────────────────────
+/* ── US Alliance FCU importer ─────────────────────────────────────────── */
 (function() {
   var _usaJobId = null;
   var _usaLogTimer = null;
@@ -625,11 +623,8 @@
     if (name === 'usalliance') loadUsaStatus();
   };
 })();
-</script>
 
-
-<script>
-// ── Capital One, US Bank, Merrick Bank, Chime, SimpleFIN importers ─────────────
+/* ── Capital One, US Bank, Merrick Bank, Chime, SimpleFIN importers ───── */
 (function() {
   // Generic log poller factory — shared by all new importers
   function makePoller(prefix, mfaBoxId) {

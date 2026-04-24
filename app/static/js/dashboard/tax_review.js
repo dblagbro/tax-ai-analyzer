@@ -262,3 +262,5 @@ async function trSendFollowup() {
 
 function trStopFollowup() { if (_trQaAbort) _trQaAbort.abort(); }
 
+
+registerTabLoader("tax_review", loadTaxReviewYears);

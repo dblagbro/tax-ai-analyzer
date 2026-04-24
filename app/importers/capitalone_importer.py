@@ -389,7 +389,7 @@ def _download_chunk(
     Navigate to Capital One's 'Download Transactions' UI for one account,
     select a date range, and download the CSV.
     """
-    from playwright.sync_api import TimeoutError as PWTimeout
+    from patchright.sync_api import TimeoutError as PWTimeout
 
     # Navigate to account page
     if acct.get("url") and acct["url"] != ACCOUNTS_URL:

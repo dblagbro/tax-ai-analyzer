@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     curl \
     fonts-liberation \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -29,11 +30,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
     libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
     && rm -rf /var/lib/apt/lists/* \
-    && python -m playwright install chromium
+    && python -m patchright install chromium \
+    && python -m patchright install chrome
 
 COPY app/ ./app/
 COPY profiles/ ./profiles/
 
 EXPOSE 8012
 
-CMD ["python", "-m", "app.main"]
+# Wrap with xvfb-run so patchright can launch a headful real-Chrome browser
+# (much harder to fingerprint than --headless=new). Without Xvfb, headless=False
+# fails with "DISPLAY not set".
+CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x900x24", "python", "-m", "app.main"]

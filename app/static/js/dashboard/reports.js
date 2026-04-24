@@ -109,3 +109,5 @@ function downloadYoYCsv() {
   });
 }
 
+
+registerTabLoader("reports", loadExports);

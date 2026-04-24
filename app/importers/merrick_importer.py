@@ -264,7 +264,7 @@ def _download_year(
 def _download_chunk(page, context, start_date: date, end_date: date,
                     log: Callable) -> Optional[bytes]:
     """Navigate to download UI, set dates, download CSV."""
-    from playwright.sync_api import TimeoutError as PWTimeout
+    from patchright.sync_api import TimeoutError as PWTimeout
 
     # Try to navigate to the download/export section
     export_reached = False

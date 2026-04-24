@@ -140,3 +140,5 @@ function exportMileageCSV() {
   window.location = P+'/api/mileage/export.csv' + (p.toString() ? '?'+p : '');
 }
 
+
+registerTabLoader("mileage", loadMileage);
