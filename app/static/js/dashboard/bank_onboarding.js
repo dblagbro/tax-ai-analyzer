@@ -92,15 +92,35 @@ async function openBankDetail(bankId) {
     </div>
 
     <h4 style="margin-top:18px">Recordings (${recordings.length})</h4>
+    <div style="background:#f0f7ff;border-left:3px solid #2196f3;padding:10px 14px;font-size:.85rem;margin-bottom:10px">
+      <strong>How to capture a HAR:</strong>
+      <ol style="margin:6px 0 0 18px">
+        <li>Open the bank's site in a real Chrome window (no automation)</li>
+        <li>Open DevTools (F12) → Network tab → enable "Preserve log"</li>
+        <li>Log in + navigate to statements + click one statement</li>
+        <li>Right-click in the Network tab → "Save all as HAR with content"</li>
+        <li>Upload the .har file below + describe what you did in the narration box</li>
+      </ol>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:10px;max-width:760px">
+      <input type="file" id="bo-har-${bank.id}" accept=".har,.json" />
+      <textarea id="bo-narration-${bank.id}" rows="4"
+                placeholder="Narration: what did you do? e.g. 'Logged in via username + password, got SMS code, entered code, clicked Statements tab, clicked October 2025 row, PDF opened in new tab.'"></textarea>
+      <div>
+        <button class="btn btn-primary" onclick="uploadRecording(${bank.id})">Upload recording</button>
+        <span id="bo-upload-result-${bank.id}" style="margin-left:10px;font-size:.86rem"></span>
+      </div>
+    </div>
     ${recordings.length === 0
       ? '<div class="empty" style="font-size:.86rem">No recordings uploaded yet.</div>'
-      : `<table><thead><tr><th>#</th><th>Captured</th><th>HAR</th><th>Bytes</th><th>Narration</th></tr></thead><tbody>
+      : `<table><thead><tr><th>#</th><th>Captured</th><th>HAR</th><th>Bytes</th><th>Narration</th><th></th></tr></thead><tbody>
         ${recordings.map(r => `<tr>
           <td>${r.id}</td>
           <td style="font-size:.78rem">${(r.captured_at || '').slice(0, 16).replace('T', ' ')}</td>
-          <td style="font-size:.74rem">${esc(r.har_path || '—')}</td>
+          <td style="font-size:.74rem">${r.har_path ? esc(r.har_path.split('/').pop()) : '—'}</td>
           <td>${r.byte_size?.toLocaleString() || 0}</td>
           <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.narration_text || '')}">${esc((r.narration_text || '').slice(0, 80))}</td>
+          <td>${r.har_path ? `<a class="btn btn-sm btn-outline" href="${P}/api/admin/banks/${bank.id}/recordings/${r.id}?download=1" download>Download</a>` : ''}</td>
         </tr>`).join('')}
       </tbody></table>`}
 
@@ -177,6 +197,39 @@ async function approveGenerated(bankId, genId) {
     loadBankQueue();
   } else {
     toast('Approve failed: ' + (r?.error || ''), 'error');
+  }
+}
+
+async function uploadRecording(bankId) {
+  const harInput = document.getElementById(`bo-har-${bankId}`);
+  const narration = document.getElementById(`bo-narration-${bankId}`)?.value.trim() || '';
+  const result = document.getElementById(`bo-upload-result-${bankId}`);
+  const harFile = harInput?.files?.[0];
+  if (!harFile && !narration) {
+    result.innerHTML = '<span style="color:var(--red)">Need a HAR file OR narration text</span>';
+    return;
+  }
+  result.innerHTML = '<span style="color:var(--muted)">Uploading…</span>';
+  const fd = new FormData();
+  if (harFile) fd.append('har', harFile);
+  if (narration) fd.append('narration', narration);
+  try {
+    const r = await fetch(P + `/api/admin/banks/${bankId}/recordings`, {
+      method: 'POST',
+      body: fd,
+    });
+    const j = await r.json();
+    if (j && j.id) {
+      result.innerHTML = `<span style="color:var(--income)">&#10003; Uploaded recording #${j.id} (${(j.byte_size || 0).toLocaleString()} bytes)</span>`;
+      if (harInput) harInput.value = '';
+      document.getElementById(`bo-narration-${bankId}`).value = '';
+      // Refresh detail panel
+      openBankDetail(bankId);
+    } else {
+      result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(j?.error || 'Upload failed')}</span>`;
+    }
+  } catch (e) {
+    result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(e.message || 'Network error')}</span>`;
   }
 }
 
