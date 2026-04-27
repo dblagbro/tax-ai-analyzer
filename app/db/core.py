@@ -349,3 +349,51 @@ def _migrate(conn):
             "ALTER TABLE analyzed_documents ADD COLUMN cross_source_duplicate INTEGER DEFAULT 0"
         )
         conn.commit()
+
+    # ── Phase 11: bank-onboarding queue (admin-curated user submissions) ──
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS pending_banks (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug            TEXT UNIQUE NOT NULL,
+            display_name    TEXT NOT NULL,
+            login_url       TEXT NOT NULL,
+            statements_url  TEXT DEFAULT '',
+            platform_hint   TEXT DEFAULT '',  -- e.g. 'lumin_digital', 'q2', 'fis', 'unknown'
+            submitted_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            status          TEXT NOT NULL DEFAULT 'pending',
+              -- pending | recording | recorded | processing | generated | approved | rejected | live
+            notes           TEXT DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now')),
+            updated_at      TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_pendingbanks_status ON pending_banks(status);
+        CREATE INDEX IF NOT EXISTS idx_pendingbanks_slug   ON pending_banks(slug);
+
+        CREATE TABLE IF NOT EXISTS bank_recordings (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            pending_bank_id   INTEGER REFERENCES pending_banks(id) ON DELETE CASCADE,
+            har_path          TEXT,                -- on-disk path under data/onboarding/
+            narration_text    TEXT DEFAULT '',
+            dom_snapshot_path TEXT,
+            byte_size         INTEGER DEFAULT 0,
+            captured_at       TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_bankrec_pending ON bank_recordings(pending_bank_id);
+
+        CREATE TABLE IF NOT EXISTS generated_importers (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            pending_bank_id   INTEGER REFERENCES pending_banks(id) ON DELETE CASCADE,
+            recording_id      INTEGER REFERENCES bank_recordings(id) ON DELETE SET NULL,
+            source_code       TEXT NOT NULL,       -- the generated <bank>_importer.py
+            test_code         TEXT DEFAULT '',     -- generated test (optional)
+            llm_model         TEXT DEFAULT '',
+            llm_tokens_in     INTEGER DEFAULT 0,
+            llm_tokens_out    INTEGER DEFAULT 0,
+            generation_notes  TEXT DEFAULT '',     -- LLM's own commentary about confidence
+            approved_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            approved_at       TEXT,
+            generated_at      TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_genimp_pending ON generated_importers(pending_bank_id);
+    """)
+    conn.commit()

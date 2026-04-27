@@ -1,0 +1,59 @@
+<!-- BANK ONBOARDING (admin queue) -->
+<div id="tab-bank_onboarding" class="tab-panel {% if active_tab == 'bank_onboarding' %}active{% endif %}">
+  <div class="page-header">
+    <div class="page-title">Bank Onboarding Queue</div>
+    <button class="btn btn-outline" onclick="loadBankQueue()">&#8635; Refresh</button>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title" style="margin-top:0">Submit a new bank</div>
+    <p style="margin-top:0;color:var(--muted);font-size:.86rem">
+      Add a bank to the queue. After submission you can attach a HAR recording
+      + narration that the codegen agent uses to draft a Playwright importer.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:760px">
+      <input id="bo-name" type="text" placeholder="Display name (e.g. Capital One)" />
+      <input id="bo-login-url" type="url" placeholder="Login URL (https://...)" />
+      <input id="bo-statements-url" type="url" placeholder="Statements URL (optional)" />
+      <input id="bo-platform-hint" type="text" placeholder='Platform hint (optional, e.g. "lumin_digital")' />
+    </div>
+    <textarea id="bo-notes" placeholder="Notes (optional) — anything you know about the bank's flow"
+              rows="2" style="width:100%;max-width:760px;margin-top:10px"></textarea>
+    <div style="margin-top:10px">
+      <button class="btn btn-primary" onclick="submitBankCandidate()">Submit to queue</button>
+      <span id="bo-submit-result" style="margin-left:10px;font-size:.86rem"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+      <div class="card-title" style="margin:0">Queue</div>
+      <select id="bo-status-filter" onchange="loadBankQueue()" style="margin-left:auto">
+        <option value="">All statuses</option>
+        <option value="pending">pending</option>
+        <option value="recording">recording</option>
+        <option value="recorded">recorded</option>
+        <option value="processing">processing</option>
+        <option value="generated">generated</option>
+        <option value="approved">approved</option>
+        <option value="rejected">rejected</option>
+        <option value="live">live</option>
+      </select>
+    </div>
+    <div id="bo-queue-list">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Detail panel — populated when a row is clicked -->
+  <div id="bo-detail-panel" style="display:none;margin-top:14px">
+    <div class="card">
+      <div style="display:flex;align-items:center">
+        <div class="card-title" id="bo-detail-title" style="margin:0">…</div>
+        <button class="btn btn-outline" style="margin-left:auto"
+                onclick="closeBankDetail()">&times; Close</button>
+      </div>
+      <div id="bo-detail-body"></div>
+    </div>
+  </div>
+</div>

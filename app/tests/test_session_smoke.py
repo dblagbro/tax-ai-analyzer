@@ -158,6 +158,7 @@ class TestTabRegistry:
         "dashboard", "transactions", "documents", "import",
         "tax_review", "mileage", "activity", "ai_costs",
         "folder_manager", "chat", "reports", "settings", "users", "entities",
+        "bank_onboarding",
     ]
 
     def test_all_tabs_registered(self):

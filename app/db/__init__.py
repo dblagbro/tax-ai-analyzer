@@ -138,3 +138,19 @@ from app.db.activity import (
     log_activity,
     search_activity,
 )
+
+from app.db.bank_onboarding import (
+    add_generated_importer,
+    add_recording,
+    approve_generated_importer,
+    create_pending_bank,
+    delete_pending_bank,
+    get_generated_importer,
+    get_pending_bank,
+    get_pending_bank_by_slug,
+    get_recording,
+    list_generated_importers,
+    list_pending_banks,
+    list_recordings,
+    update_pending_bank,
+)
