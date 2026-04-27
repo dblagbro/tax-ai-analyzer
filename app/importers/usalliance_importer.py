@@ -92,28 +92,16 @@ def run_import(
     # patchright replaces playwright + playwright-stealth: CDP Runtime.Enable
     # leak and driver-level fingerprint issues are patched at build time, so no
     # explicit stealth hook is needed here.
+    # Reuse the shared Chrome launch args from base_bank_importer to keep
+    # us in sync if the stealth config evolves (was duplicated pre-Phase-9).
+    from app.importers.base_bank_importer import _STEALTH_ARGS
+
     with sync_playwright() as pw:
         log("Launching real Chrome via patchright (visible under Xvfb)…")
         browser = pw.chromium.launch(
             headless=False,
             channel="chrome",  # real Chrome binary, not bundled Chromium
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--disable-extensions",
-                "--disable-default-apps",
-                "--disable-component-extensions-with-background-pages",
-                "--disable-background-networking",
-                "--disable-sync",
-                "--metrics-recording-only",
-                "--no-first-run",
-                "--password-store=basic",
-                "--use-mock-keychain",
-                "--lang=en-US",
-                "--accept-lang=en-US",
-            ],
+            args=_STEALTH_ARGS,
         )
         context = browser.new_context(
             accept_downloads=True,

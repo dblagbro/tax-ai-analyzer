@@ -1,0 +1,256 @@
+# Operational Runbook — tax-ai-analyzer
+
+Captures the hard-won knowledge from the 2026-04-23/24 remediation + canary
+session. Use this when something breaks or before a maintenance event.
+
+---
+
+## 1. Quick health check
+
+```sh
+# Container alive?
+docker ps --filter name=tax-ai-analyzer --format '{{.Status}}\t{{.Image}}'
+
+# Flask actually serving (not just "Up")?
+curl -sI http://localhost:8012/tax-ai-analyzer/login | head -1
+# Expect: HTTP/1.1 200 OK
+
+# Process tree healthy?
+docker exec tax-ai-analyzer ps -ef | head -8
+# Expect: PID 1 = tini, child = python -m app.main, grandchild = Xvfb :99
+
+# Run the test suite
+docker exec tax-ai-analyzer python3 -m pytest app/tests/ -q
+# Expect: 126 passed (or higher)
+```
+
+---
+
+## 2. Single-container restart (safe, never touches volumes)
+
+```sh
+# Code-only changes (under app/, profiles/, app/static/)
+sudo docker restart tax-ai-analyzer
+
+# Image-changing edits (Dockerfile, requirements.txt, docker-entrypoint.sh)
+cd /home/dblagbro/docker
+sudo docker compose build tax-ai-analyzer
+sudo docker compose up -d --force-recreate --no-deps tax-ai-analyzer
+```
+
+**NEVER** run `docker compose down` — it stops the entire stack including
+Paperless. The repo's `CLAUDE.md` calls this out as a HARD LIMIT.
+
+---
+
+## 3. "Container Up but nothing is serving"
+
+Symptom: `docker ps` shows `Up X minutes` but `curl` returns connection
+refused / curl exit 56.
+
+Diagnosis:
+```sh
+docker exec tax-ai-analyzer ps -ef | head
+```
+
+Outcomes:
+- **Only `tini` + `Xvfb`, no python**: entrypoint failed before Flask
+  started. Check `docker logs tax-ai-analyzer --tail 80` for the cause.
+  Common: stale `/tmp/.X11-unix/X99` socket from a prior Xvfb.
+- **`tini` + `python` + Xvfb all running**: Flask is up, problem is
+  upstream (nginx, network, port mapping). Check
+  `docker port tax-ai-analyzer 8012`.
+- **Only `xvfb-run` (no python, no Xvfb)**: this means the image is from
+  before commit `1bba238`. Old `xvfb-run` wrapper hangs in Docker. Pull
+  the latest image.
+
+Hard fix when Xvfb is the problem:
+```sh
+sudo docker compose up -d --force-recreate --no-deps tax-ai-analyzer
+# This recreates the container with a fresh /tmp, which clears any
+# stale X11 socket from a prior Xvfb.
+```
+
+---
+
+## 4. Restore data from backup tarball
+
+Tarballs live at `/mnt/s/router_and_LAN/backups/www1/manual/tax-ai-data-*.tar.gz`.
+
+```sh
+# 1. Stop writers (analysis daemon)
+docker exec tax-ai-analyzer curl -s -X POST http://localhost:5000/api/admin/pause_threads || true
+
+# 2. Pick a tarball to restore
+TARBALL=/mnt/s/router_and_LAN/backups/www1/manual/tax-ai-data-2026-04-24_1634-session-close-post-canary.tar.gz
+
+# 3. Verify the tarball before destroying live data
+sudo tar tzf $TARBALL | head
+# Expect: _snapshot_*.db, usage.db, tax_analyzer_state.json, etc.
+
+# 4. Extract over the live volume
+docker stop tax-ai-analyzer
+sudo tar xzf $TARBALL -C /var/lib/docker/volumes/docker_tax_ai_data/_data/
+
+# 5. The snapshot DB is named _snapshot_<timestamp>.db — rename to financial_analyzer.db
+sudo mv /var/lib/docker/volumes/docker_tax_ai_data/_data/_snapshot_*.db \
+        /var/lib/docker/volumes/docker_tax_ai_data/_data/financial_analyzer.db
+
+# 6. Restart
+sudo docker compose up -d --force-recreate --no-deps tax-ai-analyzer
+sleep 5
+
+# 7. Verify counts match expected post-restore state
+docker exec tax-ai-analyzer python3 -c "
+import sqlite3
+c = sqlite3.connect('/app/data/financial_analyzer.db')
+print('tx:', c.execute('SELECT COUNT(*) FROM transactions').fetchone()[0])
+print('docs:', c.execute('SELECT COUNT(*) FROM analyzed_documents').fetchone()[0])
+print('integrity:', c.execute('PRAGMA integrity_check').fetchone())"
+```
+
+---
+
+## 5. Rotate `ADMIN_INITIAL_PASSWORD` (only matters on fresh-DB bootstrap)
+
+The `ensure_default_data()` gate refuses to seed an admin user without this
+env var on a pristine DB. If the existing DB already has users, the value
+is ignored — but it's still wise to set a fresh secret periodically.
+
+```sh
+# Generate a new secret
+NEW=$(python3 -c "import secrets; print(secrets.token_urlsafe(18))")
+
+# Update .env (gitignored)
+sed -i "s|^TAX_AI_ADMIN_PASSWORD=.*|TAX_AI_ADMIN_PASSWORD=$NEW|" /home/dblagbro/docker/.env
+
+# Recreate the container so it picks up the new env value
+cd /home/dblagbro/docker
+sudo docker compose up -d --force-recreate --no-deps tax-ai-analyzer
+```
+
+Note: rotating this does NOT change any existing admin user's password —
+that's a separate flow under Settings → Users → Reset Password. The env
+var only seeds on first-ever boot.
+
+---
+
+## 6. Image tags + Docker Hub
+
+Naming convention: `dblagbro/tax-ai-analyzer:YYYY-MM-DD-<label>`.
+
+Active tags as of session-close:
+| Tag | Purpose |
+|---|---|
+| `2026-04-24-qa-remediated` | Current production (matches HEAD `9b3f623`) |
+| `pre-remediation-2026-04-24_0107` | Nuclear rollback target |
+| `2026-04-23-playwright-step1` | Pre-Phase-9 reference |
+| `latest` | Stale — DO NOT use; use a dated tag |
+
+Push a new tag to Docker Hub:
+```sh
+sudo docker tag dblagbro/tax-ai-analyzer:2026-04-24-qa-remediated \
+                dblagbro/tax-ai-analyzer:2026-MM-DD-<label>
+sudo docker push dblagbro/tax-ai-analyzer:2026-MM-DD-<label>
+```
+
+Roll back to an older image:
+```sh
+# Edit the compose image tag
+sed -i 's|^.*image: dblagbro/tax-ai-analyzer:.*$|    image: dblagbro/tax-ai-analyzer:pre-remediation-2026-04-24_0107|' \
+    /home/dblagbro/docker/docker-compose.yml
+# Recreate
+cd /home/dblagbro/docker
+sudo docker compose up -d --force-recreate --no-deps tax-ai-analyzer
+```
+
+---
+
+## 7. Bank importer troubleshooting
+
+### Patchright + real Chrome won't launch (`Missing X server or $DISPLAY`)
+Almost always Xvfb dying after `docker-entrypoint.sh` exec'd into python.
+Symptoms in `ps -ef`: no `Xvfb :99` process. Fix:
+```sh
+sudo docker compose up -d --force-recreate --no-deps tax-ai-analyzer
+```
+
+### MFA push not arriving on user's phone
+Cause is bank-side — not our code. Verify on phone:
+1. Open the bank's mobile app
+2. Settings → Notifications → enabled
+3. iOS/Android system Settings → bank app → notifications → enabled
+4. Manually log in to the bank's app once to "wake" the device registration
+
+If the bank app can log in manually but the importer can't get a push,
+the registered MFA device has likely changed. Re-register.
+
+### Login succeeds but statement download yields 0 bytes / 536-byte stub
+This is the known US Alliance statement-download bug. See
+`qa/bug-statement-download-usalliance.md`. Workaround: log in to the
+bank's mobile app, download statements manually, drop into
+`/consume/personal/<year>/`. Paperless will OCR + ingest.
+
+### Account lockout suspected
+1. Stop firing import attempts immediately. Each adds another bad-login
+   to the bank's record.
+2. Manually log in via a real browser at the bank's website.
+3. If "Your account has been locked": call the bank's recovery line +
+   reset password.
+4. Save the new password in Settings → `<bank>` credentials.
+5. Then retry the importer.
+
+### Cookie auto-save not skipping MFA on next run
+Two failure modes:
+- **Cookies not saved**: check `db.get_setting('<bank>_cookies')` is
+  non-empty. If empty, the prior login failed before reaching the
+  `Logged in` checkpoint where `save_auth_cookies()` runs.
+- **Cookies saved but session rejected**: the bank's session model isn't
+  pure cookie-based (US Alliance is known to do this — see Finding A in
+  `bug-statement-download-usalliance.md`). The importer falls back to
+  full credential login + MFA. Not a bug.
+
+---
+
+## 8. Known dangerous operations to avoid
+
+| Action | Why dangerous |
+|---|---|
+| `docker compose down` | Stops the entire stack incl. Paperless |
+| `docker compose down -v` | DESTROYS volumes. Total data loss. |
+| `docker volume rm docker_tax_ai_data` | Same as above. Live data goes away. |
+| `git push --force` to main | Lose commits. |
+| Editing `/var/lib/docker/volumes/docker_tax_ai_data/_data/financial_analyzer.db` while container running | SQLite WAL corruption. Stop container first. |
+| Setting `SESSION_COOKIE_SECURE=False` | Cookie no longer requires HTTPS — a rollback risk. |
+| Removing `_safe_next()` guard in `app/routes/auth.py` | Re-opens CRIT-NEW-3 open redirect. |
+| Editing `_STEALTH_ARGS` and forgetting it's shared | Affects 6 bank importers at once. |
+
+---
+
+## 9. Routine release-readiness checklist
+
+Before a release/deploy:
+- [ ] `pytest app/tests/` — 126/126 (or higher)
+- [ ] `git status` — clean
+- [ ] `git log --oneline origin/main..HEAD` — empty (nothing unpushed)
+- [ ] `docker ps` — container Up, image is the dated tag (not `:latest`)
+- [ ] `curl -sI .../login` — HTTP 200
+- [ ] `qa/release-readiness-report-final.md` — verdict reflects current commit
+- [ ] Backup tarball + git tag + Docker Hub push for rollback
+- [ ] Smoke a US Alliance canary import (proves auth stack still works)
+
+---
+
+## 10. Files and where they live
+
+| What | Where |
+|---|---|
+| Code | `/home/dblagbro/docker/tax-ai-analyzer/app/` (bind-mounted into container) |
+| Data | Docker volume `docker_tax_ai_data` (NOT bind-mounted) |
+| Backups | `/mnt/s/router_and_LAN/backups/www1/manual/` |
+| Compose | `/home/dblagbro/docker/docker-compose.yml` (NOT in git) |
+| Secrets | `/home/dblagbro/docker/.env` (gitignored) |
+| QA docs | `qa/` inside repo (in git) |
+| Bug log of record | `qa/bug-log.md` + `qa/bug-log-post-phase9*.md` (canonical findings) |
+| Architecture | `architecture.md` (current as of `4573614`) |
+| Refactor history | `refactor-log.md` (current as of `9b3f623`) |
