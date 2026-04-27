@@ -103,22 +103,19 @@ def run_import(
             channel="chrome",  # real Chrome binary, not bundled Chromium
             args=_STEALTH_ARGS,
         )
+        # Phase 10C — drop the Windows-spoof user_agent + sec-ch-ua headers
+        # that were creating a UA-vs-platform-vs-CH-UA mismatch (real
+        # navigator.platform was "Linux x86_64" but UA claimed Windows).
+        # Coherent real-Linux-Chrome-147 is harder for detectors to flag
+        # than incoherent "old-Chrome-on-Windows-with-Linux-internals". See
+        # base_bank_importer.launch_browser() for full rationale.
         context = browser.new_context(
             accept_downloads=True,
-            no_viewport=True,  # let Xvfb framebuffer drive size
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            ),
+            no_viewport=True,
             locale="en-US",
             timezone_id="America/New_York",
             color_scheme="light",
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Windows"',
-            },
+            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
         )
 
         if cookies:
