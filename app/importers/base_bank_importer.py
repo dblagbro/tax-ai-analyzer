@@ -202,27 +202,18 @@ def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logge
             channel="chrome",  # Step 3: use real Google Chrome, not bundled Chromium
             args=_STEALTH_ARGS,
         )
-        # Phase 10C — fingerprint consistency.
-        # Earlier configs spoofed user-agent to "Windows NT 10.0 / Chrome 131"
-        # while navigator.platform stayed "Linux x86_64" (the actual host)
-        # and the sec-ch-ua hints claimed "Windows". A 2026-04-24
-        # fingerprint probe (tools/diag_fingerprint_probe.py) confirmed that
-        # those overrides created a UA-vs-platform-vs-CH-UA mismatch that
-        # any modern bot detector flags. Real Chrome 147 on Linux gives a
-        # COHERENT fingerprint (UA, platform, CH-UA all align), and Linux
-        # Chrome is normal traffic for banks. So we drop the spoof and let
-        # real values flow through. Net: better stealth despite "looking
-        # like Linux" (which is what we are).
         context = browser.new_context(
             accept_downloads=True,
-            no_viewport=True,  # let Xvfb framebuffer drive size
+            no_viewport=True,  # Step 4: let Xvfb framebuffer drive size
+            user_agent=_DEFAULT_UA,
             locale="en-US",
             timezone_id="America/New_York",
             color_scheme="light",
-            # Accept-Language matches navigator.languages now that we're not
-            # forcing a UA mismatch.
             extra_http_headers={
                 "Accept-Language": "en-US,en;q=0.9",
+                "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
             },
         )
     except Exception:
