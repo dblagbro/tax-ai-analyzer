@@ -224,6 +224,17 @@ def generate_importer(
         db.update_pending_bank(bank_id, status="recorded")
         raise RuntimeError(f"codegen LLM call failed: {e}") from e
 
+    # Static + shape validation BEFORE we accept the output. This catches the
+    # most common LLM failure modes (syntax errors, missing public surface,
+    # hallucinated helper names) so the admin reviewer doesn't have to.
+    from app.ai_agents.importer_validator import validate as _validate
+    validation_status, validation_notes = _validate(result["source_code"])
+    if validation_status != "pass":
+        logger.warning(
+            f"codegen output failed validation ({validation_status}): "
+            f"{validation_notes[:200]}"
+        )
+
     gen_id = db.add_generated_importer(
         pending_bank_id=bank_id,
         recording_id=recording["id"],
@@ -233,12 +244,15 @@ def generate_importer(
         llm_tokens_in=result["tokens_in"],
         llm_tokens_out=result["tokens_out"],
         generation_notes=result.get("generation_notes", ""),
+        validation_status=validation_status,
+        validation_notes=validation_notes,
     )
     db.update_pending_bank(bank_id, status="generated")
     db.log_activity(
         "bank_importer_generated",
         f"bank={bank_id} gen_id={gen_id} model={result['model']} "
-        f"tokens={result['tokens_in']}/{result['tokens_out']}",
+        f"tokens={result['tokens_in']}/{result['tokens_out']} "
+        f"validation={validation_status}",
     )
 
     return {
@@ -247,6 +261,8 @@ def generate_importer(
         "tokens_out": result["tokens_out"],
         "model": result["model"],
         "notes": result.get("generation_notes", ""),
+        "validation_status": validation_status,
+        "validation_notes": validation_notes,
     }
 
 

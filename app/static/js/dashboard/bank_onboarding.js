@@ -131,18 +131,25 @@ async function openBankDetail(bankId) {
     <h4 style="margin-top:18px">Generated importers (${generated.length})</h4>
     ${generated.length === 0
       ? '<div class="empty" style="font-size:.86rem">No importer drafts yet.</div>'
-      : `<table><thead><tr><th>#</th><th>Generated</th><th>LLM</th><th>Tokens</th><th>Approved</th><th></th></tr></thead><tbody>
-        ${generated.map(g => `<tr>
-          <td>${g.id}</td>
-          <td style="font-size:.78rem">${(g.generated_at || '').slice(0, 16).replace('T', ' ')}</td>
-          <td style="font-size:.78rem">${esc(g.llm_model || '—')}</td>
-          <td style="font-size:.78rem">in:${g.llm_tokens_in || 0} out:${g.llm_tokens_out || 0}</td>
-          <td>${g.approved_at ? '✓' : '—'}</td>
-          <td>
-            <button class="btn btn-sm btn-outline" onclick="viewGenerated(${bank.id}, ${g.id})">View</button>
-            ${g.approved_at ? '' : `<button class="btn btn-sm btn-primary" onclick="approveGenerated(${bank.id}, ${g.id})">Approve</button>`}
-          </td>
-        </tr>`).join('')}
+      : `<table><thead><tr><th>#</th><th>Generated</th><th>LLM</th><th>Tokens</th><th>Validation</th><th>Approved</th><th></th></tr></thead><tbody>
+        ${generated.map(g => {
+          const vs = g.validation_status || '';
+          const vBadge = vs === 'pass'
+            ? '<span class="badge badge-income" title="Passed automated checks">&#10003; pass</span>'
+            : (vs ? `<span class="badge badge-expense" title="${esc(g.validation_notes || '')}">${esc(vs)}</span>` : '<span style="color:var(--muted)">—</span>');
+          return `<tr>
+            <td>${g.id}</td>
+            <td style="font-size:.78rem">${(g.generated_at || '').slice(0, 16).replace('T', ' ')}</td>
+            <td style="font-size:.78rem">${esc(g.llm_model || '—')}</td>
+            <td style="font-size:.78rem">in:${g.llm_tokens_in || 0} out:${g.llm_tokens_out || 0}</td>
+            <td>${vBadge}</td>
+            <td>${g.approved_at ? '&#10003;' : '—'}</td>
+            <td>
+              <button class="btn btn-sm btn-outline" onclick="viewGenerated(${bank.id}, ${g.id})">View</button>
+              ${g.approved_at ? '' : `<button class="btn btn-sm btn-primary" onclick="approveGenerated(${bank.id}, ${g.id})">Approve</button>`}
+            </td>
+          </tr>`;
+        }).join('')}
       </tbody></table>`}
   `;
 }
@@ -180,27 +187,48 @@ async function viewGenerated(bankId, genId) {
   if (!g || g.error) { alert('Failed to load: ' + (g?.error || 'unknown')); return; }
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked. Allow pop-ups to view generated source.'); return; }
+  const escHtml = s => (s || '').replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]));
+  const vs = g.validation_status || '';
+  const vColor = vs === 'pass' ? '#3fb950' : (vs ? '#f85149' : '#8b949e');
+  const vLine = vs
+    ? `<div style="margin:10px 0;padding:10px;border-left:3px solid ${vColor};background:#161b22;color:#c9d1d9">
+         <strong style="color:${vColor}">Validation: ${escHtml(vs)}</strong>
+         ${g.validation_notes ? `<div style="margin-top:6px;color:#8b949e">${escHtml(g.validation_notes)}</div>` : ''}
+       </div>`
+    : '';
   w.document.write(`<html><head><title>Generated importer #${g.id}</title>
     <style>body{font-family:monospace;white-space:pre-wrap;padding:20px;font-size:.82rem;background:#0d1117;color:#c9d1d9}h2{color:#58a6ff}</style>
     </head><body>
     <h2>Generated importer #${g.id}</h2>
-    <div style="color:#8b949e;margin-bottom:10px">model: ${g.llm_model || 'unknown'} | tokens in/out: ${g.llm_tokens_in}/${g.llm_tokens_out}</div>
-    ${g.generation_notes ? `<div style="background:#161b22;padding:10px;border-radius:6px;color:#a8e6cf">${(g.generation_notes || '').replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]))}</div>` : ''}
+    <div style="color:#8b949e;margin-bottom:10px">model: ${escHtml(g.llm_model || 'unknown')} | tokens in/out: ${g.llm_tokens_in}/${g.llm_tokens_out}</div>
+    ${vLine}
+    ${g.generation_notes ? `<div style="background:#161b22;padding:10px;border-radius:6px;color:#a8e6cf">${escHtml(g.generation_notes)}</div>` : ''}
     <h3 style="color:#58a6ff;margin-top:20px">source_code</h3>
-    <pre style="background:#161b22;padding:14px;border-radius:6px;overflow:auto">${(g.source_code || '').replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]))}</pre>
-    ${g.test_code ? `<h3 style="color:#58a6ff;margin-top:20px">test_code</h3><pre style="background:#161b22;padding:14px;border-radius:6px;overflow:auto">${g.test_code.replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]))}</pre>` : ''}
+    <pre style="background:#161b22;padding:14px;border-radius:6px;overflow:auto">${escHtml(g.source_code)}</pre>
+    ${g.test_code ? `<h3 style="color:#58a6ff;margin-top:20px">test_code</h3><pre style="background:#161b22;padding:14px;border-radius:6px;overflow:auto">${escHtml(g.test_code)}</pre>` : ''}
     </body></html>`);
 }
 
 async function approveGenerated(bankId, genId) {
   if (!confirm(`Approve generated importer #${genId}?\n\nNote: this records approval but does NOT auto-deploy. You still need to copy the source into app/importers/ + register a route.`)) return;
-  const r = await post(`/api/admin/banks/${bankId}/generated/${genId}/approve`, {});
-  if (r && r.status === 'approved') {
+  let r = await fetch(P + `/api/admin/banks/${bankId}/generated/${genId}/approve`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+  });
+  let j = await r.json().catch(() => ({}));
+  if (r.status === 409) {
+    const msg = `${j.error || ''}\n\nValidation notes:\n${j.validation_notes || '(none)'}\n\nForce-approve anyway?`;
+    if (!confirm(msg)) { toast('Approve cancelled', 'info'); return; }
+    r = await fetch(P + `/api/admin/banks/${bankId}/generated/${genId}/approve?force=1`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+    });
+    j = await r.json().catch(() => ({}));
+  }
+  if (j && j.status === 'approved') {
     toast('Approved', 'success');
     openBankDetail(bankId);
     loadBankQueue();
   } else {
-    toast('Approve failed: ' + (r?.error || ''), 'error');
+    toast('Approve failed: ' + (j?.error || ''), 'error');
   }
 }
 

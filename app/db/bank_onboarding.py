@@ -212,15 +212,19 @@ def add_generated_importer(
     llm_tokens_in: int = 0,
     llm_tokens_out: int = 0,
     generation_notes: str = "",
+    validation_status: str = "",
+    validation_notes: str = "",
 ) -> int:
     conn = get_connection()
     try:
         cur = conn.execute(
             "INSERT INTO generated_importers(pending_bank_id,recording_id,source_code,"
-            "test_code,llm_model,llm_tokens_in,llm_tokens_out,generation_notes) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "test_code,llm_model,llm_tokens_in,llm_tokens_out,generation_notes,"
+            "validation_status,validation_notes) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
             (pending_bank_id, recording_id, source_code, test_code, llm_model,
-             llm_tokens_in, llm_tokens_out, generation_notes),
+             llm_tokens_in, llm_tokens_out, generation_notes,
+             validation_status, validation_notes),
         )
         conn.commit()
         return cur.lastrowid

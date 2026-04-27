@@ -134,10 +134,25 @@ def api_generated_get(bank_id, gen_id):
 def api_generated_approve(bank_id, gen_id):
     """Mark a generated importer as approved. Does NOT auto-deploy — admin still
     has to copy the source into app/importers/ and register a route. This
-    endpoint just records the approval timestamp + user."""
+    endpoint just records the approval timestamp + user.
+
+    Importers that failed automated validation (syntax/shape/import errors)
+    require ?force=1 to approve, so a careless click doesn't bless broken code.
+    """
     gen = db.get_generated_importer(gen_id)
     if not gen or gen.get("pending_bank_id") != bank_id:
         return jsonify({"error": "not found"}), 404
+    vs = (gen.get("validation_status") or "").strip()
+    force = request.args.get("force") == "1"
+    if vs and vs != "pass" and not force:
+        return jsonify({
+            "error": (
+                f"importer failed validation ({vs}). "
+                f"Re-run codegen, or pass ?force=1 to approve anyway."
+            ),
+            "validation_status": vs,
+            "validation_notes": gen.get("validation_notes") or "",
+        }), 409
     db.approve_generated_importer(gen_id, approved_by=current_user.id)
     db.update_pending_bank(bank_id, status="approved")
     db.log_activity("bank_approved", f"id={bank_id} gen_id={gen_id}",
@@ -188,6 +203,8 @@ def api_banks_generate(bank_id):
         "tokens_in": result["tokens_in"],
         "tokens_out": result["tokens_out"],
         "notes": result["notes"],
+        "validation_status": result.get("validation_status", ""),
+        "validation_notes": result.get("validation_notes", ""),
     }), 201
 
 

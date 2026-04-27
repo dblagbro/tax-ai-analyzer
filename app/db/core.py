@@ -392,8 +392,25 @@ def _migrate(conn):
             generation_notes  TEXT DEFAULT '',     -- LLM's own commentary about confidence
             approved_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
             approved_at       TEXT,
-            generated_at      TEXT DEFAULT (datetime('now'))
+            generated_at      TEXT DEFAULT (datetime('now')),
+            validation_status TEXT DEFAULT '',     -- 'pass' | 'syntax_error' | 'shape_error' | ''
+            validation_notes  TEXT DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_genimp_pending ON generated_importers(pending_bank_id);
     """)
     conn.commit()
+
+    # Belt-and-braces ALTER for DBs created before the validation columns existed
+    gen_cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(generated_importers)"
+    ).fetchall()}
+    if "validation_status" not in gen_cols:
+        conn.execute(
+            "ALTER TABLE generated_importers ADD COLUMN validation_status TEXT DEFAULT ''"
+        )
+        conn.commit()
+    if "validation_notes" not in gen_cols:
+        conn.execute(
+            "ALTER TABLE generated_importers ADD COLUMN validation_notes TEXT DEFAULT ''"
+        )
+        conn.commit()
