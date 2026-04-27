@@ -220,23 +220,26 @@ def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logge
         pw.stop()
         raise
 
-    # MED-PASS2-2: patchright + channel="chrome" leaves navigator.webdriver
-    # exposed as `false` (boolean) rather than `undefined`. Stricter anti-bot
-    # vendors (DataDome, Akamai in aggressive mode) check for
-    # `=== undefined` as a humanity signal. add_init_script runs too late for
-    # some pages; we override at the CONTEXT level so every new document
-    # navigation applies it before any detector script runs.
-    try:
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {"
-            "get: () => undefined, configurable: true});"
-            "Object.defineProperty(navigator, 'plugins', {"
-            "get: () => [1,2,3,4,5], configurable: true});"
-            "Object.defineProperty(navigator, 'languages', {"
-            "get: () => ['en-US', 'en'], configurable: true});"
-        )
-    except Exception as _e:
-        log(f"  (webdriver-mask init-script install failed: {_e!r})")
+    # NOTE: an earlier Phase-10B commit (5f0c2a3) called
+    # context.add_init_script() here to redefine navigator.webdriver to
+    # `undefined`. A 2026-04-24 fingerprint probe (tools/diag_fingerprint_probe.py)
+    # proved that patchright deliberately suppresses runtime JS injection
+    # — both `add_init_script` AND direct CDP
+    # `Page.addScriptToEvaluateOnNewDocument` are silently no-op'd. (This
+    # is a patchright design choice: runtime injection is itself a
+    # detectable fingerprint, so they refuse to do it.)
+    #
+    # Result: patchright leaves `navigator.webdriver` as boolean `false`
+    # (better than the default `true`, but not `undefined` like a real
+    # human browser). Strict detectors that check `=== undefined` will
+    # still flag us. To override webdriver further would require either
+    # (a) abandon patchright for a tool that allows runtime injection
+    # (most also less stealthy), or (b) use a Chrome --user-data-dir
+    # with a real-human profile (contradicts Phase-9's ephemeral-context
+    # decision).
+    #
+    # Filed as MED-PASS2-2 in qa/bug-log-post-phase9-pass2.md (deferred).
+    # No-op kept here to make the limitation discoverable from code.
 
     page = context.new_page()
     return pw, context, page

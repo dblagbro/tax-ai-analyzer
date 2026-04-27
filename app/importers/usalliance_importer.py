@@ -125,16 +125,12 @@ def run_import(
             log(f"Injecting {len(cookies)} browser cookies…")
             context.add_cookies(cookies)
 
-        # MED-PASS2-2 fingerprint hardening — override navigator.webdriver to
-        # undefined (patchright leaves it as boolean false by default).
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {"
-            "get: () => undefined, configurable: true});"
-            "Object.defineProperty(navigator, 'plugins', {"
-            "get: () => [1,2,3,4,5], configurable: true});"
-            "Object.defineProperty(navigator, 'languages', {"
-            "get: () => ['en-US', 'en'], configurable: true});"
-        )
+        # NOTE: prior commit added context.add_init_script() to override
+        # navigator.webdriver. 2026-04-24 fingerprint probe proved patchright
+        # silently suppresses runtime JS injection (by design — injection
+        # itself is a detectable fingerprint). The override didn't take
+        # effect; webdriver stays at boolean `false`. See base_bank_importer.py
+        # for full rationale + the kept-for-discoverability comment.
 
         page = context.new_page()
 

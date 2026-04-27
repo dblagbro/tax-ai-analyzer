@@ -85,12 +85,14 @@
 - **Area:** `base_bank_importer.launch_browser()` — and the Phase 9 plan's MED-NEW-4 workaround
 - **Severity:** MEDIUM (fingerprint leak; previously identified; this pass confirmed the obvious workaround doesn't work)
 - **Evidence:** Launched real Chrome via `pw.chromium.launch(headless=False, channel="chrome", ...)`, called `context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")`, navigated to `https://www.google.com/`, evaluated `navigator.webdriver` → still returns `False` with `typeof: boolean`. The init script did not override.
-- **Root cause:** patchright likely re-installs the webdriver property after init scripts run, OR Chrome 147+ enforces the property at a deeper level than user-land JS can override.
-- **Fix options:**
-  - Try a Chrome launch arg instead: `--disable-blink-features=AutomationControlled` (already present but incomplete).
-  - Use CDP `Page.addScriptToEvaluateOnNewDocument` with `runImmediately=true` via `CDPSession`.
-  - Accept as residual risk — the strongest anti-bot check (CDP Runtime.Enable) IS patched, so this is a secondary signal.
-- **Status:** UNFIXED.
+- **Root cause confirmed (2026-04-24 probe via `tools/diag_fingerprint_probe.py`):** patchright deliberately suppresses ALL runtime JavaScript injection. Both `context.add_init_script()` AND direct `Page.addScriptToEvaluateOnNewDocument` via `CDPSession.send` are silently no-op'd — even a marker variable (`window.__INIT_SCRIPT_RAN = true`) doesn't get set on the next-loaded document. This is a patchright design choice: runtime JS injection is itself a detectable fingerprint, so they refuse to do it.
+- **Fix options (all unsuitable):**
+  - ❌ `context.add_init_script` — silently no-op'd by patchright
+  - ❌ Direct CDP `Page.addScriptToEvaluateOnNewDocument` with `runImmediately=true` — also silently no-op'd
+  - ⚠️ Abandon patchright for selenium-stealth or undetected-chromedriver — both are detected by Cloudflare worse than patchright
+  - ⚠️ Use Chrome `--user-data-dir` with a real-human profile — contradicts Phase-9 ephemeral-context decision (persistent profiles accumulate other anomalies)
+- **Net residual risk:** patchright already converts `navigator.webdriver` from default `true` to `false`. Real human Chrome returns `undefined`. Strict detectors that check `=== undefined` will still flag us — but the strongest signal (CDP Runtime.Enable) IS patched, and `=== false` is closer to human than the default `=== true`.
+- **Status:** **CLOSED — VALIDATED AS UN-FIXABLE under patchright**. Code retired (commit pending) — was theater since the day it was committed. Comment kept in `base_bank_importer.py` to make the limitation discoverable from code.
 
 ### HARDENING-PASS2-1 — `Dockerfile`, `docker-entrypoint.sh`, and 3 QA docs ARE UNCOMMITTED
 
