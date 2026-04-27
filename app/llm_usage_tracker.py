@@ -67,6 +67,7 @@ def _init_db():
 # Format: "provider:model" -> (input_price, output_price)
 _PRICING: dict[str, tuple[float, float]] = {
     # Anthropic Claude
+    "anthropic:claude-opus-4-7":             ( 5.00,  25.00),
     "anthropic:claude-opus-4-6":             (15.00,  75.00),
     "anthropic:claude-sonnet-4-6":           ( 3.00,  15.00),
     "anthropic:claude-sonnet-4-5-20250929":  ( 3.00,  15.00),

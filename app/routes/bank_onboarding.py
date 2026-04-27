@@ -145,6 +145,52 @@ def api_generated_approve(bank_id, gen_id):
     return jsonify({"status": "approved"})
 
 
+# ── codegen agent trigger (Phase 11D) ─────────────────────────────────────────
+
+@bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/generate", methods=["POST"])
+@login_required
+@admin_required
+def api_banks_generate(bank_id):
+    """Trigger the AI codegen agent for a pending bank.
+
+    Reads the bank's most recent recording (HAR + narration), digests the HAR,
+    and asks Claude to draft a Playwright importer in the style of
+    usbank_importer.py. The result lands in `generated_importers` for review.
+
+    Optional JSON body: {"recording_id": int, "model": str} — both default to
+    "use the most recent recording" / "use the codegen default model".
+    """
+    bank = db.get_pending_bank(bank_id)
+    if not bank:
+        return jsonify({"error": "bank not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    recording_id = data.get("recording_id")
+    model = (data.get("model") or "").strip() or None
+
+    from app.ai_agents.bank_codegen import generate_importer
+    try:
+        result = generate_importer(
+            bank_id,
+            recording_id=int(recording_id) if recording_id else None,
+            model=model,
+        )
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.exception(f"codegen failed for bank={bank_id}")
+        return jsonify({"error": f"codegen failed: {e}"}), 500
+
+    return jsonify({
+        "status": "generated",
+        "generated_id": result["id"],
+        "model": result["model"],
+        "tokens_in": result["tokens_in"],
+        "tokens_out": result["tokens_out"],
+        "notes": result["notes"],
+    }), 201
+
+
 # ── recording uploads (Phase 11C-lite) ────────────────────────────────────────
 
 @bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/recordings",

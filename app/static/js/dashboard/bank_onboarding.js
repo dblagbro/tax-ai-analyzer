@@ -122,7 +122,11 @@ async function openBankDetail(bankId) {
           <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.narration_text || '')}">${esc((r.narration_text || '').slice(0, 80))}</td>
           <td>${r.har_path ? `<a class="btn btn-sm btn-outline" href="${P}/api/admin/banks/${bank.id}/recordings/${r.id}?download=1" download>Download</a>` : ''}</td>
         </tr>`).join('')}
-      </tbody></table>`}
+      </tbody></table>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:center">
+        <button class="btn btn-primary" onclick="generateImporter(${bank.id})">&#9889; Generate importer (Claude)</button>
+        <span id="bo-gen-result-${bank.id}" style="font-size:.86rem;color:var(--muted)">Uses the most recent recording. ~30-60s.</span>
+      </div>`}
 
     <h4 style="margin-top:18px">Generated importers (${generated.length})</h4>
     ${generated.length === 0
@@ -227,6 +231,29 @@ async function uploadRecording(bankId) {
       openBankDetail(bankId);
     } else {
       result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(j?.error || 'Upload failed')}</span>`;
+    }
+  } catch (e) {
+    result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(e.message || 'Network error')}</span>`;
+  }
+}
+
+async function generateImporter(bankId) {
+  const result = document.getElementById(`bo-gen-result-${bankId}`);
+  if (!result) return;
+  if (!confirm('Run the AI codegen agent on the most recent recording?\n\nThis calls Claude (Opus) and may take 30-60 seconds. The draft lands in "Generated importers" for review.')) return;
+  result.innerHTML = '<span style="color:var(--muted)"><span class="spinner" style="display:inline-block;width:12px;height:12px;vertical-align:middle"></span> Generating… this may take 30-60s</span>';
+  try {
+    const r = await fetch(P + `/api/admin/banks/${bankId}/generate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: '{}',
+    });
+    const j = await r.json();
+    if (r.status === 201 && j.generated_id) {
+      result.innerHTML = `<span style="color:var(--income)">&#10003; Draft #${j.generated_id} ready (model=${esc(j.model)}, tokens=${j.tokens_in}/${j.tokens_out}). Refreshing…</span>`;
+      setTimeout(() => openBankDetail(bankId), 1200);
+    } else {
+      result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(j?.error || 'Codegen failed')}</span>`;
     }
   } catch (e) {
     result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(e.message || 'Network error')}</span>`;
