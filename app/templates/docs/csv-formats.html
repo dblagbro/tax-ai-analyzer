@@ -1,0 +1,47 @@
+<section class="section" id="csv-formats">
+  <h2 class="section-heading">CSV Column Reference</h2>
+  <p>When the auto-detector cannot identify your CSV format, ensure your file has columns matching these names (case-insensitive).</p>
+
+  <h3 class="sub-heading">Generic bank CSV</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Column</th><th>Required</th><th>Description</th></tr>
+      <tr><td>date</td><td>Yes</td><td>Transaction date (YYYY-MM-DD, MM/DD/YYYY, etc.)</td></tr>
+      <tr><td>description or memo</td><td>Yes</td><td>Transaction description</td></tr>
+      <tr><td>amount</td><td>Yes</td><td>Positive for deposits, negative for withdrawals</td></tr>
+      <tr><td>debit / credit</td><td>Alt</td><td>Separate debit and credit columns (either/or with amount)</td></tr>
+      <tr><td>category</td><td>No</td><td>Pre-assigned category (will be mapped or overridden by AI)</td></tr>
+      <tr><td>reference or check_number</td><td>No</td><td>Reference number for dedup</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">PayPal CSV (standard export)</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Column</th><th>Notes</th></tr>
+      <tr><td>Date</td><td>MM/DD/YYYY format</td></tr>
+      <tr><td>Name</td><td>Counterparty name</td></tr>
+      <tr><td>Type</td><td>Transaction type (Payment Sent, etc.)</td></tr>
+      <tr><td>Status</td><td>Completed transactions are imported; others skipped</td></tr>
+      <tr><td>Gross</td><td>Amount with currency symbol (e.g. $-12.50)</td></tr>
+      <tr><td>Fee</td><td>PayPal fee (added to gross for net amount)</td></tr>
+      <tr><td>Net</td><td>Used if Gross is missing</td></tr>
+      <tr><td>Transaction ID</td><td>Used for dedup</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">Venmo CSV (standard export)</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Column</th><th>Notes</th></tr>
+      <tr><td>Datetime</td><td>ISO 8601 format</td></tr>
+      <tr><td>Type</td><td>Payment or Charge</td></tr>
+      <tr><td>Status</td><td>Complete transactions only</td></tr>
+      <tr><td>Note</td><td>Payment memo (used as description)</td></tr>
+      <tr><td>From</td><td>Sender name</td></tr>
+      <tr><td>To</td><td>Recipient name</td></tr>
+      <tr><td>Amount (total)</td><td>With + or - sign</td></tr>
+      <tr><td>ID</td><td>Used for dedup</td></tr>
+    </table>
+  </div>
+</section>

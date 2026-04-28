@@ -95,8 +95,28 @@ app/
 │   ├── entity_router.py — Rule-based entity tagger for imported docs
 │   ├── csv_runner.py   — parse_csv() + run_csv_job() shared by all CSV import routes
 │   ├── bank_csv.py     — Generic bank CSV parser
-│   ├── gmail_importer.py, paypal_api.py, paypal_importer.py
-│   ├── usalliance_importer.py (own inline Playwright launch — not yet folded onto base)
+│   │
+│   ├── gmail/          — (Phase 11H) Gmail OAuth + month-window fetch + AI review
+│   │   ├── runner.py   — _process_month worker + run_import orchestrator
+│   │   ├── fetch.py    — Gmail API connect + message-list/detail fetch
+│   │   ├── auth.py     — OAuth credentials.json + token DB persistence
+│   │   ├── parse.py    — HTML/text→PDF, filename, amount/date, dedup hash
+│   │   ├── transactions.py — upsert_transaction (also used by IMAP importer)
+│   │   ├── ai_review.py — _ai_review_email AI relevance check
+│   │   └── __init__.py — Re-exports public + IMAP-shared symbols
+│   ├── gmail_importer.py — Re-export shim → gmail/
+│   │
+│   ├── usalliance/     — (Phase 11G) US Alliance Playwright statement importer
+│   │   ├── runner.py   — run_import orchestrator
+│   │   ├── download.py — Per-year statement discovery + PDF download
+│   │   ├── estatements.py — eStatements navigation + readiness checks
+│   │   ├── login.py    — Login form fill + post-login verification
+│   │   ├── mfa.py      — MFA code exchange + page detection
+│   │   ├── helpers.py  — Filename / month / element-find / debug screenshot
+│   │   └── __init__.py — Re-exports run_import + set_mfa_code
+│   ├── usalliance_importer.py — Re-export shim → usalliance/
+│   │
+│   ├── paypal_api.py, paypal_importer.py
 │   ├── usbank_importer.py, chime_importer.py, merrick_importer.py,
 │   ├── capitalone_importer.py, verizon_importer.py (all use base launch_browser)
 │   ├── plaid_importer.py, simplefin_importer.py, imap_importer.py, venmo_importer.py
@@ -120,7 +140,16 @@ app/
 │       ├── transactions.js     — Transactions tab: list, reconcile, bulk-edit, vendor merge
 │       ├── documents.js        — Documents tab: table, file browser, override modal
 │       ├── import_hub.js       — Import Hub tab: source selectors, jobs list, Gmail import polling
-│       ├── setup_modals.js     — Gmail/PayPal/all bank setup modal IIFEs
+│       ├── setup_modals/       — (Phase 11E) Per-source Import Hub setup modals
+│       │   ├── gmail.js         — Gmail Setup Modal (OAuth chat + manual upload)
+│       │   ├── paypal.js        — PayPal Setup Modal
+│       │   └── banks/
+│       │       ├── factory.js   — Installs window.__bankFactory.{makePoller,makeBankHelpers}
+│       │       ├── usalliance.js — US Alliance importer (uses factory + own clipboard/test-login)
+│       │       ├── capitalone.js, usbank.js, merrick.js
+│       │       ├── chime.js, verizon.js
+│       │       ├── simplefin.js, imap.js, plaid.js
+│       │       └── tab_dispatcher.js — Wraps impTab to fire loadXxxStatus per source
 │       ├── chat.js             — AI Chat tab: sessions, messages, sharing, PDF export
 │       ├── tax_review.js       — Tax Review tab: filed returns, SSE stream, Q&A followups
 │       ├── reports.js          — Reports tab: export generate/download, Year-over-Year
@@ -159,7 +188,15 @@ app/
     │       └── _source_cloud.html
     ├── login.html
     ├── gmail_setup.html
-    └── docs.html
+    ├── docs.html       — User manual shell (Phase 11F: 274-line shell + 24 partials)
+    └── docs/           — (Phase 11F) Per-section docs partials
+        ├── overview.html, login.html, navigation.html, entities.html
+        ├── gmail.html, gmail-setup.html, gmail-run.html, paypal.html
+        ├── bank.html, url-import.html, cloud.html
+        ├── transactions.html, txn-add.html, txn-filter.html, txn-categorize.html
+        ├── documents.html, ai-analysis.html
+        ├── chat.html, reports.html, settings.html, users.html
+        ├── csv-formats.html, categories.html, troubleshooting.html
 ```
 
 ## Data flow: document analysis

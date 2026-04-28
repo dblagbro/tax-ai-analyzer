@@ -1,0 +1,26 @@
+<section class="section" id="bank">
+  <h2 class="section-heading">Bank CSV Import</h2>
+  <p>Most banks allow exporting a CSV of transactions. The importer supports a generic format with auto-detection for common bank layouts.</p>
+
+  <h3 class="sub-heading">Supported formats</h3>
+  <ul>
+    <li>Chase Bank CSV (Date, Description, Amount columns)</li>
+    <li>Bank of America CSV</li>
+    <li>Wells Fargo CSV</li>
+    <li>Generic OFX-to-CSV exports</li>
+    <li>Any CSV with <code>date</code>, <code>description</code> (or <code>memo</code>), and <code>amount</code> columns</li>
+  </ul>
+
+  <h3 class="sub-heading">Steps</h3>
+  <ol class="step-list">
+    <li>Download your bank statement as CSV from your bank's website.</li>
+    <li>Go to <strong>Import &rarr; Bank CSV</strong>.</li>
+    <li>Select entity and tax year.</li>
+    <li>Upload the CSV and click <strong>Import</strong>.</li>
+  </ol>
+
+  <div class="callout callout-tip">
+    <strong>Column mapping</strong>
+    If the importer cannot detect your bank's format, check the CSV Format Reference section below for the expected column names.
+  </div>
+</section>

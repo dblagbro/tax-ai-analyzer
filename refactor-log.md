@@ -566,3 +566,159 @@ pytest: 126/126.
 
 
 
+
+---
+
+## Phase 11E — `setup_modals.js` → `setup_modals/` package (completed 2026-04-28)
+
+**Before**: single 1,142-line `app/static/js/dashboard/setup_modals.js`
+mixing Gmail OAuth setup chat, PayPal setup chat, US Alliance importer
+modal, and a combined IIFE containing the `__bankFactory` plus 8 sub-bank
+sections (Capital One / US Bank / Merrick / Chime / Verizon / SimpleFIN /
+IMAP / Plaid).
+
+**After**: 13-file package under `setup_modals/`:
+
+| File | Lines | Responsibility |
+|------|-------|---------------|
+| `gmail.js` | 286 | Gmail Setup Modal (`openGmailSetupModal`, drag-and-drop, OAuth chat) |
+| `paypal.js` | 149 | PayPal Setup Modal |
+| `banks/factory.js` | 122 | Installs `window.__bankFactory.{makePoller, makeBankHelpers}` |
+| `banks/usalliance.js` | 106 | US Alliance IIFE — uses factory + own clipboard/test-login |
+| `banks/capitalone.js` | 38 | Capital One importer modal |
+| `banks/usbank.js` | 36 | US Bank importer modal |
+| `banks/merrick.js` | 36 | Merrick Bank importer modal |
+| `banks/chime.js` | 73 | Chime (email/password instead of username) |
+| `banks/verizon.js` | 71 | My Verizon importer modal |
+| `banks/simplefin.js` | 47 | SimpleFIN Bridge token claim |
+| `banks/imap.js` | 98 | Generic IMAP importer modal |
+| `banks/plaid.js` | 122 | Plaid Link / per-item connection management |
+| `banks/tab_dispatcher.js` | 33 | Wraps `impTab` to fire `loadXxxStatus` per source |
+
+`_scripts.html` updated with the new ordered `<script>` list (factory before
+banks; tab_dispatcher last so all `loadXxxStatus` globals exist when it
+captures them).
+
+**Globals preserved**: 67 `window.*` exports across the new files, exact
+match against the 67 in the old monolith. Zero call-site changes.
+
+**Verification**: `pytest app/tests/` — 144/144 passed.
+
+---
+
+## Phase 11F — `docs.html` → `templates/docs/` partials (completed 2026-04-28)
+
+**Before**: 918-line `app/templates/docs.html` with 24 inline `<section>`
+blocks (Overview, Logging In, Navigation, Entities, Gmail OAuth Setup,
+Gmail Run, PayPal & Venmo, Bank CSV, URL Importer, Cloud, Transactions,
+Adding Manually, Filtering & Search, Categorizing, Documents, AI Analysis,
+Chat, Reports, Settings, Users, CSV Reference, Categories, Troubleshooting).
+
+**After**: 274-line shell + 24 `templates/docs/<section>.html` partials.
+Sizes: 4-58 lines per partial. The Jinja shell:
+```html
+<!-- ... -->
+<h1 class="doc-title">Financial AI Analyzer</h1>
+{% include "docs/overview.html" %}
+{% include "docs/login.html" %}
+…22 more…
+{% include "docs/troubleshooting.html" %}
+```
+
+The TOC sidebar, footer, and inline `<style>` + `<script>` block all stay
+in the shell — they're shell-level concerns, not section content.
+
+**Verification**: rendered docs.html via Jinja → 43,953 chars, all 24
+section IDs present, footer + script block intact. `pytest` 144/144.
+
+---
+
+## Phase 11G — `usalliance_importer.py` → `usalliance/` package (completed 2026-04-28)
+
+**Before**: 1,132-line `app/importers/usalliance_importer.py` with 23
+top-level functions covering MFA registry, login form fill, MFA detection,
+eStatements navigation, statement discovery, PDF download, and small
+utility helpers all in one file.
+
+**After**: 7-file package under `usalliance/`, plus the original module
+kept as a 6-line re-export shim for backwards compatibility:
+
+| Module | Lines | Responsibility |
+|--------|-------|---------------|
+| `runner.py` | 245 | `run_import` orchestrator (login → MFA → download) |
+| `download.py` | 486 | `_download_year`, `_select_statement_year`, `_find_statement_links`, `_dump_page_structure`, `_download_statement`, `_nav_back_to_statements` |
+| `estatements.py` | 154 | `_is_404_page`, `_is_documents_page`, `_navigate_to_estatements`, `_wait_for_documents_content` |
+| `login.py` | 146 | `_fill_login`, `_verify_logged_in` |
+| `mfa.py` | 144 | `set_mfa_code`, `_wait_for_mfa`, `_is_mfa_page`, `_is_push_mfa_page`, `_submit_mfa` |
+| `helpers.py` | 60 | `_safe_filename`, `_months_for_year`, `_find_element`, `_get_base_url`, `_save_debug_screenshot` |
+| `__init__.py` | 20 | Re-exports `run_import` + `set_mfa_code` |
+
+**Public API preserved**: `from app.importers.usalliance_importer import
+run_import, set_mfa_code` still works. The 2 actual call sites
+(`routes/importers/import_usalliance.py:138, 177`) are unchanged.
+
+**Verification**: `pytest` 144/144. Container restart + import smoke
+confirmed `run_import is run_import` between shim and package paths.
+
+---
+
+## Phase 11H — `gmail_importer.py` → `gmail/` package (completed 2026-04-28)
+
+**Before**: 843-line `app/importers/gmail_importer.py` mixing OAuth
+credential storage, Gmail API search/fetch, HTML/text → PDF rendering,
+amount/date normalization, AI-assisted relevance review, transaction
+upsert, per-month worker pool, and `run_import`.
+
+**After**: 7-file package under `gmail/` plus a 17-line re-export shim:
+
+| Module | Lines | Responsibility |
+|--------|-------|---------------|
+| `runner.py` | 374 | `_process_month` worker + `run_import` orchestrator |
+| `fetch.py` | 175 | `_google_imports`, `_month_query`, `_fast_prefilter`, `_build_service`, message-list/detail fetch, body decode |
+| `auth.py` | 132 | OAuth credentials.json + token DB persistence + auth URL flow |
+| `parse.py` | 128 | HTML/text → PDF, filename safety, amount/date normalize, dedup hash |
+| `transactions.py` | 86 | `upsert_transaction` (used by Gmail and IMAP) |
+| `ai_review.py` | 58 | `_ai_review_email` AI relevance check |
+| `__init__.py` | 36 | Re-exports public + IMAP-shared symbols |
+
+**Cross-importer reuse preserved**: `imap_importer.py` was importing
+`_ai_review_email`, `_fast_prefilter`, `_is_known_pdf`, `_text_to_pdf`,
+`upsert_transaction` directly from `gmail_importer`. All five remain
+re-exported by the package `__init__` and the legacy shim, so
+`imap_importer.py:34-40` is unchanged.
+
+**Drive-by fix**: 4 modules were missing `import re` after the split
+(`gmail/fetch.py`, `gmail/ai_review.py`, `gmail/runner.py`,
+`usalliance/estatements.py`) — `re.compile(...)` calls at module scope
+crashed on first import. Caught by manual import smoke after restart;
+added the missing imports.
+
+**Verification**: `pytest` 144/144. Both shim path
+(`from app.importers.gmail_importer import run_import`) and package path
+(`from app.importers.gmail import run_import`) resolve to the same
+function object.
+
+---
+
+## Session totals (Phase 11E–H, 2026-04-28)
+
+- 4 large files split into 4 cohesive packages
+- Largest single file in repo: `setup_modals.js` 1,142 → `gmail/runner.py` 374 LOC (cap-rate 67% reduction)
+- 23 new module files (13 JS + 10 Python) under 4 new package directories
+- 2 thin re-export shims preserve all existing imports
+- 24 new HTML partials from `docs.html`
+- pytest: 144/144 passed at every phase boundary
+- No Docker image rebuild needed (source-mount only — `docker restart` between phases)
+
+## Next refactor targets
+
+- `app/importers/verizon_importer.py` 709, `capitalone_importer.py` 652,
+  `usbank_importer.py` 636, `chime_importer.py` 593 — bank-importer family
+  is structurally similar (login → MFA → discover accounts → download →
+  parse). A future template-method base class could collapse these
+  significantly. Deferred: Phase 11D bank-onboarding codegen agent is
+  actively generating new bank importers — wait for that work to stabilize
+  before introducing a shared abstraction.
+- `app/static/js/dashboard/transactions.js` 563 — splittable into tab
+  logic / bulk-edit / vendor-merge sub-files. Lower payoff right now.
+- `app/db/import_jobs.py` 330 — getting wide; revisit at ~500 LOC.

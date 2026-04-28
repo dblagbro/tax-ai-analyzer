@@ -1,0 +1,27 @@
+
+
+<section class="section" id="gmail-run">
+  <h2 class="section-heading">Running a Gmail Import</h2>
+  <p>Once credentials and a token are configured, running an import is one click.</p>
+
+  <ol class="step-list">
+    <li>Go to <strong>Import &rarr; Gmail</strong>.</li>
+    <li>Select the <strong>Entity</strong> and <strong>Tax Year</strong> to associate with imported transactions.</li>
+    <li>Click <strong>Start Gmail Import</strong>.</li>
+    <li>The job runs in the background. Watch the progress in <strong>Import &rarr; Import Jobs</strong>.</li>
+  </ol>
+
+  <h3 class="sub-heading">What gets imported</h3>
+  <p>The importer searches for emails matching these keywords: <code>receipt invoice statement payment billing 1099 W-2 tax order</code>. For each matching email, it:</p>
+  <ul>
+    <li>Extracts the subject, sender, date, and body.</li>
+    <li>Downloads PDF/image attachments and sends them to Paperless-ngx for OCR and storage.</li>
+    <li>Uses AI to extract vendor name, amount, category, and tax year from the content.</li>
+    <li>Creates a transaction record with the extracted data.</li>
+  </ul>
+
+  <div class="callout callout-tip">
+    <strong>Years covered</strong>
+    By default the importer covers 2022–2025. Change this in Settings &rarr; Gmail Years, or set the <code>GMAIL_YEARS</code> environment variable.
+  </div>
+</section>

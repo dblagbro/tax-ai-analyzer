@@ -1,0 +1,58 @@
+<section class="section" id="troubleshooting">
+  <h2 class="section-heading">Troubleshooting</h2>
+
+  <h3 class="sub-heading">Login issues</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Problem</th><th>Solution</th></tr>
+      <tr><td>"Invalid username or password"</td><td>Check username spelling. Default credentials: admin / admin123.</td></tr>
+      <tr><td>Redirected to login on every page</td><td>Clear browser cookies. Ensure the server is accessible via HTTPS (required for secure cookies in production).</td></tr>
+      <tr><td>Account locked / inactive</td><td>An admin must reactivate the account in the Users tab.</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">Import issues</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Problem</th><th>Solution</th></tr>
+      <tr><td>Gmail import fails immediately</td><td>Check that credentials.json and the OAuth token are both present in Settings &rarr; Gmail status. Re-run Gmail Setup if the token is expired.</td></tr>
+      <tr><td>CSV import shows 0 records</td><td>Check that the file has the expected column names. See CSV Column Reference above. Try opening the file in a text editor to inspect the headers.</td></tr>
+      <tr><td>Import job stuck at "running"</td><td>Check the container logs: <code>docker logs tax-ai-analyzer</code>. Restart the container if the job has not progressed in 10+ minutes.</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">AI / LLM issues</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Problem</th><th>Solution</th></tr>
+      <tr><td>Chat returns "API key not configured"</td><td>Go to Settings and enter your Anthropic or OpenAI API key. Click Test LLM to verify.</td></tr>
+      <tr><td>AI analysis is slow</td><td>Large documents take longer. Check container resource limits in docker-compose.yml. Reduce parallel analysis workers if memory is constrained.</td></tr>
+      <tr><td>AI gives wrong categories</td><td>You can manually override categories on any transaction. The AI uses description and vendor — adding more context in the Notes field improves future suggestions.</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">Paperless-ngx connection</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Problem</th><th>Solution</th></tr>
+      <tr><td>Documents tab shows 0 documents</td><td>Verify Paperless URL and API token in Settings. Click Test Paperless. Ensure Paperless is running: <code>docker ps | grep paperless</code>.</td></tr>
+      <tr><td>Documents show "error" badge</td><td>Check container logs for the specific document ID. Common cause: OCR extracted no text and Vision AI fallback is not enabled.</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">Checking logs</h3>
+  <pre>
+# View real-time logs for the analyzer
+docker logs -f tax-ai-analyzer
+
+# View last 100 lines
+docker logs --tail 100 tax-ai-analyzer
+
+# View Paperless-ngx logs
+docker logs -f tax-paperless-web</pre>
+
+  <div class="callout callout-tip">
+    <strong>Activity feed</strong>
+    The Dashboard tab shows a real-time activity feed of recent operations. This is often the fastest way to see what happened during an import or analysis run without needing to check logs.
+  </div>
+</section>

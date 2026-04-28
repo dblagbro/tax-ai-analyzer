@@ -1,0 +1,30 @@
+
+
+<section class="section" id="gmail-setup">
+  <h2 class="section-heading">Gmail OAuth Setup</h2>
+  <p>Gmail requires a one-time OAuth 2.0 setup via Google Cloud Console. Navigate to <strong>Import &rarr; Gmail</strong> and click <strong>Gmail Setup</strong> to launch the guided assistant.</p>
+
+  <ol class="step-list">
+    <li>Go to <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a> and create or select a project.</li>
+    <li>Enable the <strong>Gmail API</strong>: APIs &amp; Services &rarr; Library &rarr; search "Gmail API" &rarr; Enable.</li>
+    <li>Go to <strong>OAuth consent screen</strong>. Select <strong>External</strong> user type (required for personal @gmail.com accounts).</li>
+    <li>Fill in an app name and your email address. Add your Gmail address as a <strong>Test User</strong>.</li>
+    <li>Go to <strong>Credentials</strong> &rarr; Create Credentials &rarr; <strong>OAuth client ID</strong>.</li>
+    <li>Select application type: <strong>Desktop app</strong> (not "Web application").</li>
+    <li>Download the JSON file. Upload it via Import &rarr; Gmail &rarr; Gmail Setup &rarr; Manual Upload tab.</li>
+    <li>Click <strong>Connect Gmail Account</strong> to complete the OAuth flow in your browser.</li>
+  </ol>
+
+  <div class="callout callout-tip">
+    <strong>AI-guided setup</strong>
+    The Gmail Setup page has an AI-guided assistant mode. Type what you see on screen and the assistant will give step-by-step instructions tailored to your situation.
+  </div>
+  <div class="callout callout-note">
+    <strong>Testing mode is fine</strong>
+    Your Google app will stay in "Testing" mode permanently. This is completely normal and does not affect functionality as long as you are listed as a test user.
+  </div>
+  <div class="callout callout-warn">
+    <strong>Credential type must be "Desktop app"</strong>
+    A common mistake is choosing "Web application" instead. If you receive redirect URI errors during authorization, re-create the credentials as a Desktop app.
+  </div>
+</section>

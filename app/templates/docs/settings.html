@@ -1,0 +1,26 @@
+<section class="section" id="settings">
+  <h2 class="section-heading">Settings</h2>
+  <p>The Settings tab configures connections, API keys, and application behavior.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Setting</th><th>Description</th></tr>
+      <tr><td>LLM Provider</td><td>anthropic or openai</td></tr>
+      <tr><td>LLM API Key</td><td>Your Anthropic or OpenAI API key</td></tr>
+      <tr><td>LLM Model</td><td>Model name (e.g. <code>claude-sonnet-4-6</code>)</td></tr>
+      <tr><td>Paperless URL</td><td>Base URL of your Paperless-ngx instance</td></tr>
+      <tr><td>Paperless Token</td><td>API token from Paperless-ngx admin panel</td></tr>
+      <tr><td>Gmail Years</td><td>Comma-separated list of years to search</td></tr>
+      <tr><td>Export Path</td><td>Server path where exports are saved</td></tr>
+      <tr><td>Poll Interval</td><td>How often (seconds) to poll Paperless for new documents</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">Testing connections</h3>
+  <p>After entering settings, use the <strong>Test LLM</strong> and <strong>Test Paperless</strong> buttons to verify connectivity before saving.</p>
+
+  <div class="callout callout-warn">
+    <strong>API key security</strong>
+    API keys are stored in the SQLite database on your server. Use HTTPS and keep your server firewall properly configured to prevent unauthorized access.
+  </div>
+</section>

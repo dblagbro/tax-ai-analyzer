@@ -1,0 +1,21 @@
+
+
+<section class="section" id="ai-analysis">
+  <h2 class="section-heading">AI Document Analysis</h2>
+  <p>The AI analyzer polls Paperless-ngx for new documents and automatically extracts financial data. You can also trigger analysis manually.</p>
+
+  <h3 class="sub-heading">Triggering analysis manually</h3>
+  <ol class="step-list">
+    <li>Go to the <strong>Documents</strong> tab.</li>
+    <li>Click <strong>Run AI Analysis</strong> (top right).</li>
+    <li>The analyzer will process any unanalyzed documents. Progress is shown in the activity feed.</li>
+  </ol>
+
+  <h3 class="sub-heading">Vision AI fallback</h3>
+  <p>When the analyzer detects poor OCR quality (e.g., scanned images, handwritten forms), it automatically falls back to sending document images directly to Claude's Vision API. Documents processed this way are tagged <code>aianomaly:vision_ai_extracted</code> in Paperless-ngx.</p>
+
+  <div class="callout callout-note">
+    <strong>Paperless-ngx connection</strong>
+    AI analysis requires a running Paperless-ngx instance. Configure the URL and API token in Settings &rarr; Paperless.
+  </div>
+</section>

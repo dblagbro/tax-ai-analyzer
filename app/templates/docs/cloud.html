@@ -1,0 +1,27 @@
+<section class="section" id="cloud">
+  <h2 class="section-heading">Cloud Storage Import</h2>
+  <p>The cloud adapter connects to Google Drive, Dropbox, or Amazon S3 to scan for CSV and PDF files and import them automatically.</p>
+
+  <h3 class="sub-heading">Supported Providers</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Provider</th><th>Credential required</th></tr>
+      <tr><td>Google Drive</td><td>Service account JSON or OAuth token</td></tr>
+      <tr><td>Dropbox</td><td>App access token</td></tr>
+      <tr><td>Amazon S3</td><td>Access key ID + secret + bucket name</td></tr>
+    </table>
+  </div>
+
+  <h3 class="sub-heading">Configuration</h3>
+  <ol class="step-list">
+    <li>Go to <strong>Import &rarr; Cloud</strong>.</li>
+    <li>Select a provider and enter the required credentials.</li>
+    <li>Specify the folder or bucket path to scan.</li>
+    <li>Click <strong>Connect &amp; Scan</strong>. A background job will fetch matching files.</li>
+  </ol>
+
+  <div class="callout callout-note">
+    <strong>Optional feature</strong>
+    Cloud adapters require optional Python packages (<code>google-api-python-client</code>, <code>dropbox</code>, <code>boto3</code>). If not installed, the Cloud tab will display an installation notice.
+  </div>
+</section>

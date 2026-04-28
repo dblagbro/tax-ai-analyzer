@@ -1,0 +1,14 @@
+<section class="section" id="url-import">
+  <h2 class="section-heading">URL Importer</h2>
+  <p>The URL importer downloads a CSV or JSON file from a URL on a recurring schedule — useful for integrations that expose a downloadable export endpoint.</p>
+
+  <ol class="step-list">
+    <li>Go to <strong>Import &rarr; URL</strong>.</li>
+    <li>Enter the URL, file format (CSV/JSON), entity, and tax year.</li>
+    <li>Set the polling interval (in minutes).</li>
+    <li>Click <strong>Add URL Poller</strong>. The background scheduler will fetch the URL at the specified interval.</li>
+  </ol>
+
+  <h3 class="sub-heading">Authentication</h3>
+  <p>If the URL requires HTTP Basic authentication, enter the credentials in the <strong>Username</strong> and <strong>Password</strong> fields. For Bearer tokens, enter the token in the Password field and leave Username empty.</p>
+</section>

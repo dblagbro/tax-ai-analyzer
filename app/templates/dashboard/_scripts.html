@@ -34,7 +34,22 @@ document.addEventListener('DOMContentLoaded', () => {
 <script src="{{ url_prefix }}/static/js/dashboard/transactions.js"></script>
 <script src="{{ url_prefix }}/static/js/dashboard/documents.js"></script>
 <script src="{{ url_prefix }}/static/js/dashboard/import_hub.js"></script>
-<script src="{{ url_prefix }}/static/js/dashboard/setup_modals.js"></script>
+{# Phase 11E: setup_modals.js → setup_modals/ package. Load order matters:
+   factory.js installs window.__bankFactory before any per-bank IIFE consumes
+   it; tab_dispatcher.js wraps impTab last, after every loadXxxStatus exists. #}
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/gmail.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/paypal.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/factory.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/usalliance.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/capitalone.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/usbank.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/merrick.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/chime.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/verizon.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/simplefin.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/imap.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/plaid.js"></script>
+<script src="{{ url_prefix }}/static/js/dashboard/setup_modals/banks/tab_dispatcher.js"></script>
 <script src="{{ url_prefix }}/static/js/dashboard/chat.js"></script>
 <script src="{{ url_prefix }}/static/js/dashboard/tax_review.js"></script>
 <script src="{{ url_prefix }}/static/js/dashboard/reports.js"></script>

@@ -1,0 +1,30 @@
+<section class="section" id="paypal">
+  <h2 class="section-heading">PayPal &amp; Venmo CSV Import</h2>
+  <p>Export a transaction CSV from your PayPal or Venmo account and upload it directly.</p>
+
+  <h3 class="sub-heading">Exporting from PayPal</h3>
+  <ol class="step-list">
+    <li>Log into PayPal and go to <strong>Activity</strong>.</li>
+    <li>Click <strong>Download</strong> (top right), select <strong>CSV</strong> format.</li>
+    <li>Choose your date range (full year recommended) and download.</li>
+  </ol>
+
+  <h3 class="sub-heading">Exporting from Venmo</h3>
+  <ol class="step-list">
+    <li>Log into Venmo and go to <strong>Statements</strong> (Settings &rarr; Privacy &rarr; Download your data, or the Statements link).</li>
+    <li>Select the year and download the CSV.</li>
+  </ol>
+
+  <h3 class="sub-heading">Uploading</h3>
+  <ol class="step-list">
+    <li>Go to <strong>Import &rarr; PayPal</strong> (or Venmo).</li>
+    <li>Select the entity and tax year.</li>
+    <li>Click <strong>Choose File</strong> and select your CSV.</li>
+    <li>Click <strong>Import</strong>. The job runs in the background.</li>
+  </ol>
+
+  <div class="callout callout-note">
+    <strong>Duplicate handling</strong>
+    Transactions are upserted by a unique key (date + amount + description) so re-importing the same CSV will not create duplicates.
+  </div>
+</section>
