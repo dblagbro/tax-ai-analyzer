@@ -71,7 +71,44 @@ def api_banks_get(bank_id):
         return jsonify({"error": "not found"}), 404
     bank["recordings"] = db.list_recordings(bank_id)
     bank["generated"] = db.list_generated_importers(bank_id)
+    # Surface the per-bank anti-detection overrides so the admin UI can
+    # populate the engine + proxy fields.
+    slug = bank.get("slug") or ""
+    bank["browser_engine"] = (db.get_setting(f"{slug}_browser_engine") or "").strip()
+    bank["proxy_url"] = (db.get_setting(f"{slug}_proxy_url") or "").strip()
     return jsonify(bank)
+
+
+@bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/antibot", methods=["POST"])
+@login_required
+@admin_required
+def api_banks_antibot(bank_id):
+    """Save per-bank anti-detection overrides: browser_engine + proxy_url.
+
+    Both are optional. Empty string clears the setting (falls back to global
+    default → env → built-in default). The proxy URL is stored verbatim;
+    Playwright will reject malformed URLs at connect time.
+    """
+    bank = db.get_pending_bank(bank_id)
+    if not bank:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    engine = (data.get("browser_engine") or "").strip().lower()
+    proxy = (data.get("proxy_url") or "").strip()
+    if engine and engine not in ("chrome", "firefox"):
+        return jsonify({"error": "browser_engine must be 'chrome', 'firefox', or empty"}), 400
+    slug = bank["slug"]
+    db.set_setting(f"{slug}_browser_engine", engine)
+    db.set_setting(f"{slug}_proxy_url", proxy)
+    db.log_activity("bank_antibot_updated",
+                    f"bank={bank_id} slug={slug} engine={engine or 'default'} "
+                    f"proxy={'set' if proxy else 'cleared'}",
+                    user_id=current_user.id)
+    return jsonify({
+        "status": "saved",
+        "browser_engine": engine,
+        "proxy_url": proxy,
+    })
 
 
 @bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>", methods=["POST"])

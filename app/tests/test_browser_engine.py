@@ -1,8 +1,11 @@
-"""Phase 7 (Camoufox) — browser engine selection unit tests.
+"""Phase 7 (Camoufox) + Step 6 (proxy) — browser engine + proxy unit tests.
 
 We don't actually launch a browser in CI. We verify:
   - _resolve_browser_engine() reads per-bank > global > env > default
+  - _resolve_proxy() reads per-bank > global > env > None
+  - Proxy URL parsing handles auth, schemes, and bare host:port
   - launch_browser() dispatches to the camoufox path when engine="firefox"
+  - launch_browser() forwards the proxy dict to both engines
   - The camoufox path raises a clean error when the package isn't installed
 """
 import os
@@ -107,6 +110,115 @@ def test_launch_dispatches_to_patchright_when_chrome():
     assert fake_patchright.called
     assert not fake_camoufox.called
     assert result[0] == "PW"
+
+
+# ── _resolve_proxy ───────────────────────────────────────────────────────────
+
+def _resolve_proxy_with(env=None, settings=None):
+    settings = settings or {}
+    env_patches = {"PROXY_URL": env} if env is not None else {}
+    with patch.dict(os.environ, env_patches, clear=False):
+        if env is None and "PROXY_URL" in os.environ:
+            del os.environ["PROXY_URL"]
+        import sys as _sys
+        mod = _sys.modules.get("app.db")
+        real_get = mod.get_setting if mod else None
+        try:
+            if mod:
+                mod.get_setting = lambda k, default="": settings.get(k, default)
+            from app.importers.base_bank_importer import _resolve_proxy
+            return _resolve_proxy("usbank")
+        finally:
+            if mod and real_get is not None:
+                mod.get_setting = real_get
+
+
+def test_proxy_default_is_none():
+    assert _resolve_proxy_with() is None
+
+
+def test_proxy_env_simple():
+    out = _resolve_proxy_with(env="http://proxy.example.com:8080")
+    assert out == {"server": "http://proxy.example.com:8080"}
+
+
+def test_proxy_with_auth():
+    out = _resolve_proxy_with(env="http://alice:secret%21@proxy.example.com:8080")
+    assert out["server"] == "http://proxy.example.com:8080"
+    assert out["username"] == "alice"
+    assert out["password"] == "secret!"  # %21 url-decoded
+
+
+def test_proxy_bare_host_port_defaults_http():
+    out = _resolve_proxy_with(env="proxy.example.com:9999")
+    assert out["server"] == "http://proxy.example.com:9999"
+
+
+def test_proxy_socks5():
+    out = _resolve_proxy_with(env="socks5://proxy.example.com:1080")
+    assert out["server"] == "socks5://proxy.example.com:1080"
+
+
+def test_proxy_per_bank_overrides_global():
+    out = _resolve_proxy_with(
+        env="http://envproxy:8080",
+        settings={
+            "default_proxy_url": "http://global:8080",
+            "usbank_proxy_url":  "http://specific:8080",
+        },
+    )
+    assert out["server"] == "http://specific:8080"
+
+
+def test_proxy_global_overrides_env():
+    out = _resolve_proxy_with(
+        env="http://envproxy:8080",
+        settings={"default_proxy_url": "http://global:8080"},
+    )
+    assert out["server"] == "http://global:8080"
+
+
+def test_proxy_blank_returns_none():
+    """Empty or whitespace-only env should be treated as 'no proxy'."""
+    assert _resolve_proxy_with(env="") is None
+    assert _resolve_proxy_with(env="   ") is None
+
+
+# ── launch_browser forwards proxy ────────────────────────────────────────────
+
+def test_launch_passes_proxy_to_patchright():
+    from app.importers import base_bank_importer as bbi
+    fake_pr = MagicMock(return_value=("PW", "CTX", "PAGE"))
+    with patch.object(bbi, "_launch_patchright", fake_pr), \
+         patch.object(bbi, "_resolve_browser_engine", return_value="chrome"), \
+         patch.object(bbi, "_resolve_proxy",
+                      return_value={"server": "http://p:1"}):
+        bbi.launch_browser("usbank", headless=True, log=lambda m: None)
+    _, kwargs = fake_pr.call_args
+    assert kwargs.get("proxy") == {"server": "http://p:1"}
+
+
+def test_launch_passes_proxy_to_camoufox():
+    from app.importers import base_bank_importer as bbi
+    fake_cf = MagicMock(return_value=("CM", "CTX", "PAGE"))
+    with patch.object(bbi, "_launch_camoufox", fake_cf), \
+         patch.object(bbi, "_resolve_browser_engine", return_value="firefox"), \
+         patch.object(bbi, "_resolve_proxy",
+                      return_value={"server": "socks5://p:1080"}):
+        bbi.launch_browser("usbank", headless=True, log=lambda m: None)
+    _, kwargs = fake_cf.call_args
+    assert kwargs.get("proxy") == {"server": "socks5://p:1080"}
+
+
+def test_launch_no_proxy_when_unset():
+    from app.importers import base_bank_importer as bbi
+    fake_pr = MagicMock(return_value=("PW", "CTX", "PAGE"))
+    with patch.object(bbi, "_launch_patchright", fake_pr), \
+         patch.object(bbi, "_resolve_browser_engine", return_value="chrome"), \
+         patch.object(bbi, "_resolve_proxy", return_value=None):
+        bbi.launch_browser("usbank", headless=True, log=lambda m: None)
+    _, kwargs = fake_pr.call_args
+    assert kwargs.get("proxy") is None
 
 
 def test_camoufox_clean_error_when_not_installed():

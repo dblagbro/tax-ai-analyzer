@@ -91,6 +91,25 @@ async function openBankDetail(bankId) {
       <button class="btn btn-sm btn-danger" onclick="deleteBank(${bank.id})" style="margin-left:14px">Delete</button>
     </div>
 
+    <div style="margin-top:14px;padding:10px;background:#fafbfd;border-radius:6px">
+      <strong style="font-size:.88rem">Anti-detection (per-bank overrides)</strong>
+      <div style="font-size:.78rem;color:var(--muted);margin:4px 0 8px">
+        Engine: chrome (default) — patchright + real Chrome.
+        firefox — Camoufox (last-resort, slower, different fingerprint surface).
+        Proxy URL: leave blank for direct. Format <code>http://user:pass@host:port</code>.
+      </div>
+      <div style="display:grid;grid-template-columns:200px 1fr auto;gap:8px;align-items:center">
+        <select id="bo-engine-${bank.id}">
+          <option value="">(default)</option>
+          <option value="chrome"${bank.browser_engine === 'chrome' ? ' selected' : ''}>chrome</option>
+          <option value="firefox"${bank.browser_engine === 'firefox' ? ' selected' : ''}>firefox (Camoufox)</option>
+        </select>
+        <input type="text" id="bo-proxy-${bank.id}" placeholder="http://user:pass@proxy.example.com:8080"
+               value="${esc(bank.proxy_url || '')}" />
+        <button class="btn btn-sm btn-primary" onclick="saveBankAntibot(${bank.id})">Save</button>
+      </div>
+    </div>
+
     <h4 style="margin-top:18px">Recordings (${recordings.length})</h4>
     <div style="background:#f0f7ff;border-left:3px solid #2196f3;padding:10px 14px;font-size:.85rem;margin-bottom:10px">
       <strong>How to capture a HAR:</strong>
@@ -271,6 +290,20 @@ async function uploadRecording(bankId) {
     }
   } catch (e) {
     result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(e.message || 'Network error')}</span>`;
+  }
+}
+
+async function saveBankAntibot(bankId) {
+  const engine = document.getElementById(`bo-engine-${bankId}`)?.value || '';
+  const proxy = document.getElementById(`bo-proxy-${bankId}`)?.value.trim() || '';
+  const r = await post(`/api/admin/banks/${bankId}/antibot`,
+                       {browser_engine: engine, proxy_url: proxy});
+  if (r && r.status === 'saved') {
+    const bits = [`engine=${r.browser_engine || 'default'}`];
+    bits.push(r.proxy_url ? 'proxy set' : 'proxy cleared');
+    toast(`Saved (${bits.join(', ')})`, 'success');
+  } else {
+    toast('Save failed: ' + (r?.error || ''), 'error');
   }
 }
 

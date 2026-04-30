@@ -169,6 +169,62 @@ _STEALTH_ARGS = [
 ]
 
 
+def _resolve_proxy(bank_slug: str) -> Optional[dict]:
+    """Pick the proxy config for a given bank. Same precedence as engine:
+
+      1. Per-bank DB setting:  `<slug>_proxy_url`
+      2. Global DB setting:    `default_proxy_url`
+      3. Env var:               `PROXY_URL`
+      4. None (direct connection)
+
+    URL format: `http://user:pass@host:port` (auth optional).
+    SOCKS5 also accepted as `socks5://host:port` for camoufox.
+
+    Returns a dict shaped for Playwright's `browser.launch(proxy=...)`:
+      {"server": "...", "username": "...", "password": "..."}
+    or None if no proxy is configured.
+
+    Provider-agnostic — works with any HTTP/SOCKS proxy. Recommended:
+    PacketStream PAYG (~$1/GB, no subscription, no KYC) for one-shot
+    annual tax pulls. See QA notes for the full proxy comparison.
+    """
+    import os as _os
+    from urllib.parse import urlparse, unquote
+
+    raw = ""
+    try:
+        from app import db as _db
+        raw = (_db.get_setting(f"{bank_slug}_proxy_url") or "").strip()
+        if not raw:
+            raw = (_db.get_setting("default_proxy_url") or "").strip()
+    except Exception:
+        pass
+    if not raw:
+        raw = (_os.environ.get("PROXY_URL") or "").strip()
+    if not raw:
+        return None
+
+    parsed = urlparse(raw)
+    if not parsed.hostname:
+        # Not a URL — could be "host:port" with no scheme. Default to http.
+        if "://" not in raw:
+            parsed = urlparse(f"http://{raw}")
+    if not parsed.hostname:
+        return None
+
+    scheme = parsed.scheme or "http"
+    server = f"{scheme}://{parsed.hostname}"
+    if parsed.port:
+        server += f":{parsed.port}"
+
+    out = {"server": server}
+    if parsed.username:
+        out["username"] = unquote(parsed.username)
+    if parsed.password:
+        out["password"] = unquote(parsed.password)
+    return out
+
+
 def _resolve_browser_engine(bank_slug: str) -> str:
     """Pick the browser engine for a given bank.
 
@@ -214,13 +270,19 @@ def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logge
     don't need to branch. Caller closes context + calls pw.stop().
     """
     engine = _resolve_browser_engine(bank_slug)
-    log(f"Launching browser engine: {engine}")
+    proxy = _resolve_proxy(bank_slug)
+    if proxy:
+        # Don't log the password — only the server identity
+        log(f"Launching browser engine: {engine}  via proxy {proxy['server']}")
+    else:
+        log(f"Launching browser engine: {engine}")
     if engine == "firefox":
-        return _launch_camoufox(bank_slug, headless=headless, log=log)
-    return _launch_patchright(bank_slug, headless=headless, log=log)
+        return _launch_camoufox(bank_slug, headless=headless, log=log, proxy=proxy)
+    return _launch_patchright(bank_slug, headless=headless, log=log, proxy=proxy)
 
 
-def _launch_patchright(bank_slug: str, headless: bool, log: Callable):
+def _launch_patchright(bank_slug: str, headless: bool, log: Callable,
+                        proxy: Optional[dict] = None):
     """Original patchright + real Chrome path. Documented behaviour from
     Phase 9 / 10 — see prior comment block below for fingerprint caveats."""
     try:
@@ -234,12 +296,16 @@ def _launch_patchright(bank_slug: str, headless: bool, log: Callable):
     # (headful) browser via Xvfb for the lowest fingerprint.
     pw = sync_playwright().start()
 
+    launch_kwargs = {
+        "headless": headless,
+        "channel": "chrome",  # Step 3: use real Google Chrome, not bundled Chromium
+        "args": _STEALTH_ARGS,
+    }
+    if proxy:
+        launch_kwargs["proxy"] = proxy
+
     try:
-        browser = pw.chromium.launch(
-            headless=headless,
-            channel="chrome",  # Step 3: use real Google Chrome, not bundled Chromium
-            args=_STEALTH_ARGS,
-        )
+        browser = pw.chromium.launch(**launch_kwargs)
         context = browser.new_context(
             accept_downloads=True,
             no_viewport=True,  # Step 4: let Xvfb framebuffer drive size
@@ -313,7 +379,8 @@ _CAMOUFOX_ARGS = [
 ]
 
 
-def _launch_camoufox(bank_slug: str, headless: bool, log: Callable):
+def _launch_camoufox(bank_slug: str, headless: bool, log: Callable,
+                       proxy: Optional[dict] = None):
     """
     Launch Camoufox (hardened Firefox) as a Playwright Firefox context.
 
@@ -340,14 +407,21 @@ def _launch_camoufox(bank_slug: str, headless: bool, log: Callable):
     # camoufox compose a realistic UA based on the OS profile it picks).
     # Geoip + locale: tie everything to America/New_York to match our cookie
     # store + previous Chrome runs (consistency across reruns matters).
-    cm = Camoufox(
-        headless=headless,
-        humanize=True,           # adds tiny natural delays + mouse jitter
-        locale=["en-US"],
-        os=["windows"],          # match our existing UA family
-        block_webrtc=True,       # WebRTC IP leak is a giveaway behind a proxy
-        i_know_what_im_doing=True,  # suppresses the safety-banner stderr noise
-    )
+    cm_kwargs = {
+        "headless": headless,
+        "humanize": True,           # adds tiny natural delays + mouse jitter
+        "locale": ["en-US"],
+        "os": ["windows"],          # match our existing UA family
+        "block_webrtc": True,       # WebRTC IP leak is a giveaway behind a proxy
+        "i_know_what_im_doing": True,  # suppresses the safety-banner stderr noise
+    }
+    if proxy:
+        # Camoufox accepts the same Playwright-shaped proxy dict
+        cm_kwargs["proxy"] = proxy
+        # geoip=True asks camoufox to derive timezone/locale/lat-long from the
+        # proxy IP — keeps the fingerprint consistent with the egress IP.
+        cm_kwargs["geoip"] = True
+    cm = Camoufox(**cm_kwargs)
     browser = cm.start()         # returns a Playwright Browser (Firefox)
 
     try:
