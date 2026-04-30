@@ -147,6 +147,8 @@ from app.db.bank_onboarding import (
     delete_pending_bank,
     get_generated_importer,
     get_pending_bank,
+    list_deployed_importers,
+    mark_generated_deployed,
     get_pending_bank_by_slug,
     get_recording,
     list_generated_importers,

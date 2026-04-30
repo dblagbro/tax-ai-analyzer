@@ -22,6 +22,7 @@ def register_blueprints(app):
     from app.routes.importers.import_merrick import bp as import_merrick_bp
     from app.routes.importers.import_chime import bp as import_chime_bp
     from app.routes.importers.import_verizon import bp as import_verizon_bp
+    from app.routes.importers.import_auto import bp as import_auto_bp
     from app.routes.accountant import bp as accountant_bp
     from app.routes.mileage import bp as mileage_bp
     from app.routes.reports import bp as reports_bp
@@ -57,6 +58,7 @@ def register_blueprints(app):
         import_merrick_bp,
         import_chime_bp,
         import_verizon_bp,
+        import_auto_bp,
         accountant_bp,
         mileage_bp,
         reports_bp,

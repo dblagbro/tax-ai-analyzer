@@ -268,3 +268,37 @@ def approve_generated_importer(generated_id: int, approved_by: int) -> bool:
         return cur.rowcount > 0
     finally:
         conn.close()
+
+
+def mark_generated_deployed(
+    generated_id: int, *, deployed_path: str, deployed_by: Optional[int] = None,
+) -> bool:
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "UPDATE generated_importers SET deployed_path=?, "
+            "deployed_at=datetime('now'), deployed_by=? WHERE id=?",
+            (deployed_path, deployed_by, generated_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def list_deployed_importers() -> list[dict]:
+    """All approved+deployed importers, joined with their pending_bank slug.
+    Used by the auto-import route dispatcher at startup."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT g.id AS generated_id, g.deployed_path, g.deployed_at, "
+            "p.id AS bank_id, p.slug, p.display_name, p.status "
+            "FROM generated_importers g "
+            "JOIN pending_banks p ON p.id = g.pending_bank_id "
+            "WHERE g.deployed_at IS NOT NULL AND g.deployed_path != '' "
+            "ORDER BY g.deployed_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()

@@ -131,12 +131,23 @@ async function openBankDetail(bankId) {
     <h4 style="margin-top:18px">Generated importers (${generated.length})</h4>
     ${generated.length === 0
       ? '<div class="empty" style="font-size:.86rem">No importer drafts yet.</div>'
-      : `<table><thead><tr><th>#</th><th>Generated</th><th>LLM</th><th>Tokens</th><th>Validation</th><th>Approved</th><th></th></tr></thead><tbody>
+      : `<table><thead><tr><th>#</th><th>Generated</th><th>LLM</th><th>Tokens</th><th>Validation</th><th>Approved</th><th>Deployed</th><th></th></tr></thead><tbody>
         ${generated.map(g => {
           const vs = g.validation_status || '';
           const vBadge = vs === 'pass'
             ? '<span class="badge badge-income" title="Passed automated checks">&#10003; pass</span>'
             : (vs ? `<span class="badge badge-expense" title="${esc(g.validation_notes || '')}">${esc(vs)}</span>` : '<span style="color:var(--muted)">—</span>');
+          const dep = g.deployed_at
+            ? `<span class="badge badge-income" title="${esc(g.deployed_path || '')}">&#10003; live</span>`
+            : '<span style="color:var(--muted)">—</span>';
+          let actions = `<button class="btn btn-sm btn-outline" onclick="viewGenerated(${bank.id}, ${g.id})">View</button>`;
+          if (!g.approved_at) {
+            actions += ` <button class="btn btn-sm btn-primary" onclick="approveGenerated(${bank.id}, ${g.id})">Approve</button>`;
+          } else if (!g.deployed_at) {
+            actions += ` <button class="btn btn-sm btn-primary" onclick="deployImporter(${bank.id}, ${g.id})">Deploy</button>`;
+          } else {
+            actions += ` <button class="btn btn-sm btn-danger" onclick="undeployImporter(${bank.id}, ${g.id})">Undeploy</button>`;
+          }
           return `<tr>
             <td>${g.id}</td>
             <td style="font-size:.78rem">${(g.generated_at || '').slice(0, 16).replace('T', ' ')}</td>
@@ -144,10 +155,8 @@ async function openBankDetail(bankId) {
             <td style="font-size:.78rem">in:${g.llm_tokens_in || 0} out:${g.llm_tokens_out || 0}</td>
             <td>${vBadge}</td>
             <td>${g.approved_at ? '&#10003;' : '—'}</td>
-            <td>
-              <button class="btn btn-sm btn-outline" onclick="viewGenerated(${bank.id}, ${g.id})">View</button>
-              ${g.approved_at ? '' : `<button class="btn btn-sm btn-primary" onclick="approveGenerated(${bank.id}, ${g.id})">Approve</button>`}
-            </td>
+            <td>${dep}</td>
+            <td>${actions}</td>
           </tr>`;
         }).join('')}
       </tbody></table>`}
@@ -262,6 +271,49 @@ async function uploadRecording(bankId) {
     }
   } catch (e) {
     result.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(e.message || 'Network error')}</span>`;
+  }
+}
+
+async function deployImporter(bankId, genId) {
+  if (!confirm(`Deploy generated importer #${genId} to disk?\n\nThis writes the source to app/importers/<slug>_importer.py and exposes the bank at /api/import/auto/<slug>/start. The bank moves to "live" status.`)) return;
+  let r = await fetch(P + `/api/admin/banks/${bankId}/generated/${genId}/deploy`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+  });
+  let j = await r.json().catch(() => ({}));
+  if (r.status === 409) {
+    if (!confirm(`${j.error || 'Deploy refused'}\n\nForce-deploy anyway?`)) {
+      toast('Deploy cancelled', 'info');
+      return;
+    }
+    r = await fetch(P + `/api/admin/banks/${bankId}/generated/${genId}/deploy?force=1`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+    });
+    j = await r.json().catch(() => ({}));
+  }
+  if (j && j.status === 'deployed') {
+    toast(`Deployed to ${j.path}`, 'success');
+    openBankDetail(bankId);
+    loadBankQueue();
+  } else {
+    toast('Deploy failed: ' + (j?.error || ''), 'error');
+  }
+}
+
+async function undeployImporter(bankId, genId) {
+  if (!confirm(`Remove the auto-deployed importer file?\n\nThis deletes app/importers/<slug>_importer.py (only if it carries the auto-deploy marker — hand-written importers are protected). The DB record stays for audit.`)) return;
+  const r = await fetch(P + `/api/admin/banks/${bankId}/generated/${genId}/undeploy`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+  });
+  const j = await r.json().catch(() => ({}));
+  if (j && j.removed) {
+    toast('Undeployed', 'success');
+    openBankDetail(bankId);
+    loadBankQueue();
+  } else if (j && j.status === 'no_action') {
+    toast('Nothing to undeploy (file missing or not auto-deployed)', 'info');
+    openBankDetail(bankId);
+  } else {
+    toast('Undeploy failed: ' + (j?.error || ''), 'error');
   }
 }
 

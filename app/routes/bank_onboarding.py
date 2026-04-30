@@ -160,6 +160,67 @@ def api_generated_approve(bank_id, gen_id):
     return jsonify({"status": "approved"})
 
 
+# ── deploy approved importer (Phase 11E) ─────────────────────────────────────
+
+@bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/generated/<int:gen_id>/deploy",
+          methods=["POST"])
+@login_required
+@admin_required
+def api_generated_deploy(bank_id, gen_id):
+    """Write the approved generated source to app/importers/<slug>_importer.py.
+
+    The file is then importable by the auto-import dispatcher at
+    `/api/import/auto/<slug>/...`. Marks bank status="live" on success.
+
+    Refuses to deploy unless the importer is approved AND validation passed.
+    Pass ?force=1 to override the validation check (approval is still required).
+    """
+    gen = db.get_generated_importer(gen_id)
+    if not gen or gen.get("pending_bank_id") != bank_id:
+        return jsonify({"error": "not found"}), 404
+
+    force = request.args.get("force") == "1"
+    from app.ai_agents.importer_deployer import deploy, DeployError
+    try:
+        result = deploy(gen_id, deployed_by=current_user.id, force=force)
+    except DeployError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        logger.exception(f"deploy failed for gen={gen_id}")
+        return jsonify({"error": f"deploy failed: {e}"}), 500
+
+    return jsonify({
+        "status": "deployed",
+        "slug": result["slug"],
+        "path": result["path"],
+        "import_endpoint_prefix": URL_PREFIX + f"/api/import/auto/{result['slug']}",
+    }), 201
+
+
+@bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/generated/<int:gen_id>/undeploy",
+          methods=["POST"])
+@login_required
+@admin_required
+def api_generated_undeploy(bank_id, gen_id):
+    """Remove an auto-deployed importer from disk. Only works on files that
+    carry our deploy marker — won't touch hand-written importers."""
+    gen = db.get_generated_importer(gen_id)
+    if not gen or gen.get("pending_bank_id") != bank_id:
+        return jsonify({"error": "not found"}), 404
+    bank = db.get_pending_bank(bank_id)
+    if not bank:
+        return jsonify({"error": "bank not found"}), 404
+    from app.ai_agents.importer_deployer import undeploy
+    removed = undeploy(bank["slug"])
+    if removed:
+        db.update_pending_bank(bank_id, status="approved")
+        db.log_activity("bank_importer_undeployed",
+                        f"bank={bank_id} slug={bank['slug']}",
+                        user_id=current_user.id)
+    return jsonify({"status": "undeployed" if removed else "no_action",
+                    "removed": removed})
+
+
 # ── codegen agent trigger (Phase 11D) ─────────────────────────────────────────
 
 @bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/generate", methods=["POST"])
