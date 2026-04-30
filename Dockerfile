@@ -39,6 +39,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && python -m patchright install chromium \
     && python -m patchright install chrome
 
+# Camoufox (Firefox-based last-resort engine). Pulls a ~80 MB hardened Firefox
+# binary into the image. Activated per-bank via DB setting
+# `<slug>_browser_engine="firefox"`. Binary download is cached in the image
+# layer so cold container starts don't re-fetch.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgtk-3-0 libdbus-glib-1-2 libxt6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m camoufox fetch || \
+       echo "WARN: camoufox fetch failed at build time; will attempt at first launch"
+
 COPY app/ ./app/
 COPY profiles/ ./profiles/
 COPY tools/ ./tools/

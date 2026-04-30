@@ -158,22 +158,54 @@ class TestOpenRedirect:
 
 
 class TestOpenRedirectIntegration:
-    """End-to-end: POST /login?next=https://evil.com/ must redirect to /."""
+    """End-to-end: POST /login?next=https://evil.com/ must redirect to /.
+
+    Hermetic — sets the admin password to a known value for the duration of
+    the test, then restores the original hash. The runtime DB has its admin
+    password seeded from ADMIN_INITIAL_PASSWORD, which we don't know in CI.
+    """
 
     def test_login_post_strips_external_next(self):
-        client = flask_app.test_client()
-        resp = client.post(
-            "/tax-ai-analyzer/login?next=https://evil.com/",
-            data={"username": "admin", "password": "admin"},
-            follow_redirects=False,
-        )
-        # After successful login, Location must NOT be the attacker URL
-        assert resp.status_code == 302
-        location = resp.headers.get("Location", "")
-        assert not location.startswith("https://evil.com"), (
-            f"open redirect leaked: Location={location!r}"
-        )
-        assert not location.startswith("//"), f"protocol-relative leak: {location!r}"
+        from app import db
+        from app.db.users import _hash_password
+        from werkzeug.security import generate_password_hash
+
+        conn = db.get_connection()
+        row = conn.execute(
+            "SELECT id, password_hash FROM users WHERE username='admin'"
+        ).fetchone()
+        conn.close()
+        if not row:
+            return  # No admin to test against — environment-dependent skip
+        admin_id, original_hash = row["id"], row["password_hash"]
+
+        try:
+            db.update_user(admin_id, password="admin_test_pw")
+            client = flask_app.test_client()
+            resp = client.post(
+                "/tax-ai-analyzer/login?next=https://evil.com/",
+                data={"username": "admin", "password": "admin_test_pw"},
+                follow_redirects=False,
+            )
+            assert resp.status_code == 302, (
+                f"login failed (status {resp.status_code}) — "
+                f"hermetic password reset didn't take?"
+            )
+            location = resp.headers.get("Location", "")
+            assert not location.startswith("https://evil.com"), (
+                f"open redirect leaked: Location={location!r}"
+            )
+            assert not location.startswith("//"), \
+                f"protocol-relative leak: {location!r}"
+        finally:
+            # Restore the real hash directly (we don't know the plaintext)
+            conn = db.get_connection()
+            conn.execute(
+                "UPDATE users SET password_hash=? WHERE id=?",
+                (original_hash, admin_id),
+            )
+            conn.commit()
+            conn.close()
 
 
 # ───────────────────────────────────────────────────────────────────────────────

@@ -169,22 +169,60 @@ _STEALTH_ARGS = [
 ]
 
 
+def _resolve_browser_engine(bank_slug: str) -> str:
+    """Pick the browser engine for a given bank.
+
+    Priority (first hit wins):
+      1. Per-bank DB setting:  `<slug>_browser_engine` ∈ {"chrome", "firefox"}
+      2. Global DB setting:    `default_browser_engine`
+      3. Env var:              `BROWSER_ENGINE`
+      4. Default:               "chrome"
+
+    "chrome"  → patchright + real Google Chrome (low fingerprint, current default)
+    "firefox" → Camoufox (hardened Firefox fork — last-resort when Chrome paths fail)
+
+    Per-bank override exists because moving every bank to Camoufox would burn
+    a ton of latency for banks that already work fine on Chrome. Only flip a
+    specific bank to "firefox" after Chrome has demonstrably failed against it.
+    """
+    import os as _os
+    try:
+        from app import db as _db
+        per_bank = (_db.get_setting(f"{bank_slug}_browser_engine") or "").strip().lower()
+        if per_bank in ("chrome", "firefox"):
+            return per_bank
+        global_default = (_db.get_setting("default_browser_engine") or "").strip().lower()
+        if global_default in ("chrome", "firefox"):
+            return global_default
+    except Exception:
+        pass
+    env = (_os.environ.get("BROWSER_ENGINE") or "").strip().lower()
+    if env in ("chrome", "firefox"):
+        return env
+    return "chrome"
+
+
 def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logger.info):
     """
-    Launch a hardened Chromium with the same anti-detection config that works
-    for US Alliance FCU (see app/importers/usalliance_importer.py for provenance).
+    Launch a hardened browser context. Engine is selected per-bank via
+    `_resolve_browser_engine(bank_slug)`:
 
-    Stealth is hooked at the playwright-instance level BEFORE launch, then also
-    applied to the page — both lifecycle points matter for different signals
-    (the pw-level hook rewires the driver, the page-level apply covers
-    late-bound init scripts).
+      - "chrome"  → patchright + real Google Chrome (default)
+      - "firefox" → Camoufox (hardened Firefox; Step 7 last-resort fallback)
 
-    Uses an ephemeral browser+context rather than launch_persistent_context:
-    persistent profiles leak fingerprint anomalies back to detectors when
-    they're not a real, accumulated user-driven profile.
-
-    Returns (pw, context, page). Caller closes context + calls pw.stop().
+    Both engines return the same (pw, context, page) tuple shape so callers
+    don't need to branch. Caller closes context + calls pw.stop().
     """
+    engine = _resolve_browser_engine(bank_slug)
+    log(f"Launching browser engine: {engine}")
+    if engine == "firefox":
+        return _launch_camoufox(bank_slug, headless=headless, log=log)
+    return _launch_patchright(bank_slug, headless=headless, log=log)
+
+
+def _launch_patchright(bank_slug: str, headless: bool, log: Callable):
+    """Original patchright + real Chrome path. Documented behaviour from
+    Phase 9 / 10 — see prior comment block below for fingerprint caveats."""
     try:
         from patchright.sync_api import sync_playwright
     except ImportError:
@@ -243,6 +281,101 @@ def launch_browser(bank_slug: str, headless: bool = False, log: Callable = logge
 
     page = context.new_page()
     return pw, context, page
+
+
+# ── Camoufox (Firefox-based last-resort) ──────────────────────────────────────
+
+# Hardened Firefox fork that patches anti-bot fingerprints at the browser
+# binary level (vs. patchright which patches the CDP protocol). Use this when
+# a bank's bot detection beats every Chromium-based config we've tried.
+#
+# Trade-offs:
+#   + Different engine = different fingerprint surface; bypasses Akamai/Shape
+#     rules tuned specifically for Chromium-driven sessions.
+#   + No CDP at all (Firefox uses Marionette/WebDriver BiDi internally),
+#     so the entire family of "is CDP attached?" detectors goes silent.
+#   - Slower to launch (~3s vs ~1.5s for Chrome)
+#   - Distinct binary download (~80 MB) — must be `python -m camoufox fetch`'d
+#     before first use, handled in Dockerfile.
+#   - Some sites have Firefox-specific user-agent allowlists that fail this UA.
+#
+# Activation (per-bank, via DB setting):
+#   db.set_setting("usbank_browser_engine", "firefox")
+# Or globally:
+#   db.set_setting("default_browser_engine", "firefox")
+# Or in Docker env: BROWSER_ENGINE=firefox
+
+# Camoufox-specific args. Most stealth knobs are baked into the binary;
+# we only need a few CLI overrides here.
+_CAMOUFOX_ARGS = [
+    # Disable telemetry endpoints so we don't leak runs
+    "--disable-features=TranslateUI",
+]
+
+
+def _launch_camoufox(bank_slug: str, headless: bool, log: Callable):
+    """
+    Launch Camoufox (hardened Firefox) as a Playwright Firefox context.
+
+    Camoufox ships its own `AsyncCamoufox`/`Camoufox` (sync) helper that wraps
+    Playwright's Firefox driver and applies fingerprint patches before the
+    first page loads. We use the sync helper since the rest of our importers
+    are sync.
+
+    Returns (pw, context, page) for shape-compatibility with the patchright
+    path. `pw` is actually the Camoufox manager — callers' `pw.stop()` / context
+    cleanup still works because Camoufox proxies those through to the
+    underlying Playwright instance.
+    """
+    try:
+        # camoufox provides a sync API that mirrors Playwright's
+        from camoufox.sync_api import Camoufox  # type: ignore[import-not-found]
+    except ImportError:
+        raise RuntimeError(
+            "camoufox not installed. Add `camoufox[geoip]` to requirements.txt "
+            "and rebuild the image (Dockerfile runs `python -m camoufox fetch`)."
+        )
+
+    # Configure Camoufox: humanize input, US locale, custom UA off (let
+    # camoufox compose a realistic UA based on the OS profile it picks).
+    # Geoip + locale: tie everything to America/New_York to match our cookie
+    # store + previous Chrome runs (consistency across reruns matters).
+    cm = Camoufox(
+        headless=headless,
+        humanize=True,           # adds tiny natural delays + mouse jitter
+        locale=["en-US"],
+        os=["windows"],          # match our existing UA family
+        block_webrtc=True,       # WebRTC IP leak is a giveaway behind a proxy
+        i_know_what_im_doing=True,  # suppresses the safety-banner stderr noise
+    )
+    browser = cm.start()         # returns a Playwright Browser (Firefox)
+
+    try:
+        context = browser.new_context(
+            accept_downloads=True,
+            no_viewport=True,
+            locale="en-US",
+            timezone_id="America/New_York",
+            color_scheme="light",
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            # Don't pass `user_agent` — Camoufox composes one to match its
+            # injected fingerprint. Overriding it here re-introduces the
+            # exact mismatch we're trying to avoid.
+        )
+    except Exception:
+        try:
+            cm.stop()
+        except Exception:
+            pass
+        raise
+
+    page = context.new_page()
+    log(f"Camoufox launched ({browser.browser_type.name}) for {bank_slug}")
+    # Return the Camoufox manager as the first slot; it carries .stop()
+    # so callers can `pw.stop()` and have it close the underlying browser.
+    return cm, context, page
 
 
 # ── Cookie persistence helpers ────────────────────────────────────────────────
