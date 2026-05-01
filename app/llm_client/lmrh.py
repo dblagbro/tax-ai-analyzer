@@ -48,9 +48,11 @@ TASK_PRESETS: dict[str, dict] = {
     # Q&A — short factual answers
     "qa":               {"cost": "standard"},
 
-    # Reasoning-heavy: tax review, multi-document synthesis
-    "reasoning":        {"cost": "premium"},
-    "tax-review":       {"cost": "premium"},
+    # Reasoning-heavy: tax review, multi-document synthesis. cascade=auto
+    # lets the proxy chain a cheap reasoning model with a quality model
+    # behind a single answer — better quality-per-dollar on reasoning.
+    "reasoning":        {"cost": "premium", "cascade": "auto"},
+    "tax-review":       {"cost": "premium", "cascade": "auto"},
 
     # Free-text summary generation
     "summarize":        {"cost": "standard"},
@@ -74,6 +76,7 @@ def build_lmrh_header(
     safety_min: Optional[int] = None,
     context_length: Optional[int] = None,
     has_images: bool = False,
+    cascade: Optional[str] = None,
     extras: Optional[dict] = None,
 ) -> str:
     """Build the LLM-Hint header value.
@@ -86,6 +89,11 @@ def build_lmrh_header(
       safety_min: 1..5. Hard constraint via `;require`.
       context_length: int — minimum tokens of context the model must support.
       has_images: if True, adds modality=vision.
+      cascade: pass-through dim (LMRH spec lists it as a provider-specific
+            extension). When set to ``"auto"``, llm-proxy2 may chain a
+            cheap reasoning model with a quality model behind a single
+            answer — typically improves quality-per-dollar on reasoning
+            tasks. Per-task default in TASK_PRESETS["cascade"].
       extras: dict of extra dim=value pairs appended verbatim.
 
     Returns:
@@ -102,6 +110,7 @@ def build_lmrh_header(
     eff_cost = cost or preset.get("cost")
     eff_ctx = context_length if context_length is not None else preset.get("context-length")
     eff_safety = safety_min if safety_min is not None else preset.get("safety-min")
+    eff_cascade = cascade if cascade is not None else preset.get("cascade")
 
     parts: list[str] = [f"task={task}"]
     if eff_cost:
@@ -114,6 +123,8 @@ def build_lmrh_header(
         parts.append(f"context-length={int(eff_ctx)}")
     if has_images:
         parts.append("modality=vision")
+    if eff_cascade:
+        parts.append(f"cascade={eff_cascade}")
     if extras:
         for k, v in extras.items():
             key = str(k).lower().replace("_", "-")

@@ -36,6 +36,7 @@ def register_blueprints(app):
     from app.routes.ai_costs import bp as ai_costs_bp
     from app.routes.folder_manager import bp as folder_manager_bp
     from app.routes.bank_onboarding import bp as bank_onboarding_bp
+    from app.routes.llm_proxies import bp as llm_proxies_bp
 
     for bp in (
         auth_bp,
@@ -72,5 +73,6 @@ def register_blueprints(app):
         ai_costs_bp,
         folder_manager_bp,
         bank_onboarding_bp,
+        llm_proxies_bp,
     ):
         app.register_blueprint(bp)

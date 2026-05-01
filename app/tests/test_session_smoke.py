@@ -159,6 +159,7 @@ class TestTabRegistry:
         "tax_review", "mileage", "activity", "ai_costs",
         "folder_manager", "chat", "reports", "settings", "users", "entities",
         "bank_onboarding",
+        "llm_routing",
     ]
 
     def test_all_tabs_registered(self):
