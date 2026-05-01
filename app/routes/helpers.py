@@ -89,15 +89,29 @@ def setup_chat_stream(system_prompt: str, history: list, user_message: str):
 
     def _generate():
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            with client.messages.stream(
-                model=model, max_tokens=1024,
-                system=system_prompt,
-                messages=messages,
-            ) as stream:
-                for text in stream.text_stream:
-                    yield f"data: {json.dumps({'text': text})}\n\n"
+            from app.llm_client import proxy_call
+            client = None
+            endpoint_id = None
+            try:
+                client, endpoint_id = proxy_call.get_streaming_anthropic_client("chat")
+            except proxy_call.NoProxyAvailable:
+                import anthropic
+                client = anthropic.Anthropic(api_key=api_key)
+
+            try:
+                with client.messages.stream(
+                    model=model, max_tokens=1024,
+                    system=system_prompt,
+                    messages=messages,
+                ) as stream:
+                    for text in stream.text_stream:
+                        yield f"data: {json.dumps({'text': text})}\n\n"
+                if endpoint_id:
+                    proxy_call.mark_endpoint_success(endpoint_id)
+            except Exception:
+                if endpoint_id:
+                    proxy_call.mark_endpoint_failure(endpoint_id)
+                raise
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"

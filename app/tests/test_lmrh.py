@@ -195,6 +195,34 @@ def test_proxy_call_chat_walks_chain_on_failure():
     assert result["out_tokens"] == 5
 
 
+def test_streaming_client_picks_top_priority():
+    """get_streaming_anthropic_client returns the highest-priority healthy
+    endpoint pre-configured with the LMRH hint."""
+    from unittest.mock import MagicMock, patch
+    from app.llm_client import proxy_call
+
+    fake_a = MagicMock(); fake_b = MagicMock()
+    with patch(
+        "app.llm_client.proxy_manager.get_all_anthropic_clients",
+        return_value=[(fake_a, "ep_top"), (fake_b, "ep_lower")],
+    ):
+        client, eid = proxy_call.get_streaming_anthropic_client("chat")
+    assert client is fake_a
+    assert eid == "ep_top"
+
+
+def test_streaming_client_raises_when_pool_empty():
+    from unittest.mock import patch
+    from app.llm_client import proxy_call
+    with patch("app.llm_client.proxy_manager.get_all_anthropic_clients",
+               return_value=[]):
+        try:
+            proxy_call.get_streaming_anthropic_client("chat")
+        except proxy_call.NoProxyAvailable:
+            return
+        raise AssertionError("expected NoProxyAvailable")
+
+
 def test_proxy_call_anthropic_walks_chain_and_logs_cache():
     from app.llm_client import proxy_call
 

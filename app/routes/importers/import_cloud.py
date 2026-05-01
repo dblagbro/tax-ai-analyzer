@@ -324,22 +324,36 @@ def api_import_filed_return_from_folder():
 
     try:
         if llm_provider == "anthropic":
-            import anthropic
-            ac = anthropic.Anthropic(api_key=llm_api_key)
-            msg = ac.messages.create(
-                model=llm_model,
-                max_tokens=2000,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "document", "source": {"type": "base64",
-                                                         "media_type": "application/pdf",
-                                                         "data": pdf_b64}},
-                        {"type": "text", "text": prompt},
-                    ],
-                }],
-            )
-            raw = msg.content[0].text
+            # Phase 12: route through llm-proxy2 first (LMRH task=analysis —
+            # PDF document extraction is bulk doc-analysis pipeline), fall
+            # back to direct Anthropic SDK if the proxy pool is exhausted.
+            user_msg = [{
+                "role": "user",
+                "content": [
+                    {"type": "document", "source": {"type": "base64",
+                                                     "media_type": "application/pdf",
+                                                     "data": pdf_b64}},
+                    {"type": "text", "text": prompt},
+                ],
+            }]
+            from app.llm_client import proxy_call
+            try:
+                result = proxy_call.call_anthropic_messages(
+                    "analysis",
+                    model=llm_model, system=None,
+                    messages=user_msg, max_tokens=2000,
+                )
+                msg = result["response"]
+                raw = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+            except proxy_call.NoProxyAvailable:
+                import anthropic
+                ac = anthropic.Anthropic(api_key=llm_api_key)
+                msg = ac.messages.create(
+                    model=llm_model,
+                    max_tokens=2000,
+                    messages=user_msg,
+                )
+                raw = msg.content[0].text
         else:
             import subprocess
             result = subprocess.run(["pdftotext", pdf_path, "-"],

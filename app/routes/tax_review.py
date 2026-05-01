@@ -171,16 +171,33 @@ def api_tax_review_followup():
     def generate():
         try:
             if llm_provider == "anthropic":
-                import anthropic
-                ac = anthropic.Anthropic(api_key=llm_api_key)
-                with ac.messages.stream(
-                    model=llm_model,
-                    max_tokens=4096,
-                    system=system,
-                    messages=messages,
-                ) as stream:
-                    for chunk in stream.text_stream:
-                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                # Phase 12: route streaming through the proxy chain (LMRH-aware)
+                # before falling back to direct Anthropic SDK. Tax-review is a
+                # reasoning-heavy task — cascade=auto opt-in lives in the hint.
+                from app.llm_client import proxy_call
+                ac = None
+                endpoint_id = None
+                try:
+                    ac, endpoint_id = proxy_call.get_streaming_anthropic_client("tax-review")
+                except proxy_call.NoProxyAvailable:
+                    import anthropic
+                    ac = anthropic.Anthropic(api_key=llm_api_key)
+
+                try:
+                    with ac.messages.stream(
+                        model=llm_model,
+                        max_tokens=4096,
+                        system=system,
+                        messages=messages,
+                    ) as stream:
+                        for chunk in stream.text_stream:
+                            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                    if endpoint_id:
+                        proxy_call.mark_endpoint_success(endpoint_id)
+                except Exception:
+                    if endpoint_id:
+                        proxy_call.mark_endpoint_failure(endpoint_id)
+                    raise
             else:
                 import openai as _oai
                 oai = _oai.OpenAI(api_key=llm_api_key)

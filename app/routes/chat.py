@@ -179,19 +179,38 @@ def api_chat_send(session_id):
     def _generate():
         full = []
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            with client.messages.stream(
-                model=model, max_tokens=2048,
-                system=system_prompt,
-                messages=prev_msgs + [{"role": "user", "content": user_msg}],
-            ) as stream:
-                for chunk in stream.text_stream:
-                    if stop_event.is_set():
-                        yield f"data: {json.dumps({'text': ' [stopped]', 'done': True})}\n\n"
-                        break
-                    full.append(chunk)
-                    yield f"data: {json.dumps({'text': chunk})}\n\n"
+            # Try the proxy chain first; fall through to direct Anthropic SDK
+            # if the pool is empty. Streaming can't fail-over mid-stream — we
+            # pick one endpoint up front and let the breaker take it out of
+            # rotation if it dies.
+            from app.llm_client import proxy_call
+            client = None
+            endpoint_id = None
+            try:
+                client, endpoint_id = proxy_call.get_streaming_anthropic_client("chat")
+            except proxy_call.NoProxyAvailable:
+                import anthropic
+                client = anthropic.Anthropic(api_key=api_key)
+
+            try:
+                with client.messages.stream(
+                    model=model, max_tokens=2048,
+                    system=system_prompt,
+                    messages=prev_msgs + [{"role": "user", "content": user_msg}],
+                ) as stream:
+                    for chunk in stream.text_stream:
+                        if stop_event.is_set():
+                            yield f"data: {json.dumps({'text': ' [stopped]', 'done': True})}\n\n"
+                            break
+                        full.append(chunk)
+                        yield f"data: {json.dumps({'text': chunk})}\n\n"
+                if endpoint_id:
+                    proxy_call.mark_endpoint_success(endpoint_id)
+            except Exception as stream_err:
+                if endpoint_id:
+                    proxy_call.mark_endpoint_failure(endpoint_id)
+                raise stream_err
+
             db.append_chat_message(session_id, "assistant", "".join(full), model_used=model)
             if not stop_event.is_set():
                 yield f"data: {json.dumps({'done': True})}\n\n"

@@ -222,3 +222,39 @@ def call_anthropic_messages(
         f"all {len(chain)} proxy endpoints failed for anthropic-shape "
         f"{operation}; last error: {last_err!r}"
     )
+
+
+# ── Streaming Anthropic client (chat, tax_review, helpers) ───────────────────
+
+def get_streaming_anthropic_client(operation: str = "chat"):
+    """Return a tuple of (anthropic_client, endpoint_id) configured to stream
+    through the highest-priority healthy proxy endpoint.
+
+    Streaming responses can't be transparently failed-over mid-stream — by
+    the time we know the connection died, half the answer has been delivered
+    to the user. So we pick ONE endpoint up front. If it fails to connect,
+    we mark it failed in the breaker and the caller can fall through to
+    direct vendor SDK (or retry — but on a fresh stream, not mid-stream).
+
+    The returned client carries the LMRH hint as a default header, so the
+    caller's `client.messages.stream(...)` call automatically includes it.
+
+    Raises NoProxyAvailable if the pool is empty.
+    """
+    chain = proxy_manager.get_all_anthropic_clients(operation)
+    if not chain:
+        raise NoProxyAvailable("no healthy proxy endpoints available")
+    # First in priority order; the chain is already filtered by breaker state.
+    return chain[0]
+
+
+def mark_endpoint_failure(endpoint_id: str) -> None:
+    """Mark an endpoint failed in the breaker. Use this from a streaming
+    caller when the stream errored — we can't retry mid-stream, but we can
+    take this endpoint out of rotation for the next call."""
+    proxy_manager.mark_failure(endpoint_id)
+
+
+def mark_endpoint_success(endpoint_id: str) -> None:
+    """Reset breaker state after a successful streaming call."""
+    proxy_manager.mark_success(endpoint_id)

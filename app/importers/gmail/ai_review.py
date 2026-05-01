@@ -41,12 +41,27 @@ def _ai_review_email(subject: str, sender: str, body_snippet: str,
             "relevant=false for: marketing, newsletters, shipping-only no cost, "
             "general chat, order status no dollar amount."
         )
-        client = anthropic.Anthropic(api_key=api_key, timeout=_AI_TIMEOUT)
-        resp = client.messages.create(
-            model=model, max_tokens=256,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = resp.content[0].text.strip()
+        # Phase 12: route through llm-proxy2 first (LMRH task=classification,
+        # cost=economy — Gmail review is high-volume and low-stakes), fall
+        # back to direct Anthropic SDK if the proxy pool is exhausted.
+        from app.llm_client import proxy_call
+        text = ""
+        try:
+            result = proxy_call.call_anthropic_messages(
+                "classification",
+                model=model, system=None,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=256, timeout=_AI_TIMEOUT,
+            )
+            resp = result["response"]
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+        except proxy_call.NoProxyAvailable:
+            client = anthropic.Anthropic(api_key=api_key, timeout=_AI_TIMEOUT)
+            resp = client.messages.create(
+                model=model, max_tokens=256,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = resp.content[0].text.strip()
         if text.startswith("```"):
             text = re.sub(r"^```\w*\n?", "", text).rstrip("`")
         result = _json.loads(text)
