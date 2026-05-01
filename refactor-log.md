@@ -722,3 +722,78 @@ function object.
 - `app/static/js/dashboard/transactions.js` 563 — splittable into tab
   logic / bulk-edit / vendor-merge sub-files. Lower payoff right now.
 - `app/db/import_jobs.py` 330 — getting wide; revisit at ~500 LOC.
+
+---
+
+## Phase 11D / 11E / 11F — Bank-onboarding pipeline (2026-04-30)
+
+**Goal**: end-to-end self-service for adding new banks. User uploads a HAR
+recording → AI codegen drafts a Playwright importer → admin reviews →
+auto-deploy to disk → live at `/api/import/auto/<slug>/start`.
+
+New surface:
+- `app/ai_agents/` — codegen subsystem (separate from `llm_client/`)
+  - `har_analyzer.py` — strips noise hosts, redacts password/OTP, surfaces
+    login POSTs + download URLs from a HAR file
+  - `bank_codegen.py` — single Anthropic call with prompt caching on a
+    ~30k-token reference template (base + usbank importer). Supports
+    regenerate-with-feedback via `parent_generated_id` + `feedback` kwargs.
+  - `importer_validator.py` — three-layer AST validation (syntax / shape /
+    base-imports) before drafts hit the DB
+  - `importer_deployer.py` — writes approved+validated source to
+    `app/importers/<slug>_importer.py` with a deploy-marker first line.
+    Refuses to clobber hand-written importers.
+- `app/routes/bank_onboarding.py` — admin queue routes
+- `app/routes/importers/import_auto.py` — generic dispatcher: any deployed
+  bank exposes /api/import/auto/<slug>/{credentials,cookies,status,mfa,start}
+  via dynamic `importlib.import_module()` — no per-bank route file.
+- DB: `pending_banks` + `bank_recordings` + `generated_importers` tables
+  (with `parent_id`, `feedback_text`, `deployed_*`, `validation_*` columns).
+- Dashboard tab: "Bank Queue" (sidebar nav).
+
+Test coverage: 39 tests across bank_codegen, importer_validator,
+importer_deployer, regenerate.
+
+## Phase 12 — LMRH-aware multi-proxy chain (2026-04-30)
+
+**Pivot**: `llm-proxy-manager` (v1) decommissioned per ops; replaced with
+`llm-proxy2` (v2) at /v1/messages. Single-URL fallback in `client.py`
+deleted. New chain: pool (priority+breaker) → direct vendor SDK.
+
+New surface:
+- `app/llm_client/proxy_manager.py` — endpoint pool from
+  `llm_proxy_endpoints` DB table with 3-failure / 60-s circuit breaker.
+  Builds OpenAI-compat AND native Anthropic clients (the latter preserves
+  prompt caching for codegen).
+- `app/llm_client/proxy_call.py` — high-level `call_chat()` (OpenAI-shape)
+  and `call_anthropic_messages()` (Anthropic-shape, used by codegen).
+  Walks the chain, raises `NoProxyAvailable` on exhaustion → caller falls
+  through to direct vendor.
+- `app/llm_client/lmrh.py` — header builder per LMRH 1.0 spec
+  (https://www.voipguru.org/llm-proxy2/lmrh.md). Comma-separated dim list,
+  `;require` for hard constraints, no hardcoded model names per ops
+  directive — proxy picks model from `task=` + `cost=` + `safety-min=` +
+  `context-length=`. Cascade=auto opt-in for reasoning + tax-review.
+- DB: `llm_proxy_endpoints` table + migrations to delete v1 rows on boot.
+
+## Phase 13 — LLM Routing admin tab (2026-04-30)
+
+New "LLM Routing" sidebar tab with:
+- Proxy endpoint CRUD (priority inline-edit, live Test button, breaker
+  badges, Reset, key tail-display only)
+- Per-task LMRH hint override editor (default shown read-only, override
+  input persists to `db.set_setting("lmrh.hint.<task>")`)
+- New routes under `/api/admin/llm-proxies/*` and `/api/admin/llm-hints/*`
+
+## Camoufox + residential proxy plumbing (2026-04-30)
+
+`base_bank_importer.launch_browser()` now dispatches on a per-bank engine
+selector: `chrome` (patchright + real Chrome, default) vs `firefox`
+(Camoufox — Step 7 last-resort). Provider-agnostic HTTP/SOCKS proxy URL
+via per-bank `<slug>_proxy_url` setting (or env `PROXY_URL`). Camoufox
+sets `geoip=True` so the fingerprint TZ/locale match the proxy egress IP.
+
+## Test totals at 2026-04-30 close
+
+- Container pytest: 210 passed, 30 skipped (host-only JS)
+- Up from 144 (Phase 11E-H session close) → 210 in 30 commits
