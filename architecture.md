@@ -44,8 +44,28 @@ app/
 ├── llm_client/         — AI provider abstraction package
 │   ├── vocab.py        — Valid doc types/categories + fallback model chains
 │   ├── prompts.py      — System prompt strings (ANALYSIS_SYSTEM, CHAT_SYSTEM_TEMPLATE…)
-│   ├── client.py       — LLMClient class; Anthropic + OpenAI with fallback chains
+│   ├── client.py       — LLMClient class: pool-walk → direct vendor SDK fallback (Phase 12)
+│   ├── lmrh.py         — LMRH header builder per LMRH 1.0 spec (Phase 12)
+│   ├── proxy_manager.py — Multi-endpoint pool from llm_proxy_endpoints DB
+│   │                     table; 3-failure / 60-s circuit breaker; builds
+│   │                     OpenAI-compat AND native Anthropic clients (Phase 12)
+│   ├── proxy_call.py   — High-level call_chat() / call_anthropic_messages() /
+│   │                     get_streaming_anthropic_client(); LMRH hint injection;
+│   │                     captures LLM-Capability + X-LMRH-Warnings response
+│   │                     headers and surfaces them in logs (Phase 12)
 │   └── __init__.py     — Re-exports all public symbols
+│
+├── ai_agents/          — Admin-triggered codegen pipelines (Phase 11D-F)
+│   ├── har_analyzer.py — HAR digester: strips noise hosts + redacts password/
+│   │                     OTP/SSN values + surfaces login POSTs + download URLs
+│   ├── bank_codegen.py — Anthropic call with prompt caching on a ~30k-token
+│   │                     reference template; supports regenerate-with-feedback
+│   │                     via parent_generated_id + feedback kwargs
+│   ├── importer_validator.py — 3-layer AST validation (compile / shape / base
+│   │                     imports). NEVER exec's the source.
+│   └── importer_deployer.py — Writes approved+validated source to
+│                         app/importers/<slug>_importer.py with a deploy-marker
+│                         first line. Refuses to clobber hand-written importers.
 │
 ├── routes/             — Flask Blueprint modules (one domain per file)
 │   ├── _state.py       — Shared in-process mutable globals (job logs, stop events)
@@ -65,6 +85,11 @@ app/
 │   ├── chat.py         — /api/chat/sessions/* (SSE streaming, sharing, PDF export)
 │   ├── ai_costs.py     — /api/ai-costs/*
 │   ├── folder_manager.py— /api/folder-manager/*
+│   ├── bank_onboarding.py — /api/admin/banks/*: queue + recordings + codegen +
+│   │                       approve + deploy + regenerate (Phase 11A-F)
+│   ├── llm_proxies.py  — /api/admin/llm-proxies/* + /api/admin/llm-hints/*:
+│   │                     proxy CRUD with live test + per-task LMRH hint
+│   │                     overrides (Phase 13)
 │   ├── accountant.py   — /accountant/* (token-scoped read-only view)
 │   ├── mileage.py      — /api/mileage/* (+ isfinite + ISO-date validation, Wave-A MED-1)
 │   ├── reports.py      — /api/reports/*
@@ -85,7 +110,11 @@ app/
 │       ├── import_usbank.py      — /api/import/usbank/*
 │       ├── import_merrick.py     — /api/import/merrick/*
 │       ├── import_chime.py       — /api/import/chime/*
-│       └── import_verizon.py     — /api/import/verizon/*
+│       ├── import_verizon.py     — /api/import/verizon/*
+│       └── import_auto.py        — /api/import/auto/<slug>/*: GENERIC
+│                                    dispatcher that resolves the importer
+│                                    module via importlib.import_module() —
+│                                    used by all auto-deployed importers (Phase 11E)
 │
 ├── importers/          — Data source importers (one per source)
 │   ├── base_bank_importer.py  — Shared Playwright launch, CAPTCHA handling,
@@ -266,3 +295,98 @@ All Playwright-based bank importers (US Bank, Chime, Merrick, Capital One, Veriz
 - `/login?next=...` sanitized via `_safe_next()` — only same-origin paths accepted (CRIT-NEW-3)
 - `ADMIN_INITIAL_PASSWORD` env-var gate on fresh-DB bootstrap (HIGH-2 / HIGH-NEW-1)
 - `/api/settings` credential mask uses suffix-based predicate (`_password|_pass|_secret|_token|_key`) — not a hardcoded allow-list (CRIT-1)
+
+## LLM proxy chain (Phase 12 + 13)
+
+All LLM traffic — analyze, extract, classify, summarize, chat, tax_review,
+codegen, gmail/ai_review, cloud-import doc analysis — routes through:
+
+1. **The proxy pool** (one or more `llm_proxy_endpoints` rows). Default pool
+   has a single endpoint: `https://www.voipguru.org/llm-proxy2/v1` (public
+   URL only — local-access URLs are explicitly rejected by
+   `_normalize_llm_proxy_url`). Per-call LMRH hint emitted via the
+   `LLM-Hint` HTTP header per the LMRH 1.0 spec
+   (https://www.voipguru.org/llm-proxy2/lmrh.md). Proxy picks model+provider;
+   we never hardcode model names per operation.
+2. **Direct vendor SDK** (Anthropic / OpenAI) as last-resort fallback when
+   the entire pool is exhausted. `proxy_call.NoProxyAvailable` signals the
+   caller to drop to direct SDK.
+
+Per-task hints (in `app/llm_client/lmrh.py:TASK_PRESETS`):
+
+| Task          | cost     | extras                                   |
+|---------------|----------|------------------------------------------|
+| analysis      | standard | safety-min=3                             |
+| extraction    | economy  |                                          |
+| classification| economy  |                                          |
+| chat          | premium  |                                          |
+| reasoning     | premium  | cascade=auto                             |
+| tax-review    | premium  | cascade=auto                             |
+| summarize     | standard |                                          |
+| codegen       | premium  | context-length=60000                     |
+| vision        | standard |                                          |
+
+Operator can override any task's hint via `db.set_setting("lmrh.hint.<task>")`
+or via the LLM Routing admin tab. Response headers `LLM-Capability` and
+`X-LMRH-Warnings` are captured + logged for diagnostics
+(`proxy_call._log_lmrh_diagnostics`).
+
+Circuit breaker (`proxy_manager`): 3 failures within window → 60-s cooldown
+per endpoint. Process-local state. Reset via the admin tab's "Reset" button
+or `mark_endpoint_success()`.
+
+## Bank-onboarding pipeline (Phase 11A-F)
+
+Self-service for adding new banks. Stages (each owned by a separate module):
+
+```
+User uploads HAR + narration
+        │
+        ▼
+[bank_onboarding.py] queue + validation
+        │
+        ▼
+[har_analyzer.py] strip noise + redact secrets → compact prompt summary
+        │
+        ▼
+[bank_codegen.py] Anthropic call via proxy_call (prompt-cached reference template)
+        │
+        ▼
+[importer_validator.py] AST: compile / shape / base-imports
+        │
+        ▼  (admin reviews + approves)
+        │
+        ▼
+[importer_deployer.py] write app/importers/<slug>_importer.py with deploy marker
+        │
+        ▼
+[routes/importers/import_auto.py] /api/import/auto/<slug>/* dispatcher
+        │
+        ▼  (admin starts import)
+        │
+        ▼
+[<slug>_importer.py via base_bank_importer.launch_browser()] Playwright run
+```
+
+Re-iteration loop: admin types corrective notes → POST
+`/api/admin/banks/<id>/generated/<gen_id>/regenerate` → new draft chained
+via `parent_id` column with `feedback_text` preserved. Previous draft is
+not deleted.
+
+## Browser engine dispatch (Step 6 + 7)
+
+`base_bank_importer.launch_browser(bank_slug)` resolves the engine via:
+
+1. `db.get_setting(f"{slug}_browser_engine")` ∈ {`chrome`, `firefox`}
+2. `db.get_setting("default_browser_engine")`
+3. env `BROWSER_ENGINE`
+4. Default `chrome`
+
+`chrome` → `_launch_patchright()` (real Chrome via patchright + Xvfb).
+`firefox` → `_launch_camoufox()` (hardened Firefox fork; binary cached in
+the image). Camoufox has a different fingerprint surface than Chromium —
+last-resort when Chrome paths are detected by a specific bank.
+
+Optional residential proxy (Step 6): `<slug>_proxy_url` setting plumbs
+through to both engines via Playwright's `proxy={server,username,password}`
+config. Provider-agnostic (any HTTP/SOCKS5 URL).

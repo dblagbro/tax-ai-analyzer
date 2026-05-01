@@ -8,17 +8,20 @@ AI-powered financial document management and tax preparation tool. Organizes doc
 
 ## Features
 
-- **Multi-source import** — Local folders, Gmail, Google Drive, Dropbox, PayPal, US Alliance FCU (Playwright-based)
-- **AI document analysis** — Claude-powered OCR, categorization, vendor/amount/date extraction
+- **Multi-source import** — Local folders, Gmail, Google Drive, Dropbox, PayPal, IMAP, Plaid, SimpleFIN, and Playwright-based bank scrapers (US Alliance, US Bank, Capital One, Chime, Merrick, Verizon)
+- **AI document analysis** — Claude-powered OCR, categorization, vendor/amount/date extraction, all routed through an LMRH-aware proxy chain (Phase 12)
 - **Vision AI fallback** — When OCR fails, Claude reads document images directly
+- **Bank-Onboarding Wizard** *(Phase 11A-F)* — Submit a new bank, upload a HAR recording + narration, AI codegen drafts a Playwright importer, AST-validate it, approve, auto-deploy to disk, and expose under `/api/import/auto/<slug>/*` — all without leaving the dashboard. Re-iterate via "Regenerate with feedback".
+- **LLM Routing Admin** *(Phase 13)* — Manage proxy endpoints (priority, breaker reset, live test, key tail-only display) and per-task LMRH hint overrides directly in the dashboard.
+- **Anti-detection browser stack** — patchright + real Google Chrome by default; per-bank flip to Camoufox (hardened Firefox) and/or residential proxy egress for sites that defeat Chromium-based scrapers.
 - **Duplicate detection** — Automatic near-duplicate flagging and PDF content-hash deduplication across imports
 - **Multi-entity support** — Manage Personal, LLC, Corp, DBA entities in a hierarchy
 - **Transaction tracking** — Import bank CSVs, OFX/QFX files with AI categorization
-- **AI Chat** — Natural language Q&A about your finances, exportable as PDF; multi-turn Tax Review mode
+- **AI Chat** — Natural language Q&A about your finances, exportable as PDF; multi-turn Tax Review mode (streaming, routed through proxy chain with cascade=auto for quality-per-dollar)
 - **Tax Review** — AI acts as a tax accountant, streaming questions and flags for any year; compare against filed 1040 data
 - **Filed Tax Returns** — Enter actual 1040 data (income, AGI, deductions, refund) for year-over-year comparison
 - **Folder Manager** — Browse, rename, and queue local document folders for import with AI-assisted rename suggestions
-- **AI Cost Tracking** — Per-model token and cost breakdown for all LLM calls
+- **AI Cost Tracking** — Per-model token and cost breakdown for all LLM calls (proxy-pool calls + direct-vendor fallback)
 - **Multiple export formats** — CSV, PDF report, OFX/QFX, TurboTax TXF, QuickBooks IIF, JSON, ZIP bundle
 - **Elasticsearch integration** — Optional vector search across all documents
 
@@ -80,16 +83,21 @@ AI-powered financial document management and tax preparation tool. Organizes doc
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `LLM_API_KEY` | ✅ | Anthropic (Claude) API key |
-| `LLM_MODEL` | | Model name (default: `claude-sonnet-4-6`) |
+| `LLM_API_KEY` | ✅ | Anthropic (Claude) API key — used as direct-SDK fallback when the proxy pool is exhausted |
+| `LLM_MODEL` | | Model name (default: `claude-sonnet-4-6`). Note: with LMRH routing, the proxy picks the model from `task=`/`cost=` hints; this only matters for the direct-SDK fallback path |
+| `LLM_PROXY2_KEY` | | `llmp-*` key for the LMRH-aware proxy chain (preferred). Falls back to `LLM_PROXY_KEY` for back-compat |
+| `LLM_PROXY2_URL` | | Public URL of the proxy. Defaults to `https://www.voipguru.org/llm-proxy2/v1`. Local-access URLs are auto-rewritten — never use `localhost`/`host.docker.internal`/internal docker names |
 | `PAPERLESS_API_BASE_URL` | | Paperless-ngx API URL |
 | `PAPERLESS_API_TOKEN` | | Paperless-ngx API token |
-| `SECRET_KEY` | ✅ | Flask secret key (generate a random string) |
+| `SECRET_KEY` / `FLASK_SECRET_KEY` | ✅ | Flask secret key (generate a random string) |
+| `ADMIN_INITIAL_PASSWORD` | ✅ on fresh DB | Seeds the admin user on first boot. Refused if shorter than 12 chars |
 | `ELASTICSEARCH_URL` | | Elasticsearch URL for vector search |
 | `ELASTICSEARCH_PASSWORD` | | Elasticsearch password |
 | `CONSUME_PATH` | | Path where PDFs are dropped for Paperless consumption |
 | `ENTITIES` | | Comma-separated entity slugs (default: `personal,voipguru,martinfeld_ranch`) |
 | `URL_PREFIX` | | URL prefix if behind a reverse proxy (e.g. `/tax-ai-analyzer`) |
+| `BROWSER_ENGINE` | | Default Playwright engine: `chrome` (patchright) or `firefox` (Camoufox). Per-bank override via `<slug>_browser_engine` setting |
+| `PROXY_URL` | | Default residential proxy URL for Playwright. Per-bank override via `<slug>_proxy_url` setting. Format: `http://user:pass@host:port` or `socks5://...` |
 
 ## Entity Types
 
@@ -110,10 +118,15 @@ Use **Admin → Entities** to manage your entity tree. The **Merge / Acquire** f
 |--------|-------------|-------|
 | Local Folder | None | Recursive scan of accessible server path |
 | Gmail | OAuth2 | Connect via in-app flow; imports financial emails as PDFs |
+| IMAP | Username + Password | Yahoo / iCloud / Outlook / AOL / generic |
 | Google Drive | OAuth2 | Import from Drive folder |
 | Dropbox | OAuth2 | Import from Dropbox path |
+| Amazon S3 | Access keys | Bucket + prefix |
 | PayPal | API credentials | Client ID + Secret |
-| US Alliance FCU | Username + Password / Cookies | Playwright browser automation; cookie-based session reuse |
+| Plaid | OAuth-style access tokens | 12,000+ institutions via Plaid Link SDK |
+| SimpleFIN | Bridge token | 16,000+ institutions, beta-bridge.simplefin.org |
+| US Alliance FCU, US Bank, Capital One, Chime, Merrick, Verizon | Username + Password (+ MFA) | Playwright browser automation with patchright; cookie auto-save reuses sessions |
+| **Auto-deployed banks** | (varies) | Banks added via the **Bank-Onboarding Wizard** (admin tab) get a Playwright importer auto-generated from a HAR recording, AST-validated, deployed to disk, and exposed under `/api/import/auto/<slug>/*` |
 
 ## Export Formats
 

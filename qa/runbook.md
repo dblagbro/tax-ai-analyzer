@@ -241,6 +241,65 @@ Before a release/deploy:
 
 ---
 
+## 9b. LLM proxy chain (Phase 12 + 13)
+
+### Manage proxy endpoints via admin UI
+Sidebar → **LLM Routing** → Proxy endpoints panel.
+- "Test" button: live round-trip with task=classification, cost=economy. Shows latency + the model the proxy actually picked.
+- "Reset" button: clears circuit-breaker state (visible when an endpoint has failures or is tripped).
+- "Disable" / "Enable": pulls an endpoint out of rotation without deleting.
+- Priority is inline-editable.
+- API keys are NEVER returned in full from the API — only last 4 chars shown.
+
+### Manage per-task LMRH hint overrides
+Sidebar → **LLM Routing** → Per-task LMRH hints panel.
+- One row per task in `app/llm_client/lmrh.py:TASK_PRESETS`.
+- Override input shows the default as a placeholder. Empty value clears the override.
+- Save persists to `db.set_setting(f"lmrh.hint.{task}")`.
+
+### Rotate the `llmp-*` proxy key
+1. Provision a new key in the llm-proxy2 admin UI (separate project on `https://www.voipguru.org/llm-proxy2/`)
+2. Update `LLM_PROXY2_KEY` in `/home/dblagbro/docker/.env`
+3. `docker restart tax-ai-analyzer` — boot migration auto-rewrites the api_key on every existing endpoint row
+4. Hit "Test" in the admin UI to confirm the new key round-trips
+
+### Hard rule: no local-access URLs for LLM/proxy
+Always public URL: `https://www.voipguru.org/llm-proxy2/v1`. NEVER `localhost`, `host.docker.internal`, internal docker names. The app has a defense-in-depth normalizer that rewrites local URLs to public on every boot, but don't rely on it — fix the env at the source.
+
+## 9c. Bank-Onboarding Wizard (Phase 11A-F)
+
+### Submit a new bank
+Sidebar → **Bank Queue** → "Submit a new bank" panel.
+- Required: display_name + login_url (must be http(s)://).
+- Optional: statements_url, platform_hint, notes.
+
+### Capture a HAR recording
+1. Open the bank's site in a real Chrome window
+2. DevTools (F12) → Network tab → enable "Preserve log"
+3. Log in + navigate to statements + click one statement
+4. Right-click in Network tab → "Save all as HAR with content"
+5. Upload the .har via the bank's detail panel + write a narration describing what you did
+
+### Generate the importer
+1. Click "⚡ Generate importer (Claude)" — ~30-60s
+2. Review the validation badge (pass / syntax_error / shape_error / import_error)
+3. Click "View" to see source code + validation notes in a new tab
+4. Click "↻ Regen" if the draft needs corrective feedback (Phase 11F regenerate-with-feedback loop)
+
+### Approve + deploy
+1. Click "Approve" (gated on validation_status=pass; force=1 to override)
+2. Click "Deploy" — writes `app/importers/<slug>_importer.py` with a deploy-marker first line
+3. Bank moves to status="live"
+4. New bank reachable at `/api/import/auto/<slug>/{credentials,cookies,status,mfa,start}`
+
+### Switch a bank to Camoufox / proxy
+Sidebar → **Bank Queue** → click bank → "Anti-detection (per-bank overrides)" panel.
+- Engine dropdown: chrome (default) / firefox (Camoufox)
+- Proxy URL input: `http://user:pass@proxy.example.com:8080` or `socks5://...` (provider-agnostic)
+
+### Undeploy
+Detail panel → click "Undeploy" — removes `app/importers/<slug>_importer.py`. Only works on files carrying the auto-deploy marker (hand-written importers are protected).
+
 ## 10. Files and where they live
 
 | What | Where |
@@ -252,5 +311,6 @@ Before a release/deploy:
 | Secrets | `/home/dblagbro/docker/.env` (gitignored) |
 | QA docs | `qa/` inside repo (in git) |
 | Bug log of record | `qa/bug-log.md` + `qa/bug-log-post-phase9*.md` (canonical findings) |
-| Architecture | `architecture.md` (current as of `4573614`) |
-| Refactor history | `refactor-log.md` (current as of `9b3f623`) |
+| Architecture | `architecture.md` (current as of Phase 13 / 2026-05-01) |
+| Refactor history | `refactor-log.md` (current as of `af25088`) |
+| LMRH spec (external) | https://www.voipguru.org/llm-proxy2/lmrh.md |
