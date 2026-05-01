@@ -165,14 +165,21 @@ def test_proxy_call_anthropic_raises_when_pool_empty():
 
 
 def test_proxy_call_chat_walks_chain_on_failure():
-    """Two endpoints; first one raises, second returns success."""
+    """Two endpoints; first one raises, second returns success.
+
+    We force the with_raw_response path off (AttributeError) so the test
+    exercises the simpler create() fallback. The production code tries the
+    raw path first for header capture but falls back cleanly when
+    unavailable.
+    """
     from app.llm_client import proxy_call
 
-    # Build mock OpenAI clients
     fail_client = MagicMock()
+    fail_client.chat.completions.with_raw_response.create.side_effect = AttributeError()
     fail_client.chat.completions.create.side_effect = RuntimeError("boom")
 
     ok_client = MagicMock()
+    ok_client.chat.completions.with_raw_response.create.side_effect = AttributeError()
     fake_resp = MagicMock()
     fake_choice = MagicMock()
     fake_choice.message.content = "ok-response"
@@ -193,6 +200,42 @@ def test_proxy_call_chat_walks_chain_on_failure():
     assert result["endpoint_id"] == "ep2"
     assert result["in_tokens"] == 10
     assert result["out_tokens"] == 5
+
+
+def test_lmrh_diagnostic_logger_logs_capability_and_warnings():
+    """v3.0.25 surfaces unknown dims via X-LMRH-Warnings; we must log it
+    at WARNING level so ops sees drift before it becomes silent no-ops."""
+    import logging
+    from app.llm_client.proxy_call import _log_lmrh_diagnostics
+
+    records: list = []
+    handler = logging.Handler()
+    handler.emit = lambda r: records.append(r)
+    logger_proxy = logging.getLogger("app.llm_client.proxy_call")
+    logger_proxy.addHandler(handler)
+    orig_level = logger_proxy.level
+    logger_proxy.setLevel(logging.DEBUG)
+    try:
+        _log_lmrh_diagnostics("classification", {
+            "LLM-Capability": "v=1, provider=anthropic, model=claude-haiku, chosen-because=score",
+            "X-LMRH-Warnings": "unknown dim: tax_year",
+        })
+        levels = [r.levelno for r in records]
+        msgs = [r.getMessage() for r in records]
+        assert any(l == logging.WARNING for l in levels), \
+            f"warning level not found, got: {levels}"
+        assert any("unknown dim: tax_year" in m for m in msgs)
+        assert any("capability" in m.lower() for m in msgs)
+    finally:
+        logger_proxy.removeHandler(handler)
+        logger_proxy.setLevel(orig_level)
+
+
+def test_lmrh_diagnostic_logger_handles_missing_headers():
+    """No headers → no log spam, no crash."""
+    from app.llm_client.proxy_call import _log_lmrh_diagnostics
+    _log_lmrh_diagnostics("x", {})
+    _log_lmrh_diagnostics("x", None or {})
 
 
 def test_streaming_client_picks_top_priority():
@@ -227,9 +270,11 @@ def test_proxy_call_anthropic_walks_chain_and_logs_cache():
     from app.llm_client import proxy_call
 
     fail_client = MagicMock()
+    fail_client.messages.with_raw_response.create.side_effect = AttributeError()
     fail_client.messages.create.side_effect = RuntimeError("boom")
 
     ok_client = MagicMock()
+    ok_client.messages.with_raw_response.create.side_effect = AttributeError()
     fake_resp = MagicMock()
     fake_resp.usage = MagicMock(
         input_tokens=100, output_tokens=20,

@@ -41,6 +41,35 @@ class NoProxyAvailable(Exception):
     Caller should fall back to a direct-vendor SDK call."""
 
 
+def _log_lmrh_diagnostics(operation: str, headers: dict) -> None:
+    """Surface llm-proxy2 response headers as log lines for ops visibility.
+
+    Headers we care about (per the v3.0.25 spec):
+      - LLM-Capability: which provider+model the proxy actually picked, plus
+        why (chosen-because=score|hard-constraint|fallback|cheapest|p2c) and
+        any unmet dims.
+      - X-LMRH-Warnings: the proxy received unknown/non-canonical dim names.
+        Surfaced as a WARNING so we catch dim-name drift before it silently
+        becomes a no-op routing hint.
+      - LLM-Hint-Set: echo of the parsed input — diagnostic.
+
+    Header lookup is case-insensitive (httpx returns mixed case).
+    """
+    if not headers:
+        return
+    lc = {k.lower(): v for k, v in headers.items()}
+    cap = lc.get("llm-capability", "")
+    warn = lc.get("x-lmrh-warnings", "")
+    if cap:
+        logger.info(f"[proxy/{operation}] capability: {cap}")
+    if warn:
+        logger.warning(
+            f"[proxy/{operation}] LMRH warnings from proxy: {warn} — "
+            f"check that our dim names match the canonical set "
+            f"(see /lmrh.md or /lmrh/register)"
+        )
+
+
 # Connection-class errors that mean "this endpoint is not reachable" — try
 # the next one in the chain rather than treating it as a hard failure.
 _CONN_ERR_TYPES: tuple = ()
@@ -112,7 +141,16 @@ def call_chat(
             }
             if temperature is not None:
                 kwargs["temperature"] = temperature
-            resp = client.chat.completions.create(**kwargs)
+            # Use with_raw_response so we can read X-LMRH-Warnings /
+            # LLM-Capability headers for diagnostics. Falls back to plain
+            # create() for older SDKs / mocked test clients.
+            resp_headers = {}
+            try:
+                raw = client.chat.completions.with_raw_response.create(**kwargs)
+                resp = raw.parse()
+                resp_headers = dict(raw.headers.items()) if hasattr(raw, "headers") else {}
+            except AttributeError:
+                resp = client.chat.completions.create(**kwargs)
             choice = resp.choices[0] if resp.choices else None
             content = (choice.message.content or "") if choice and choice.message else ""
             usage = getattr(resp, "usage", None)
@@ -120,6 +158,7 @@ def call_chat(
             out_tok = getattr(usage, "completion_tokens", 0) if usage else 0
             model_used = getattr(resp, "model", send_model) or send_model
 
+            _log_lmrh_diagnostics(operation, resp_headers)
             proxy_manager.mark_success(eid)
             logger.info(
                 f"[proxy] ✓ {operation} via ep={eid} model={model_used} "
@@ -186,7 +225,15 @@ def call_anthropic_messages(
             }
             if system is not None:
                 kwargs["system"] = system
-            resp = client.messages.create(**kwargs)
+            # Capture response headers for LMRH diagnostics. Anthropic SDK's
+            # with_raw_response wrapper exposes them.
+            resp_headers = {}
+            try:
+                raw = client.messages.with_raw_response.create(**kwargs)
+                resp = raw.parse()
+                resp_headers = dict(raw.headers.items()) if hasattr(raw, "headers") else {}
+            except AttributeError:
+                resp = client.messages.create(**kwargs)
 
             usage = resp.usage
             in_tok = getattr(usage, "input_tokens", 0) or 0
@@ -194,6 +241,7 @@ def call_anthropic_messages(
             cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
             cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
             model_used = getattr(resp, "model", model) or model
+            _log_lmrh_diagnostics(operation, resp_headers)
 
             proxy_manager.mark_success(eid)
             logger.info(

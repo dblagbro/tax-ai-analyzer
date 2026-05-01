@@ -204,6 +204,7 @@ def test_proxy_call_does_not_send_x_cot_cascade():
         return resp
 
     fake_client = MagicMock()
+    fake_client.chat.completions.with_raw_response.create.side_effect = AttributeError()
     fake_client.chat.completions.create.side_effect = fake_create
 
     with patch("app.llm_client.proxy_manager.get_all_clients",
