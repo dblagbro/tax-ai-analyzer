@@ -1,15 +1,29 @@
-"""LLM Model Routing Hint (LMRH) header builder.
+"""LMRH (LLM Model Routing Hint) header builder.
 
-Spec: ``/home/dblagbro/llm-proxy-v2/v1-reference/LMRH-PROTOCOL.md``
-Format: RFC 8941 structured dictionary, semicolon-separated key=value pairs.
+Spec: https://www.voipguru.org/llm-proxy2/lmrh.md (v1.0 RFC draft)
+Format: RFC 8941 structured field list, comma-separated `dim=value` pairs.
 
-Emit via ``extra_headers={'LLM-Hint': build_lmrh_header(...)}`` on OpenAI SDK
-calls. llm-proxy2 parses this header and uses it to score provider candidates.
-Unknown dimensions are ignored (soft preference) unless marked ``;require``.
+Emit via `extra_headers={'LLM-Hint': build_lmrh_header(...)}` on the OpenAI SDK,
+or via `default_headers={'LLM-Hint': ...}` when constructing the Anthropic client.
+llm-proxy2 parses this header and uses it to score provider candidates.
+Unknown dimensions are ignored (soft preference) unless marked `;require`.
 
-Phase 12 — task taxonomy adapted from paperless-ai-analyzer to fit tax-ai's
-call sites: document analysis, financial extraction, AI Chat, tax review,
-entity classification, summarization.
+Ops directive (2026-04-30):
+  - Do NOT hardcode model names per operation. Let the proxy pick the best
+    model+provider based on `task=` + `cost=` + `safety-min=` + `context-length=`.
+  - If Anthropic ships a cheaper Haiku tomorrow, the proxy auto-picks it.
+    Tax-ai code does not change.
+
+Recognized dims (from the LMRH 1.0 spec):
+  task            chat | reasoning | analysis | code | creative | audio | vision | summarize | classify | extract
+  cost            economy | standard | premium
+  latency         low | medium | high
+  safety-min      1..5         (with optional `;require` for hard constraint)
+  safety-max      1..5
+  context-length  positive int (token count needed)
+  modality        text | vision | audio
+  region          us | eu | asia | <ISO-3166-1 alpha-2>
+  refusal-rate    permissive | standard | strict | maximum
 """
 
 from __future__ import annotations
@@ -17,71 +31,87 @@ from __future__ import annotations
 from typing import Optional
 
 
-# Task presets per call-site. The proxy uses these to pick a model when the
-# caller doesn't specify one explicitly. Keep this table in sync with the
-# call-site labels in ``app/llm_client/client.py``.
+# Per-task default `cost` tier. Callers can override by passing cost= explicitly.
+# Picked to match the ops-recommended pattern:
+#   - Cheap classification / extraction               → economy
+#   - Doc analysis / summaries / chat (mid-volume)    → standard
+#   - Reasoning-heavy / codegen                       → premium
 TASK_PRESETS: dict[str, dict] = {
     # Document analysis pipeline (categorizer / extractor / analyze_document)
-    "analysis":         {"model_pref": "claude-sonnet-4-6", "fallback_chain": "anthropic,openai"},
-    "extraction":       {"model_pref": "gpt-4o", "fallback_chain": "openai,anthropic"},
-    "classification":   {"model_pref": "gpt-4o-mini"},
+    "analysis":         {"cost": "standard", "safety-min": 3},
+    "extraction":       {"cost": "economy"},
+    "classification":   {"cost": "economy"},
 
-    # AI Chat tab
-    "chat":             {"model_pref": "claude-sonnet-4-6"},
+    # AI Chat tab — keep premium for quality
+    "chat":             {"cost": "premium"},
 
     # Q&A — short factual answers
-    "qa":               {},
+    "qa":               {"cost": "standard"},
 
     # Reasoning-heavy: tax review, multi-document synthesis
-    "reasoning":        {"model_pref": "claude-opus-4-7", "quality": "high"},
-    "tax-review":       {"model_pref": "claude-opus-4-7", "quality": "high"},
+    "reasoning":        {"cost": "premium"},
+    "tax-review":       {"cost": "premium"},
 
     # Free-text summary generation
-    "summarize":        {"model_pref": "claude-sonnet-4-6"},
+    "summarize":        {"cost": "standard"},
 
-    # Bank-importer codegen agent (Phase 11D-E)
-    "codegen":          {"model_pref": "claude-sonnet-4-6", "fallback_chain": "anthropic,openai"},
+    # Bank-importer codegen agent (Phase 11D-E) — premium + long context
+    "codegen":          {"cost": "premium", "context-length": 60000},
+
+    # Vision / image-modality calls
+    "vision":           {"cost": "standard"},
+
+    # Embeddings
+    "embed":            {"cost": "economy"},
 }
 
 
 def build_lmrh_header(
     task: str,
     *,
-    model_pref: Optional[str] = None,
-    fallback_chain: Optional[str] = None,
+    cost: Optional[str] = None,
     quality: Optional[str] = None,
+    safety_min: Optional[int] = None,
+    context_length: Optional[int] = None,
     has_images: bool = False,
     extras: Optional[dict] = None,
 ) -> str:
     """Build the LLM-Hint header value.
 
     Arguments:
-        task: semantic label (e.g. ``"chat"``, ``"analysis"``, ``"reasoning"``).
-              Looked up in TASK_PRESETS to fill model_pref / quality defaults.
-              Explicit kwargs override presets.
-        model_pref: soft preference for a specific provider model name
-        fallback_chain: comma-separated provider preference order
-        quality: ``"low" | "standard" | "high"``
-        has_images: if True, adds ``modality=vision``
-        extras: dict of extra key=value pairs appended verbatim
+      task: cognitive type — one of the LMRH `task=` tokens above. Used as
+            both the literal hint dim and the lookup key into TASK_PRESETS.
+      cost: economy | standard | premium. Defaults to TASK_PRESETS[task]["cost"].
+      quality: low | standard | high. Optional pass-through.
+      safety_min: 1..5. Hard constraint via `;require`.
+      context_length: int — minimum tokens of context the model must support.
+      has_images: if True, adds modality=vision.
+      extras: dict of extra dim=value pairs appended verbatim.
 
     Returns:
-        A string like ``task=chat; model-pref=claude-sonnet-4-6`` suitable for
-        the ``LLM-Hint`` HTTP header. Callers attach via
-        ``extra_headers={'LLM-Hint': ...}``.
+      A string like `task=analysis, cost=standard, safety-min=3` suitable for
+      the LLM-Hint header. Empty string if `task` is empty.
+
+    Per the LMRH 1.0 spec, unknown dims are ignored by the proxy. We keep
+    things conservative — emit only well-formed dims.
     """
+    if not task:
+        return ""
+
     preset = TASK_PRESETS.get(task, {})
-    pref = model_pref or preset.get("model_pref")
-    fb = fallback_chain or preset.get("fallback_chain")
-    q = quality or preset.get("quality")
+    eff_cost = cost or preset.get("cost")
+    eff_ctx = context_length if context_length is not None else preset.get("context-length")
+    eff_safety = safety_min if safety_min is not None else preset.get("safety-min")
 
     parts: list[str] = [f"task={task}"]
-    if pref:
-        parts.append(f"model-pref={pref}")
-    if fb:
-        parts.append(f"fallback-chain={fb}")
-    if q:
-        parts.append(f"quality={q}")
+    if eff_cost:
+        parts.append(f"cost={eff_cost}")
+    if quality:
+        parts.append(f"quality={quality}")
+    if eff_safety is not None:
+        parts.append(f"safety-min={int(eff_safety)}")
+    if eff_ctx is not None:
+        parts.append(f"context-length={int(eff_ctx)}")
     if has_images:
         parts.append("modality=vision")
     if extras:
@@ -89,4 +119,27 @@ def build_lmrh_header(
             key = str(k).lower().replace("_", "-")
             parts.append(f"{key}={v}")
 
-    return "; ".join(parts)
+    # Spec calls for comma+space separator on the structured-field list.
+    return ", ".join(parts)
+
+
+def get_hint(operation_or_task: str, **overrides) -> str:
+    """Convenience: look up an operation/task name and return the hint string.
+
+    First checks for an operator override in db.get_setting(f"lmrh.hint.{key}"),
+    then falls through to build_lmrh_header(task=...). Mirrors the
+    coordinator-hub get_lmrh_hint() pattern.
+    """
+    try:
+        from app import db as _db
+        ovr = (_db.get_setting(f"lmrh.hint.{operation_or_task}") or "").strip()
+        if ovr:
+            return ovr
+    except Exception:
+        pass
+    return build_lmrh_header(operation_or_task, **overrides)
+
+
+def list_tasks() -> list[str]:
+    """Task names with built-in presets (used by the admin UI)."""
+    return sorted(TASK_PRESETS.keys())

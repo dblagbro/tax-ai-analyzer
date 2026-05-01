@@ -367,6 +367,19 @@ def _migrate(conn):
         )
         conn.commit()
 
+    # Phase 12 cleanup: per ops 2026-04-30, llm-proxy-manager (v1) is
+    # permanently decommissioned. Delete any legacy v1 rows so the chain
+    # never tries to route through a dead host. We do this every boot
+    # (idempotent — DELETE WHERE removes 0 rows on a clean DB).
+    try:
+        cur = conn.execute("DELETE FROM llm_proxy_endpoints WHERE version = 1")
+        if cur.rowcount:
+            logger.info(f"Removed {cur.rowcount} legacy v1 llm-proxy endpoint(s) per ops directive")
+            conn.commit()
+    except Exception as e:
+        # Table might not exist yet on the very first boot — fine.
+        logger.debug(f"v1 cleanup skipped: {e}")
+
     # ── Phase 11: bank-onboarding queue (admin-curated user submissions) ──
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS pending_banks (
@@ -458,14 +471,16 @@ def _seed_llm_proxy_endpoints(conn):
     """Seed the llm_proxy_endpoints table on first boot.
 
     Runs only if the table is empty AND the LLM_PROXY_KEY env var is set.
-    Adds two rows mirroring the paperless-ai-analyzer convention:
-      1. llm-proxy2  (v2, priority 10)  — http://llm-proxy2:3000/v1
-      2. llm-proxy-manager (v1, pri 20) — http://llm-proxy-manager:3000/v1
+    Inserts a single primary endpoint:
+      1. llm-proxy2 (v2, priority 10) — http://llm-proxy2:3000/v1
 
-    URLs can be overridden with LLM_PROXY2_URL and LLM_PROXY_URL env vars.
-    The fallback v1 row is seeded *disabled* by default — admin enables it
-    via the UI once they confirm the v1 manager is reachable for this
-    instance. (Mirrors the paperless seeding policy where v2 is primary.)
+    Per ops 2026-04-30 directive: v1 (llm-proxy-manager) is permanently
+    decommissioned — do NOT seed it. Admin can still add legacy endpoints
+    manually via llm_proxy_add_endpoint() if ever needed.
+
+    URL is overridable via the LLM_PROXY2_URL env var. For containers
+    outside the docker compose network, point this at the public URL:
+    https://www.voipguru.org/llm-proxy2/v1
     """
     import os, time, uuid as _uuid
     existing = conn.execute("SELECT COUNT(*) FROM llm_proxy_endpoints").fetchone()[0]
@@ -476,10 +491,8 @@ def _seed_llm_proxy_endpoints(conn):
         logger.info("LLM proxy seeding skipped: LLM_PROXY_KEY env var not set")
         return
     proxy2_url = os.environ.get("LLM_PROXY2_URL", "http://llm-proxy2:3000/v1")
-    proxy1_url = os.environ.get("LLM_PROXY_URL",  "http://llm-proxy-manager:3000/v1")
     seeds = [
-        (str(_uuid.uuid4()), "llm-proxy2 (v2)",            proxy2_url, key, 2, 10, 1, time.time()),
-        (str(_uuid.uuid4()), "llm-proxy-manager (v1, disabled)", proxy1_url, key, 1, 20, 0, time.time()),
+        (str(_uuid.uuid4()), "llm-proxy2 (v2)", proxy2_url, key, 2, 10, 1, time.time()),
     ]
     conn.executemany(
         "INSERT INTO llm_proxy_endpoints "
@@ -488,7 +501,7 @@ def _seed_llm_proxy_endpoints(conn):
         seeds,
     )
     conn.commit()
-    logger.info(f"Seeded {len(seeds)} LLM proxy endpoints")
+    logger.info(f"Seeded {len(seeds)} LLM proxy endpoints (v1 dropped per ops)")
 
 
 def llm_proxy_list_endpoints(include_disabled: bool = False) -> list[dict]:

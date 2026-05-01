@@ -305,8 +305,6 @@ def _call_codegen_llm(
     )
     reference = _load_reference_template()
 
-    client = anthropic.Anthropic(api_key=api_key)
-
     # The system prompt is split into two blocks so we can pin the cache
     # breakpoint just before the per-call user message. The reference template
     # is the heavy bit (~30k tokens), and it doesn't change between calls.
@@ -328,13 +326,40 @@ def _call_codegen_llm(
     ]
 
     user_msg = _build_user_message(bank, recording, har_summary_text)
+    user_messages = [{"role": "user", "content": user_msg}]
 
-    resp = client.messages.create(
-        model=chosen_model,
-        max_tokens=MAX_OUTPUT_TOKENS,
-        system=system_blocks,
-        messages=[{"role": "user", "content": user_msg}],
-    )
+    # Phase 12: try the proxy chain first (LMRH-aware, multi-endpoint with
+    # circuit breaker). If the whole pool is exhausted, fall back to a direct
+    # Anthropic SDK call so codegen stays operational when the proxies are down.
+    resp = None
+    proxy_endpoint_id = None
+    try:
+        from app.llm_client import proxy_call
+        result = proxy_call.call_anthropic_messages(
+            "codegen",
+            model=chosen_model,
+            system=system_blocks,
+            messages=user_messages,
+            max_tokens=MAX_OUTPUT_TOKENS,
+        )
+        resp = result["response"]
+        proxy_endpoint_id = result["endpoint_id"]
+        chosen_model = result["model"]  # whatever the proxy actually picked
+        logger.info(f"bank_codegen routed via proxy ep={proxy_endpoint_id}")
+    except Exception as proxy_err:
+        logger.warning(
+            f"bank_codegen proxy chain failed ({proxy_err}); "
+            f"falling back to direct Anthropic SDK"
+        )
+
+    if resp is None:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model=chosen_model,
+            max_tokens=MAX_OUTPUT_TOKENS,
+            system=system_blocks,
+            messages=user_messages,
+        )
 
     # Token + cost tracking
     in_tok = getattr(resp.usage, "input_tokens", 0) or 0
@@ -346,8 +371,11 @@ def _call_codegen_llm(
     # compute_cost() uses standard input price, so we approximate by adding
     # cached read cost separately. Good enough for our cost UI.
     cost = tracker.compute_cost("anthropic", chosen_model, in_tok + cache_create, out_tok)
+    provider_label = (
+        f"proxy:anthropic" if proxy_endpoint_id else "anthropic"
+    )
     tracker.log_usage(
-        provider="anthropic", model=chosen_model, operation="bank_codegen",
+        provider=provider_label, model=chosen_model, operation="bank_codegen",
         input_tokens=in_tok + cache_create + cache_read,
         output_tokens=out_tok, cost=cost, success=True,
     )

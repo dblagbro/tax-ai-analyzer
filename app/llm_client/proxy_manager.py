@@ -130,3 +130,56 @@ def get_all_clients() -> list[tuple[OpenAI, str]]:
     on connection failure ``mark_failure(eid)`` and try the next.
     """
     return [(build_client(ep), ep["id"]) for ep in get_healthy_endpoints()]
+
+
+def build_anthropic_client(endpoint: dict, lmrh_hint: str = ""):
+    """Build a native Anthropic SDK client pointed at a proxy endpoint.
+
+    Required for callers that depend on Anthropic-native features the
+    OpenAI compat shim can't express — primarily prompt caching with
+    cache_control blocks (used by bank-onboarding codegen). The Anthropic
+    SDK passes through to ``<base_url>/v1/messages`` exactly as it would
+    against api.anthropic.com.
+
+    v2 endpoints want the API key in ``x-api-key``. The Anthropic SDK
+    already sends ``x-api-key`` from its own ``api_key`` argument, so for
+    v2 we pass the real key through. For v1 (Bearer) we override with a
+    ``default_headers={"Authorization": ...}`` and pass a placeholder.
+    """
+    import anthropic
+    url = endpoint["url"].rstrip("/")
+    # Anthropic SDK appends /v1 itself if base_url omits it; trim if present
+    if url.endswith("/v1"):
+        base = url[:-3]
+    else:
+        base = url
+    key = endpoint["api_key"]
+    version = int(endpoint.get("version", 2))
+    extra_headers = {}
+    if lmrh_hint:
+        extra_headers["LLM-Hint"] = lmrh_hint
+    if version == 2:
+        return anthropic.Anthropic(
+            base_url=base, api_key=key,
+            default_headers=extra_headers or None,
+        )
+    # v1: Bearer token
+    extra_headers["Authorization"] = f"Bearer {key}"
+    return anthropic.Anthropic(
+        base_url=base, api_key="ignored-v1",
+        default_headers=extra_headers,
+    )
+
+
+def get_all_anthropic_clients(operation: str = "") -> list[tuple]:
+    """Return [(Anthropic client, endpoint_id), ...] for ALL healthy endpoints.
+
+    Each client is pre-configured with the LMRH hint for ``operation`` so
+    every messages.create() call carries the hint. ``operation`` is the
+    same key used in app.llm_client.lmrh.get_hint() (one of the TASK_PRESETS
+    keys, e.g. "codegen") — pass an empty string to send no hint.
+    """
+    from app.llm_client.lmrh import get_hint
+    hint = get_hint(operation) if operation else ""
+    return [(build_anthropic_client(ep, hint), ep["id"])
+            for ep in get_healthy_endpoints()]
