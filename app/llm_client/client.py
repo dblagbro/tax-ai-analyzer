@@ -54,27 +54,9 @@ class LLMClient:
             self._openai_client = _openai.OpenAI(api_key=api_key)
         return self._openai_client
 
-    def _get_proxy_client(self):
-        """Return an OpenAI-compatible client pointed at the local llm-proxy, or None if unreachable."""
-        from app import config
-        import httpx
-        proxy_url = getattr(config, "LLM_PROXY_URL", None) or "http://localhost:8055/v1"
-        proxy_key = getattr(config, "LLM_PROXY_KEY", None) or ""
-        if not proxy_key:
-            return None, None
-        try:
-            base = proxy_url[:-3] if proxy_url.endswith("/v1") else proxy_url.rstrip("/")
-            resp = httpx.get(f"{base}/health", timeout=1.5)
-            if resp.status_code != 200:
-                return None, None
-        except Exception:
-            return None, None
-        try:
-            import openai as _openai
-            client = _openai.OpenAI(api_key=proxy_key, base_url=proxy_url)
-            return client, proxy_url
-        except Exception:
-            return None, None
+    # NOTE: _get_proxy_client() (single-URL llm-proxy-manager fallback) was
+    # removed 2026-04-30 along with the Tier 2 legacy path in _call(). The
+    # proxy pool (db.llm_proxy_endpoints + proxy_manager) replaces it.
 
     # ── Runtime config resolution ─────────────────────────────────────────────
 
@@ -249,30 +231,13 @@ class LLMClient:
                 proxy_manager.mark_failure(eid)
                 continue
 
-        # ── Tier 2: legacy single-URL proxy via LLM_PROXY_URL env ───────
-        proxy_client, proxy_url = self._get_proxy_client()
-        if proxy_client is not None:
-            try:
-                proxy_model = cfg["model"] if provider != "openai" else cfg["openai_model"]
-                resp = proxy_client.chat.completions.create(
-                    model=proxy_model, messages=oai_messages,
-                    max_tokens=max_tokens, temperature=0.1,
-                    extra_headers={"LLM-Hint": lmrh},
-                )
-                text = resp.choices[0].message.content or ""
-                in_tok = resp.usage.prompt_tokens if resp.usage else 0
-                out_tok = resp.usage.completion_tokens if resp.usage else 0
-                cost = tracker.compute_cost(provider, proxy_model, in_tok, out_tok)
-                tracker.log_usage(
-                    provider=f"proxy:{provider}", model=proxy_model, operation=operation,
-                    input_tokens=in_tok, output_tokens=out_tok, cost=cost,
-                    success=True, doc_id=doc_id,
-                )
-                return text, in_tok, out_tok
-            except Exception as proxy_err:
-                logger.warning("legacy llm-proxy call failed (%s), falling back to direct API", proxy_err)
-
-        # ── Tier 3: direct provider SDK (absolute last resort) ──────────
+        # ── Tier 2: direct provider SDK (last resort) ──────────────────
+        # NOTE: a previous "Tier 2" path called self._get_proxy_client() to hit
+        # a legacy single-URL proxy via LLM_PROXY_URL. That code was removed
+        # 2026-04-30 — llm-proxy-manager (v1) is permanently decommissioned per
+        # ops directive. The chain is now Tier 1 (proxy pool with breaker) →
+        # direct vendor SDK. Re-introducing v1 would re-create a dead-host
+        # dependency.
         if provider == "openai":
             return self._call_openai(
                 api_key=cfg["openai_key"], model=cfg["openai_model"],

@@ -162,13 +162,18 @@ async function openBankDetail(bankId) {
           let actions = `<button class="btn btn-sm btn-outline" onclick="viewGenerated(${bank.id}, ${g.id})">View</button>`;
           if (!g.approved_at) {
             actions += ` <button class="btn btn-sm btn-primary" onclick="approveGenerated(${bank.id}, ${g.id})">Approve</button>`;
+            actions += ` <button class="btn btn-sm btn-outline" onclick="regenerateImporter(${bank.id}, ${g.id})" title="Re-run codegen with critique">&#x21bb; Regen</button>`;
           } else if (!g.deployed_at) {
             actions += ` <button class="btn btn-sm btn-primary" onclick="deployImporter(${bank.id}, ${g.id})">Deploy</button>`;
           } else {
             actions += ` <button class="btn btn-sm btn-danger" onclick="undeployImporter(${bank.id}, ${g.id})">Undeploy</button>`;
           }
+          // Show parent linkage if this is a regenerated draft
+          const lineage = g.parent_id
+            ? `<div style="font-size:.74rem;color:var(--muted)">↳ from #${g.parent_id}</div>`
+            : '';
           return `<tr>
-            <td>${g.id}</td>
+            <td>${g.id}${lineage}</td>
             <td style="font-size:.78rem">${(g.generated_at || '').slice(0, 16).replace('T', ' ')}</td>
             <td style="font-size:.78rem">${esc(g.llm_model || '—')}</td>
             <td style="font-size:.78rem">in:${g.llm_tokens_in || 0} out:${g.llm_tokens_out || 0}</td>
@@ -304,6 +309,37 @@ async function saveBankAntibot(bankId) {
     toast(`Saved (${bits.join(', ')})`, 'success');
   } else {
     toast('Save failed: ' + (r?.error || ''), 'error');
+  }
+}
+
+async function regenerateImporter(bankId, genId) {
+  const feedback = prompt(
+    `Re-run codegen on this draft with corrective feedback.\n\n`
+    + `Describe what to fix or improve in the next draft. Be specific:\n`
+    + `selectors that should change, MFA flow corrections, download-button\n`
+    + `behavior, anti-detection tweaks, etc.\n\n`
+    + `(This calls Claude — ~30-60s. The previous draft is preserved.)`,
+    ''
+  );
+  if (!feedback || !feedback.trim()) {
+    if (feedback !== null) toast('Regenerate cancelled (no feedback)', 'info');
+    return;
+  }
+  toast('Regenerating with feedback…', 'info');
+  try {
+    const r = await fetch(P + `/api/admin/banks/${bankId}/generated/${genId}/regenerate`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({feedback: feedback.trim()}),
+    });
+    const j = await r.json();
+    if (r.status === 201 && j.generated_id) {
+      toast(`✓ Draft #${j.generated_id} (parent #${j.parent_id}, validation=${esc(j.validation_status || '?')})`, 'success');
+      openBankDetail(bankId);
+    } else {
+      toast('Regenerate failed: ' + (j?.error || 'unknown'), 'error');
+    }
+  } catch (e) {
+    toast('Regenerate error: ' + (e.message || 'network'), 'error');
   }
 }
 

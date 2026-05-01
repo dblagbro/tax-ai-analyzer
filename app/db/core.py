@@ -427,7 +427,9 @@ def _migrate(conn):
             validation_notes  TEXT DEFAULT '',
             deployed_path     TEXT DEFAULT '',     -- on-disk path to the deployed .py module
             deployed_at       TEXT,
-            deployed_by       INTEGER REFERENCES users(id) ON DELETE SET NULL
+            deployed_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            parent_id         INTEGER REFERENCES generated_importers(id) ON DELETE SET NULL,
+            feedback_text     TEXT DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_genimp_pending ON generated_importers(pending_bank_id);
     """)
@@ -460,6 +462,16 @@ def _migrate(conn):
     if "deployed_by" not in gen_cols:
         conn.execute(
             "ALTER TABLE generated_importers ADD COLUMN deployed_by INTEGER"
+        )
+        conn.commit()
+    if "parent_id" not in gen_cols:
+        conn.execute(
+            "ALTER TABLE generated_importers ADD COLUMN parent_id INTEGER"
+        )
+        conn.commit()
+    if "feedback_text" not in gen_cols:
+        conn.execute(
+            "ALTER TABLE generated_importers ADD COLUMN feedback_text TEXT DEFAULT ''"
         )
         conn.commit()
 

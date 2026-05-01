@@ -258,6 +258,56 @@ def api_generated_undeploy(bank_id, gen_id):
                     "removed": removed})
 
 
+# ── regenerate-with-feedback (Phase 11F) ──────────────────────────────────────
+
+@bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/generated/<int:gen_id>/regenerate",
+          methods=["POST"])
+@login_required
+@admin_required
+def api_generated_regenerate(bank_id, gen_id):
+    """Re-run the codegen agent with the prior draft + admin feedback as input.
+
+    Body: {"feedback": "<critique describing what to change>"}
+
+    Creates a NEW generated_importers row with parent_id pointing at the prior
+    draft. The previous draft is preserved unchanged (not deleted) so the admin
+    can compare or roll back.
+    """
+    gen = db.get_generated_importer(gen_id)
+    if not gen or gen.get("pending_bank_id") != bank_id:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    feedback = (data.get("feedback") or "").strip()
+    if not feedback:
+        return jsonify({"error": "feedback is required"}), 400
+
+    from app.ai_agents.bank_codegen import generate_importer
+    try:
+        result = generate_importer(
+            bank_id,
+            recording_id=gen.get("recording_id"),
+            parent_generated_id=gen_id,
+            feedback=feedback,
+        )
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.exception(f"regenerate failed for gen={gen_id}")
+        return jsonify({"error": f"regenerate failed: {e}"}), 500
+
+    return jsonify({
+        "status": "regenerated",
+        "generated_id": result["id"],
+        "parent_id": gen_id,
+        "model": result["model"],
+        "tokens_in": result["tokens_in"],
+        "tokens_out": result["tokens_out"],
+        "validation_status": result.get("validation_status", ""),
+        "validation_notes": result.get("validation_notes", ""),
+        "notes": result["notes"],
+    }), 201
+
+
 # ── codegen agent trigger (Phase 11D) ─────────────────────────────────────────
 
 @bp.route(URL_PREFIX + "/api/admin/banks/<int:bank_id>/generate", methods=["POST"])

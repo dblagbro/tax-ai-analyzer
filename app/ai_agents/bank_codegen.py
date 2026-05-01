@@ -130,13 +130,37 @@ def _build_user_message(
     bank: dict,
     recording: dict,
     har_summary_text: str,
+    *,
+    prior_draft: Optional[dict] = None,
+    feedback: str = "",
 ) -> str:
     """Render the bank + recording metadata + HAR summary as a single user
     message. We deliberately keep this short — heavy lifting (instructions,
-    reference template) lives in the cached system prompt."""
+    reference template) lives in the cached system prompt.
+
+    When prior_draft + feedback are passed, the message becomes a
+    regeneration prompt: the previous source is included verbatim and the
+    admin's critique is presented as the corrective instruction.
+    """
     notes = bank.get("notes") or "(none)"
     narration = recording.get("narration_text") or "(no narration provided)"
+
+    regen_block = ""
+    if prior_draft and feedback:
+        regen_block = (
+            f"=== REGENERATION REQUEST ===\n"
+            f"You previously produced a draft for this bank. The admin reviewer\n"
+            f"has provided feedback below. Produce a NEW, improved draft that\n"
+            f"addresses the feedback. Keep what worked; fix what they flagged.\n"
+            f"DO NOT restate the feedback in your output — apply it.\n\n"
+            f"--- Admin feedback ---\n{feedback.strip()}\n\n"
+            f"--- Previous draft (generated_importers id={prior_draft.get('id')}, "
+            f"validation={prior_draft.get('validation_status') or 'unchecked'}) ---\n"
+            f"{prior_draft.get('source_code') or '(empty)'}\n\n"
+        )
+
     return (
+        f"{regen_block}"
         f"=== Pending bank ===\n"
         f"  display_name : {bank.get('display_name')}\n"
         f"  slug         : {bank.get('slug')}\n"
@@ -157,6 +181,8 @@ def generate_importer(
     *,
     recording_id: Optional[int] = None,
     model: Optional[str] = None,
+    parent_generated_id: Optional[int] = None,
+    feedback: str = "",
 ) -> dict:
     """Run the codegen pipeline for a single pending bank.
 
@@ -209,6 +235,22 @@ def generate_importer(
     if not (recording.get("narration_text") or har_summary_text.strip()):
         raise RuntimeError("recording has neither HAR data nor narration text")
 
+    # Phase 11F — regenerate-with-feedback: load the prior draft so we can
+    # show the model what to improve. Caller passes parent_generated_id +
+    # feedback; both must be present together (a parent without feedback
+    # would be wasted tokens — the model has nothing to act on).
+    prior_draft = None
+    if parent_generated_id is not None:
+        prior_draft = db.get_generated_importer(parent_generated_id)
+        if not prior_draft or prior_draft.get("pending_bank_id") != bank_id:
+            raise RuntimeError(
+                f"parent_generated_id={parent_generated_id} not found for bank {bank_id}"
+            )
+        if not (feedback or "").strip():
+            raise RuntimeError(
+                "feedback is required when regenerating from a prior draft"
+            )
+
     # Mark bank as processing so the UI shows the in-flight state
     db.update_pending_bank(bank_id, status="processing")
 
@@ -218,6 +260,8 @@ def generate_importer(
             recording=recording,
             har_summary_text=har_summary_text,
             model=model,
+            prior_draft=prior_draft,
+            feedback=feedback,
         )
     except Exception as e:
         # Roll status back so the admin can retry
@@ -246,6 +290,8 @@ def generate_importer(
         generation_notes=result.get("generation_notes", ""),
         validation_status=validation_status,
         validation_notes=validation_notes,
+        parent_id=parent_generated_id,
+        feedback_text=feedback or "",
     )
     db.update_pending_bank(bank_id, status="generated")
     db.log_activity(
@@ -272,6 +318,8 @@ def _call_codegen_llm(
     recording: dict,
     har_summary_text: str,
     model: Optional[str],
+    prior_draft: Optional[dict] = None,
+    feedback: str = "",
 ) -> dict:
     """Issue the actual Anthropic API call and parse the JSON response.
 
@@ -325,7 +373,10 @@ def _call_codegen_llm(
         },
     ]
 
-    user_msg = _build_user_message(bank, recording, har_summary_text)
+    user_msg = _build_user_message(
+        bank, recording, har_summary_text,
+        prior_draft=prior_draft, feedback=feedback,
+    )
     user_messages = [{"role": "user", "content": user_msg}]
 
     # Phase 12: try the proxy chain first (LMRH-aware, multi-endpoint with

@@ -214,17 +214,25 @@ def add_generated_importer(
     generation_notes: str = "",
     validation_status: str = "",
     validation_notes: str = "",
+    parent_id: Optional[int] = None,
+    feedback_text: str = "",
 ) -> int:
+    """Insert a new generated importer row.
+
+    parent_id chains a regenerated draft to its previous version (Phase 11F);
+    feedback_text is the admin's critique that triggered the regeneration.
+    Both default to None/'' for fresh first-pass generations.
+    """
     conn = get_connection()
     try:
         cur = conn.execute(
             "INSERT INTO generated_importers(pending_bank_id,recording_id,source_code,"
             "test_code,llm_model,llm_tokens_in,llm_tokens_out,generation_notes,"
-            "validation_status,validation_notes) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "validation_status,validation_notes,parent_id,feedback_text) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (pending_bank_id, recording_id, source_code, test_code, llm_model,
              llm_tokens_in, llm_tokens_out, generation_notes,
-             validation_status, validation_notes),
+             validation_status, validation_notes, parent_id, feedback_text),
         )
         conn.commit()
         return cur.lastrowid
