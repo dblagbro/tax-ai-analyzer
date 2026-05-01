@@ -6,7 +6,14 @@ All public symbols are re-exported here so existing callers using
 continue to work without modification.
 """
 
-from app.db.core import DB_PATH, get_connection, init_db
+from app.db.core import (
+    DB_PATH, get_connection, init_db,
+    # LLM proxy endpoint pool (Phase 12)
+    llm_proxy_list_endpoints,
+    llm_proxy_add_endpoint,
+    llm_proxy_update_endpoint,
+    llm_proxy_delete_endpoint,
+)
 
 from app.db.users import (
     authenticate_user,

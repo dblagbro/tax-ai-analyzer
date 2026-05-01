@@ -184,23 +184,80 @@ class LLMClient:
     def _call(
         self, system, user_content, max_tokens=2048,
         operation="unknown", doc_id=None, history=None,
+        task: str = "analysis",
     ) -> tuple:
+        """Send a chat completion request.
+
+        Phase 12: routes through the llm_proxy_endpoints pool first
+        (priority order, per-endpoint circuit breaker), with the
+        single-URL ``LLM_PROXY_URL`` env var as a second-tier fallback,
+        and direct Anthropic/OpenAI as the absolute last resort.
+
+        ``task`` selects the LMRH preset (``analysis`` | ``chat`` |
+        ``extraction`` | ``classification`` | ``reasoning`` |
+        ``tax-review`` | ``summarize`` | ``codegen`` | ``qa``).
+        """
         cfg = self._resolve_config()
         provider = cfg["provider"].lower()
         messages = list(history or [])
         messages.append({"role": "user", "content": user_content})
 
-        # Try llm-proxy first — gives provider redundancy and cost tracking.
-        # Falls through to direct API if proxy is unreachable or misconfigured.
+        oai_messages = [{"role": "system", "content": system}] + messages
+
+        # ── Tier 1: pool of proxy endpoints (Phase 12) ──────────────────
+        from app.llm_client import proxy_manager
+        from app.llm_client.lmrh import build_lmrh_header
+        from app import llm_usage_tracker as tracker
+
+        lmrh = build_lmrh_header(task)
+        send_model = cfg["model"] if provider != "openai" else cfg["openai_model"]
+
+        for client, eid in proxy_manager.get_all_clients():
+            try:
+                resp = client.chat.completions.create(
+                    model=send_model,
+                    messages=oai_messages,
+                    max_tokens=max_tokens,
+                    temperature=0.1,
+                    extra_headers={"LLM-Hint": lmrh},
+                )
+                text = resp.choices[0].message.content or ""
+                in_tok = resp.usage.prompt_tokens if resp.usage else 0
+                out_tok = resp.usage.completion_tokens if resp.usage else 0
+                model_used = getattr(resp, "model", send_model) or send_model
+                proxy_manager.mark_success(eid)
+                try:
+                    cost = tracker.compute_cost(provider, model_used, in_tok, out_tok)
+                    tracker.log_usage(
+                        provider=f"llm-proxy:{eid[:8]}", model=model_used,
+                        operation=operation, input_tokens=in_tok,
+                        output_tokens=out_tok, cost=cost,
+                        success=True, doc_id=doc_id,
+                    )
+                except Exception:
+                    pass
+                logger.info(
+                    "[llm-proxy] %s model=%s task=%s in=%d out=%d",
+                    eid[:8], model_used, task, in_tok, out_tok
+                )
+                return text, in_tok, out_tok
+            except Exception as proxy_err:
+                logger.warning(
+                    "[llm-proxy] %s call failed (%s) — trying next endpoint",
+                    eid[:8], str(proxy_err)[:120]
+                )
+                proxy_manager.mark_failure(eid)
+                continue
+
+        # ── Tier 2: legacy single-URL proxy via LLM_PROXY_URL env ───────
         proxy_client, proxy_url = self._get_proxy_client()
         if proxy_client is not None:
             try:
-                from app import llm_usage_tracker as tracker
                 proxy_model = cfg["model"] if provider != "openai" else cfg["openai_model"]
-                oai_messages = [{"role": "system", "content": system}] + messages
                 resp = proxy_client.chat.completions.create(
                     model=proxy_model, messages=oai_messages,
                     max_tokens=max_tokens, temperature=0.1,
+                    extra_headers={"LLM-Hint": lmrh},
                 )
                 text = resp.choices[0].message.content or ""
                 in_tok = resp.usage.prompt_tokens if resp.usage else 0
@@ -213,8 +270,9 @@ class LLMClient:
                 )
                 return text, in_tok, out_tok
             except Exception as proxy_err:
-                logger.warning("llm-proxy call failed (%s), falling back to direct API", proxy_err)
+                logger.warning("legacy llm-proxy call failed (%s), falling back to direct API", proxy_err)
 
+        # ── Tier 3: direct provider SDK (absolute last resort) ──────────
         if provider == "openai":
             return self._call_openai(
                 api_key=cfg["openai_key"], model=cfg["openai_model"],

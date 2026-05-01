@@ -164,9 +164,26 @@ def init_db():
             active INTEGER DEFAULT 1,
             created_at TEXT DEFAULT (datetime('now'))
         );
+
+        -- Phase 12: LLM proxy endpoint pool (ported from paperless-ai-analyzer
+        -- v3.9.0). Each row is one llm-proxy node; the proxy_manager picks the
+        -- best healthy one per call and applies a circuit breaker to bad ones.
+        CREATE TABLE IF NOT EXISTS llm_proxy_endpoints (
+            id         TEXT PRIMARY KEY,
+            label      TEXT NOT NULL,
+            url        TEXT NOT NULL,
+            api_key    TEXT NOT NULL,
+            version    INTEGER NOT NULL DEFAULT 1,  -- 1 = Bearer, 2 = x-api-key
+            priority   INTEGER NOT NULL DEFAULT 10,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_llm_proxy_priority
+            ON llm_proxy_endpoints(enabled, priority ASC);
     """)
     conn.commit()
     _migrate(conn)
+    _seed_llm_proxy_endpoints(conn)
     conn.close()
     logger.info("Database initialized")
 
@@ -432,3 +449,116 @@ def _migrate(conn):
             "ALTER TABLE generated_importers ADD COLUMN deployed_by INTEGER"
         )
         conn.commit()
+
+
+# ── LLM proxy endpoint pool helpers (Phase 12) ────────────────────────────────
+
+
+def _seed_llm_proxy_endpoints(conn):
+    """Seed the llm_proxy_endpoints table on first boot.
+
+    Runs only if the table is empty AND the LLM_PROXY_KEY env var is set.
+    Adds two rows mirroring the paperless-ai-analyzer convention:
+      1. llm-proxy2  (v2, priority 10)  — http://llm-proxy2:3000/v1
+      2. llm-proxy-manager (v1, pri 20) — http://llm-proxy-manager:3000/v1
+
+    URLs can be overridden with LLM_PROXY2_URL and LLM_PROXY_URL env vars.
+    The fallback v1 row is seeded *disabled* by default — admin enables it
+    via the UI once they confirm the v1 manager is reachable for this
+    instance. (Mirrors the paperless seeding policy where v2 is primary.)
+    """
+    import os, time, uuid as _uuid
+    existing = conn.execute("SELECT COUNT(*) FROM llm_proxy_endpoints").fetchone()[0]
+    if existing:
+        return
+    key = os.environ.get("LLM_PROXY_KEY", "").strip()
+    if not key:
+        logger.info("LLM proxy seeding skipped: LLM_PROXY_KEY env var not set")
+        return
+    proxy2_url = os.environ.get("LLM_PROXY2_URL", "http://llm-proxy2:3000/v1")
+    proxy1_url = os.environ.get("LLM_PROXY_URL",  "http://llm-proxy-manager:3000/v1")
+    seeds = [
+        (str(_uuid.uuid4()), "llm-proxy2 (v2)",            proxy2_url, key, 2, 10, 1, time.time()),
+        (str(_uuid.uuid4()), "llm-proxy-manager (v1, disabled)", proxy1_url, key, 1, 20, 0, time.time()),
+    ]
+    conn.executemany(
+        "INSERT INTO llm_proxy_endpoints "
+        "(id, label, url, api_key, version, priority, enabled, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        seeds,
+    )
+    conn.commit()
+    logger.info(f"Seeded {len(seeds)} LLM proxy endpoints")
+
+
+def llm_proxy_list_endpoints(include_disabled: bool = False) -> list[dict]:
+    """Return endpoints ordered by priority ASC.
+
+    By default returns only enabled endpoints (what the proxy_manager
+    pool consumes). Pass include_disabled=True for the admin UI.
+    """
+    conn = get_connection()
+    try:
+        if include_disabled:
+            rows = conn.execute(
+                "SELECT id, label, url, api_key, version, priority, enabled "
+                "FROM llm_proxy_endpoints ORDER BY priority ASC, label ASC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, label, url, api_key, version, priority, enabled "
+                "FROM llm_proxy_endpoints WHERE enabled = 1 ORDER BY priority ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def llm_proxy_add_endpoint(label: str, url: str, api_key: str,
+                           version: int = 2, priority: int = 10,
+                           enabled: bool = True) -> str:
+    """Insert a new endpoint. Returns the generated UUID."""
+    import time, uuid as _uuid
+    eid = str(_uuid.uuid4())
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO llm_proxy_endpoints "
+            "(id, label, url, api_key, version, priority, enabled, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (eid, label, url, api_key, int(version), int(priority),
+             1 if enabled else 0, time.time())
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return eid
+
+
+def llm_proxy_update_endpoint(eid: str, **kwargs) -> bool:
+    """Update one or more fields on an endpoint. Allowed fields:
+    label, url, api_key, version, priority, enabled."""
+    allowed = {"label", "url", "api_key", "version", "priority", "enabled"}
+    cols = [k for k in kwargs if k in allowed]
+    if not cols:
+        return False
+    sets = ", ".join(f"{c} = ?" for c in cols)
+    vals = [kwargs[c] for c in cols]
+    vals.append(eid)
+    conn = get_connection()
+    try:
+        cur = conn.execute(f"UPDATE llm_proxy_endpoints SET {sets} WHERE id = ?", vals)
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def llm_proxy_delete_endpoint(eid: str) -> bool:
+    conn = get_connection()
+    try:
+        cur = conn.execute("DELETE FROM llm_proxy_endpoints WHERE id = ?", (eid,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
