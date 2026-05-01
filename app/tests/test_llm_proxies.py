@@ -186,9 +186,9 @@ def test_lmrh_cascade_explicit_arg():
     assert "cascade" not in out2  # no preset for analysis
 
 
-def test_proxy_call_mirrors_cascade_to_x_cot_header():
-    """When the LMRH hint contains cascade=, proxy_call should also send
-    X-Cot-Cascade for proxy versions that read it from the dedicated header."""
+def test_proxy_call_does_not_send_x_cot_cascade():
+    """Per llm-proxy2 ops 2026-04-30: cascade is read from LLM-Hint only;
+    X-Cot-Cascade is a v1 artifact v2 ignores. Confirm we don't send it."""
     from unittest.mock import MagicMock, patch
     from app.llm_client import proxy_call
 
@@ -214,4 +214,6 @@ def test_proxy_call_mirrors_cascade_to_x_cot_header():
     headers = captured["headers"]
     assert "LLM-Hint" in headers
     assert "cascade=auto" in headers["LLM-Hint"]
-    assert headers.get("X-Cot-Cascade") == "auto"
+    # X-Cot-Cascade must NOT be present — proxy team confirmed v2 ignores it
+    assert "X-Cot-Cascade" not in headers
+    assert "x-cot-cascade" not in {k.lower() for k in headers}

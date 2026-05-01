@@ -95,18 +95,10 @@ def call_chat(
     oai_messages = [{"role": "system", "content": system}] + messages
 
     last_err = None
-    # Mirror the cascade dim into the X-Cot-Cascade header for proxy versions
-    # that read it from the dedicated header rather than the LLM-Hint field.
+    # Per llm-proxy2 ops 2026-04-30: cascade is read from LLM-Hint per the
+    # LMRH spec; X-Cot-Cascade is a v1 DevinGPT artifact that v2 ignores.
+    # Sending it was harmless but adds nothing — dropped.
     extra_headers = {"LLM-Hint": hint} if hint else {}
-    if hint and "cascade=" in hint:
-        # Pull out the cascade value (everything between cascade= and the
-        # next comma or end of string) and mirror it as a sibling header.
-        try:
-            chunk = hint.split("cascade=", 1)[1].split(",", 1)[0].strip()
-            if chunk:
-                extra_headers["X-Cot-Cascade"] = chunk
-        except Exception:
-            pass
 
     for client, eid in chain:
         t0 = time.time()

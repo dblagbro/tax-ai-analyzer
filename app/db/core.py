@@ -380,6 +380,40 @@ def _migrate(conn):
         # Table might not exist yet on the very first boot — fine.
         logger.debug(f"v1 cleanup skipped: {e}")
 
+    # Per Devin's directive (2026-04-30): no local-access URLs for LLM/proxy
+    # calls. Rewrite any row whose URL is local to the public llm-proxy2 URL.
+    # Also swap in the new v2 key if LLM_PROXY2_KEY is set in env (matches the
+    # ops "key issuance + naming" provisioning model — the operator drops a
+    # new key in env, we pick it up on next boot).
+    import os
+    new_key = os.environ.get("LLM_PROXY2_KEY", "").strip()
+    try:
+        rows = conn.execute(
+            "SELECT id, url, api_key FROM llm_proxy_endpoints"
+        ).fetchall()
+        rewrites = 0
+        for r in rows:
+            updates = {}
+            if _is_local_access_url(r["url"]):
+                updates["url"] = PUBLIC_LLM_PROXY2_URL
+            if new_key and r["api_key"] != new_key:
+                updates["api_key"] = new_key
+            if updates:
+                cols = ", ".join(f"{c} = ?" for c in updates)
+                conn.execute(
+                    f"UPDATE llm_proxy_endpoints SET {cols} WHERE id = ?",
+                    (*updates.values(), r["id"]),
+                )
+                rewrites += 1
+        if rewrites:
+            conn.commit()
+            logger.info(
+                f"Rewrote {rewrites} llm-proxy endpoint URL(s)/key(s) "
+                f"to canonical values per ops directive"
+            )
+    except Exception as e:
+        logger.debug(f"llm-proxy URL/key normalization skipped: {e}")
+
     # ── Phase 11: bank-onboarding queue (admin-curated user submissions) ──
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS pending_banks (
@@ -479,30 +513,70 @@ def _migrate(conn):
 # ── LLM proxy endpoint pool helpers (Phase 12) ────────────────────────────────
 
 
+# Public URL for llm-proxy2. Per Devin's directive (2026-04-30): NEVER use
+# local-access URLs (localhost, host.docker.internal, internal docker names)
+# for LLM/AI/proxy calls. Always use the public URL — even if the proxy is
+# on the same host. We normalize any local URL we see (in env, in seed,
+# in DB rows) to this canonical value.
+PUBLIC_LLM_PROXY2_URL = "https://www.voipguru.org/llm-proxy2/v1"
+
+_LOCAL_HOST_FRAGMENTS = (
+    "localhost", "127.0.0.1", "host.docker.internal", "::1",
+    "llm-proxy2", "llm-proxy-manager",  # internal docker names
+)
+
+
+def _is_local_access_url(url: str) -> bool:
+    """True if url uses a local-access hostname that violates the public-URL
+    rule for LLM/proxy calls."""
+    if not url:
+        return True
+    u = url.lower()
+    return any(frag in u for frag in _LOCAL_HOST_FRAGMENTS)
+
+
+def _normalize_llm_proxy_url(url: str) -> str:
+    """Normalize a proxy URL to the public form.
+
+    If the URL is local-access (per Devin's directive), substitute the public
+    llm-proxy2 URL. If it's already public, pass through unchanged.
+    """
+    if _is_local_access_url(url):
+        return PUBLIC_LLM_PROXY2_URL
+    return url
+
+
 def _seed_llm_proxy_endpoints(conn):
     """Seed the llm_proxy_endpoints table on first boot.
 
-    Runs only if the table is empty AND the LLM_PROXY_KEY env var is set.
-    Inserts a single primary endpoint:
-      1. llm-proxy2 (v2, priority 10) — http://llm-proxy2:3000/v1
+    Runs only if the table is empty AND a key is configured (LLM_PROXY2_KEY
+    preferred, LLM_PROXY_KEY for back-compat). Inserts a single primary endpoint:
+      1. llm-proxy2 (v2, priority 10) — public URL only.
 
-    Per ops 2026-04-30 directive: v1 (llm-proxy-manager) is permanently
-    decommissioned — do NOT seed it. Admin can still add legacy endpoints
-    manually via llm_proxy_add_endpoint() if ever needed.
+    Per ops 2026-04-30: v1 (llm-proxy-manager) is permanently decommissioned —
+    do NOT seed it.
 
-    URL is overridable via the LLM_PROXY2_URL env var. For containers
-    outside the docker compose network, point this at the public URL:
-    https://www.voipguru.org/llm-proxy2/v1
+    The URL is locked to the public form regardless of env. Local-access URLs
+    are explicitly rejected to keep LLM traffic visible/observable on the
+    public proxy boundary.
     """
     import os, time, uuid as _uuid
     existing = conn.execute("SELECT COUNT(*) FROM llm_proxy_endpoints").fetchone()[0]
     if existing:
         return
-    key = os.environ.get("LLM_PROXY_KEY", "").strip()
+    # Prefer the v2 key; fall back to the legacy var name for back-compat.
+    key = (os.environ.get("LLM_PROXY2_KEY", "").strip()
+           or os.environ.get("LLM_PROXY_KEY", "").strip())
     if not key:
-        logger.info("LLM proxy seeding skipped: LLM_PROXY_KEY env var not set")
+        logger.info("LLM proxy seeding skipped: no LLM_PROXY2_KEY / LLM_PROXY_KEY set")
         return
-    proxy2_url = os.environ.get("LLM_PROXY2_URL", "http://llm-proxy2:3000/v1")
+    raw_url = os.environ.get("LLM_PROXY2_URL", PUBLIC_LLM_PROXY2_URL)
+    proxy2_url = _normalize_llm_proxy_url(raw_url)
+    if proxy2_url != raw_url:
+        logger.warning(
+            f"LLM_PROXY2_URL was local-access ({raw_url!r}); "
+            f"normalized to public {proxy2_url!r} per ops directive"
+        )
     seeds = [
         (str(_uuid.uuid4()), "llm-proxy2 (v2)", proxy2_url, key, 2, 10, 1, time.time()),
     ]

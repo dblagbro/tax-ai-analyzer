@@ -228,6 +228,84 @@ def test_proxy_call_anthropic_walks_chain_and_logs_cache():
 
 # ── DB seed: v1 not in seed (per ops 2026-04-30) ─────────────────────────────
 
+# ── URL normalization (Devin's "no local-access URLs" directive) ─────────────
+
+def test_normalize_local_urls_to_public():
+    from app.db.core import _normalize_llm_proxy_url, PUBLIC_LLM_PROXY2_URL
+    # Every form of "local" must rewrite to public
+    cases = [
+        "http://localhost:8055/v1",
+        "http://127.0.0.1:8055/v1",
+        "http://host.docker.internal:8055/v1",
+        "http://llm-proxy2:3000/v1",
+        "http://llm-proxy-manager:3000/v1",
+        "http://[::1]:8055/v1",
+        "",
+    ]
+    for u in cases:
+        assert _normalize_llm_proxy_url(u) == PUBLIC_LLM_PROXY2_URL, \
+            f"failed to normalize {u!r}"
+
+
+def test_public_url_passes_through():
+    from app.db.core import _normalize_llm_proxy_url, PUBLIC_LLM_PROXY2_URL
+    assert _normalize_llm_proxy_url(PUBLIC_LLM_PROXY2_URL) == PUBLIC_LLM_PROXY2_URL
+    # A different but public URL should also pass through
+    other = "https://other-proxy.example.com/v1"
+    assert _normalize_llm_proxy_url(other) == other
+
+
+def test_boot_migration_rewrites_local_url_and_swaps_key():
+    """A pre-existing endpoint with a local URL + old key gets rewritten on
+    every boot to public URL + LLM_PROXY2_KEY (if set)."""
+    import os, sqlite3, tempfile
+    from app.db import core as dbcore
+
+    orig_path = dbcore.DB_PATH
+    orig_env = {k: os.environ.get(k) for k in
+                ("LLM_PROXY_KEY", "LLM_PROXY2_KEY")}
+    tmp = tempfile.mkdtemp()
+    fresh = os.path.join(tmp, "norm_probe.db")
+    try:
+        dbcore.DB_PATH = fresh
+        # First boot: seed with old vars (local URL, old key)
+        os.environ["LLM_PROXY_KEY"] = "old-key-aaa"
+        os.environ.pop("LLM_PROXY2_KEY", None)
+        os.environ["LLM_PROXY2_URL"] = "http://llm-proxy2:3000/v1"
+        dbcore.init_db()
+        # Confirm initial state — even the seed should normalize the local URL
+        conn = sqlite3.connect(fresh)
+        rows = conn.execute(
+            "SELECT url, api_key FROM llm_proxy_endpoints"
+        ).fetchall()
+        conn.close()
+        assert len(rows) == 1
+        assert rows[0][0] == dbcore.PUBLIC_LLM_PROXY2_URL
+        assert rows[0][1] == "old-key-aaa"
+
+        # Now ops drops a new key; second boot picks it up and rewrites.
+        os.environ["LLM_PROXY2_KEY"] = "llmp-new-bbb"
+        dbcore.init_db()
+        conn = sqlite3.connect(fresh)
+        rows = conn.execute(
+            "SELECT url, api_key FROM llm_proxy_endpoints"
+        ).fetchall()
+        conn.close()
+        assert rows[0][0] == dbcore.PUBLIC_LLM_PROXY2_URL
+        assert rows[0][1] == "llmp-new-bbb"
+    finally:
+        dbcore.DB_PATH = orig_path
+        for k, v in orig_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if os.path.exists(fresh):
+            os.remove(fresh)
+        if os.path.exists(tmp):
+            os.rmdir(tmp)
+
+
 def test_seed_does_not_add_v1():
     """Ensure the seed function never inserts an llm-proxy-manager (v1) row.
 
