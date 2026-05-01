@@ -36,9 +36,11 @@ logger = logging.getLogger(__name__)
 # via the `model` kwarg or the LLM_CODEGEN_MODEL env var for testing.
 DEFAULT_MODEL = "claude-opus-4-7"
 
-# Hard cap on output tokens. Importer source is typically 400-700 LOC; budget
-# generously to avoid mid-file truncation.
-MAX_OUTPUT_TOKENS = 8000
+# Hard cap on output tokens. Importer source is typically 400-700 LOC ≈
+# 6-12k output tokens, but the JSON wrapper + escape characters roughly
+# doubles that. Budget generously — modern Claude models support 16k+
+# output natively; the proxy will cap at the model's actual limit.
+MAX_OUTPUT_TOKENS = 32000
 
 # Where the reference template lives. Read once at module-init.
 _REF_PATH = Path(__file__).resolve().parents[1] / "importers" / "usbank_importer.py"
@@ -441,10 +443,32 @@ def _call_codegen_llm(
     if not raw_text:
         raise RuntimeError("LLM response had no text content")
 
-    parsed = _parse_json_response(raw_text)
+    # Surface truncation explicitly. Anthropic sets stop_reason="max_tokens"
+    # when output hit the cap mid-stream, which means the JSON envelope is
+    # incomplete and parsing will fail. A clear error beats a confusing
+    # JSONDecodeError, and the operator can bump MAX_OUTPUT_TOKENS or the
+    # caller can re-run with a smaller scope.
+    stop_reason = getattr(resp, "stop_reason", "") or ""
+    if stop_reason == "max_tokens":
+        raise RuntimeError(
+            f"LLM output truncated by max_tokens cap "
+            f"(produced {out_tok} output tokens, cap was {MAX_OUTPUT_TOKENS}). "
+            f"Bump MAX_OUTPUT_TOKENS in bank_codegen.py or simplify the prompt. "
+            f"Last 200 chars of partial response: {raw_text[-200:]!r}"
+        )
+
+    try:
+        parsed = _parse_json_response(raw_text)
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"{e}  [response_len={len(raw_text)}, stop_reason={stop_reason!r}, "
+            f"out_tokens={out_tok}]"
+        ) from e
     if not parsed.get("source_code"):
         raise RuntimeError(
-            f"LLM response missing 'source_code'. First 300 chars: {raw_text[:300]!r}"
+            f"LLM response missing 'source_code'. "
+            f"response_len={len(raw_text)}, stop_reason={stop_reason!r}, "
+            f"first 300: {raw_text[:300]!r}"
         )
 
     return {
