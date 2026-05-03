@@ -51,14 +51,23 @@ TASK_PRESETS: dict[str, dict] = {
     # Reasoning-heavy: tax review, multi-document synthesis. cascade=auto
     # lets the proxy chain a cheap reasoning model with a quality model
     # behind a single answer — better quality-per-dollar on reasoning.
+    # tax-review pins provider=anthropic;require so the proxy fails-fast
+    # (HTTP 503) instead of cross-family substituting per v3.0.46. Codegen
+    # gets the same guardrail (correctness > availability for both).
     "reasoning":        {"cost": "premium", "cascade": "auto"},
-    "tax-review":       {"cost": "premium", "cascade": "auto"},
+    "tax-review":       {"cost": "premium", "cascade": "auto",
+                         "provider-hint": "anthropic", "provider-hint-required": True},
 
     # Free-text summary generation
     "summarize":        {"cost": "standard"},
 
     # Bank-importer codegen agent (Phase 11D-E) — premium + long context
-    "codegen":          {"cost": "premium", "context-length": 60000},
+    # provider-hint=anthropic;require: bank importer code is security-sensitive
+    # (it handles user banking creds + MFA flows). Refuse cross-family
+    # substitution; we'd rather see a 503 and retry than ship code emitted
+    # by a substituted upstream we didn't request.
+    "codegen":          {"cost": "premium", "context-length": 60000,
+                         "provider-hint": "anthropic", "provider-hint-required": True},
 
     # Vision / image-modality calls
     "vision":           {"cost": "standard"},
@@ -77,6 +86,10 @@ def build_lmrh_header(
     context_length: Optional[int] = None,
     has_images: bool = False,
     cascade: Optional[str] = None,
+    provider_hint: Optional[str] = None,
+    provider_hint_required: bool = False,
+    exclude: Optional[str] = None,
+    exclude_required: bool = False,
     extras: Optional[dict] = None,
 ) -> str:
     """Build the LLM-Hint header value.
@@ -111,6 +124,12 @@ def build_lmrh_header(
     eff_ctx = context_length if context_length is not None else preset.get("context-length")
     eff_safety = safety_min if safety_min is not None else preset.get("safety-min")
     eff_cascade = cascade if cascade is not None else preset.get("cascade")
+    eff_provider = provider_hint if provider_hint is not None else preset.get("provider-hint")
+    eff_provider_req = (provider_hint_required if provider_hint is not None
+                        else preset.get("provider-hint-required", False))
+    eff_exclude = exclude if exclude is not None else preset.get("exclude")
+    eff_exclude_req = (exclude_required if exclude is not None
+                       else preset.get("exclude-required", False))
 
     parts: list[str] = [f"task={task}"]
     if eff_cost:
@@ -125,6 +144,15 @@ def build_lmrh_header(
         parts.append("modality=vision")
     if eff_cascade:
         parts.append(f"cascade={eff_cascade}")
+    # v3.0.46 paid-plan substitution defense — provider-hint=<vendor>;require
+    # tells the proxy to fail-fast (HTTP 503) instead of cross-family substituting.
+    if eff_provider:
+        suffix = ";require" if eff_provider_req else ""
+        parts.append(f"provider-hint={eff_provider}{suffix}")
+    # v3.0.25 escape hatch — exclude=<vendor>;require steers around a flaky upstream.
+    if eff_exclude:
+        suffix = ";require" if eff_exclude_req else ""
+        parts.append(f"exclude={eff_exclude}{suffix}")
     if extras:
         for k, v in extras.items():
             key = str(k).lower().replace("_", "-")

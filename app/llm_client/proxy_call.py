@@ -41,6 +41,39 @@ class NoProxyAvailable(Exception):
     Caller should fall back to a direct-vendor SDK call."""
 
 
+class CrossFamilySubstitution(Exception):
+    """Raised when the proxy reports `chosen-because=cross-family-fallback` on
+    a call that opted into strict-provider mode (correctness-critical tasks).
+
+    Per llm-proxy2 v3.0.46: gpt-4o-family requests may get silently substituted
+    to gpt-5.5-via-Codex subscription. We don't currently route gpt-4o, but
+    AI Analyzer's v3.9.19 hit a related case — defensive check recommended.
+    Tax-review and bank-codegen default to strict because correctness >
+    availability for those operations. Override with strict_provider=False
+    or by passing provider-hint=...;require in the LMRH hint.
+    """
+
+
+# Tasks where correctness matters more than availability — never silently
+# accept a cross-family upstream substitution. Caller can override via
+# the strict_provider= kwarg on call_chat / call_anthropic_messages.
+_STRICT_PROVIDER_TASKS = {"tax-review", "codegen"}
+
+
+def _detect_substitution(operation: str, headers: dict) -> tuple[bool, str]:
+    """Return (was_substituted, capability_string).
+
+    Substitution is signaled by `chosen-because=cross-family-fallback` in the
+    LLM-Capability response header. Caller decides whether to raise based on
+    operation policy.
+    """
+    if not headers:
+        return False, ""
+    lc = {k.lower(): v for k, v in headers.items()}
+    cap = lc.get("llm-capability", "") or ""
+    return ("chosen-because=cross-family-fallback" in cap), cap
+
+
 def _log_lmrh_diagnostics(operation: str, headers: dict) -> None:
     """Surface llm-proxy2 response headers as log lines for ops visibility.
 
@@ -61,7 +94,16 @@ def _log_lmrh_diagnostics(operation: str, headers: dict) -> None:
     cap = lc.get("llm-capability", "")
     warn = lc.get("x-lmrh-warnings", "")
     if cap:
-        logger.info(f"[proxy/{operation}] capability: {cap}")
+        if "chosen-because=cross-family-fallback" in cap:
+            # v3.0.46 paid-plan substitution. Loud at WARNING so it's visible
+            # in any log review even if the operation didn't opt into strict.
+            logger.warning(
+                f"[proxy/{operation}] CROSS-FAMILY MODEL SUBSTITUTION by proxy: {cap} — "
+                f"if this disrespects correctness needs, send "
+                f"`provider-hint=<vendor>;require` in the LMRH hint to fail-fast (503)"
+            )
+        else:
+            logger.info(f"[proxy/{operation}] capability: {cap}")
     if warn:
         logger.warning(
             f"[proxy/{operation}] LMRH warnings from proxy: {warn} — "
@@ -101,6 +143,7 @@ def call_chat(
     temperature: Optional[float] = 0.1,
     model: Optional[str] = None,
     timeout: float = 90.0,
+    strict_provider: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Send an OpenAI-shaped chat.completions call through the proxy chain.
 
@@ -159,6 +202,20 @@ def call_chat(
             model_used = getattr(resp, "model", send_model) or send_model
 
             _log_lmrh_diagnostics(operation, resp_headers)
+            # Strict-provider check: refuse cross-family-fallback responses
+            # for correctness-critical tasks (or any caller that opts in).
+            if strict_provider is None:
+                strict_provider = operation in _STRICT_PROVIDER_TASKS
+            if strict_provider:
+                substituted, cap = _detect_substitution(operation, resp_headers)
+                if substituted:
+                    proxy_manager.mark_success(eid)  # endpoint itself is fine
+                    raise CrossFamilySubstitution(
+                        f"{operation}: proxy substituted across model families "
+                        f"({cap}); refusing for correctness. To accept, pass "
+                        f"strict_provider=False or omit the operation from "
+                        f"_STRICT_PROVIDER_TASKS."
+                    )
             proxy_manager.mark_success(eid)
             logger.info(
                 f"[proxy] ✓ {operation} via ep={eid} model={model_used} "
@@ -168,6 +225,10 @@ def call_chat(
                 "content": content, "model": model_used, "endpoint_id": eid,
                 "in_tokens": in_tok, "out_tokens": out_tok,
             }
+        except CrossFamilySubstitution:
+            # Policy failure, not transport — bubble up immediately. Trying
+            # the next endpoint won't help; the proxy made the same decision.
+            raise
         except _CONN_ERR_TYPES as e:
             logger.warning(f"[proxy] connection error on ep={eid}: {e!r}")
             proxy_manager.mark_failure(eid)
@@ -196,6 +257,7 @@ def call_anthropic_messages(
     messages: list,
     max_tokens: int = 4096,
     timeout: float = 180.0,
+    strict_provider: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Send a native Anthropic Messages call through the proxy chain.
 
@@ -243,6 +305,19 @@ def call_anthropic_messages(
             model_used = getattr(resp, "model", model) or model
             _log_lmrh_diagnostics(operation, resp_headers)
 
+            # Strict-provider check (matches OpenAI-shape path)
+            sp = strict_provider if strict_provider is not None else (
+                operation in _STRICT_PROVIDER_TASKS
+            )
+            if sp:
+                substituted, cap = _detect_substitution(operation, resp_headers)
+                if substituted:
+                    proxy_manager.mark_success(eid)
+                    raise CrossFamilySubstitution(
+                        f"{operation}: proxy substituted across model families "
+                        f"({cap}); refusing for correctness."
+                    )
+
             proxy_manager.mark_success(eid)
             logger.info(
                 f"[proxy/anthropic] ✓ {operation} via ep={eid} model={model_used} "
@@ -254,6 +329,8 @@ def call_anthropic_messages(
                 "in_tokens": in_tok, "out_tokens": out_tok,
                 "cache_creation": cache_create, "cache_read": cache_read,
             }
+        except CrossFamilySubstitution:
+            raise
         except _CONN_ERR_TYPES as e:
             logger.warning(f"[proxy/anthropic] connection error on ep={eid}: {e!r}")
             proxy_manager.mark_failure(eid)

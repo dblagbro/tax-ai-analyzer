@@ -231,6 +231,61 @@ def test_lmrh_diagnostic_logger_logs_capability_and_warnings():
         logger_proxy.setLevel(orig_level)
 
 
+def test_lmrh_provider_hint_required_emitted():
+    """provider-hint=anthropic;require must appear in the hint when set
+    (per llm-proxy2 v3.0.46 fail-fast on cross-family substitution)."""
+    from app.llm_client.lmrh import build_lmrh_header
+    out = build_lmrh_header(
+        "analysis",
+        provider_hint="anthropic", provider_hint_required=True,
+    )
+    assert "provider-hint=anthropic;require" in out
+
+
+def test_lmrh_provider_hint_optional_no_require():
+    from app.llm_client.lmrh import build_lmrh_header
+    out = build_lmrh_header("analysis", provider_hint="anthropic")
+    assert "provider-hint=anthropic" in out
+    assert "provider-hint=anthropic;require" not in out
+
+
+def test_lmrh_tax_review_preset_has_provider_hint_required():
+    """Strict-provider tasks default to provider-hint=anthropic;require."""
+    from app.llm_client.lmrh import build_lmrh_header
+    out = build_lmrh_header("tax-review")
+    assert "provider-hint=anthropic;require" in out
+    out2 = build_lmrh_header("codegen")
+    assert "provider-hint=anthropic;require" in out2
+
+
+def test_lmrh_exclude_dim():
+    from app.llm_client.lmrh import build_lmrh_header
+    out = build_lmrh_header("analysis", exclude="anthropic-direct",
+                              exclude_required=True)
+    assert "exclude=anthropic-direct;require" in out
+
+
+def test_substitution_detect_recognizes_cross_family_fallback():
+    from app.llm_client.proxy_call import _detect_substitution
+    headers = {"LLM-Capability": "v=1, provider=openai, model=gpt-5.5, chosen-because=cross-family-fallback, requested-model=gpt-4o"}
+    sub, cap = _detect_substitution("analysis", headers)
+    assert sub is True
+    assert "cross-family-fallback" in cap
+
+
+def test_substitution_detect_ignores_normal_capability():
+    from app.llm_client.proxy_call import _detect_substitution
+    headers = {"LLM-Capability": "v=1, provider=anthropic, model=claude-haiku-4-5, chosen-because=score"}
+    sub, _cap = _detect_substitution("analysis", headers)
+    assert sub is False
+
+
+def test_strict_provider_default_for_tax_review_and_codegen():
+    from app.llm_client.proxy_call import _STRICT_PROVIDER_TASKS
+    assert "tax-review" in _STRICT_PROVIDER_TASKS
+    assert "codegen" in _STRICT_PROVIDER_TASKS
+
+
 def test_lmrh_diagnostic_logger_handles_missing_headers():
     """No headers → no log spam, no crash."""
     from app.llm_client.proxy_call import _log_lmrh_diagnostics
