@@ -300,6 +300,16 @@ def call_anthropic_messages(
             usage = resp.usage
             in_tok = getattr(usage, "input_tokens", 0) or 0
             out_tok = getattr(usage, "output_tokens", 0) or 0
+            # Cache token reporting note: claude-oauth (Pro Max OAuth path)
+            # returns 0 for cache_creation_input_tokens and cache_read_input_tokens
+            # by design — savings are recorded server-side in the proxy's
+            # event_meta but not surfaced to API callers (per llm-proxy2 ops
+            # 2026-05-01 + paperless-ai-analyzer's parallel finding). With our
+            # ;require comma-list pinning to the Anthropic family (which is
+            # currently all claude-oauth in the fleet), expect zeros here.
+            # Don't treat 0 as "cache miss"; it's "claude-oauth doesn't expose
+            # the field." anthropic-direct (held in reserve) does expose it,
+            # so non-zero values mean we routed to that path.
             cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
             cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
             model_used = getattr(resp, "model", model) or model
