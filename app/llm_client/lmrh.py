@@ -52,29 +52,32 @@ TASK_PRESETS: dict[str, dict] = {
     # lets the proxy chain a cheap reasoning model with a quality model
     # behind a single answer — better quality-per-dollar on reasoning.
     #
-    # provider-hint=anthropic (SOFT — no ;require): prefer anthropic when
-    # available, but allow the proxy to score-pick a substitute. The
-    # post-call CrossFamilySubstitution exception in proxy_call.py is the
-    # hard backstop — if the proxy actually substitutes, we refuse the
-    # response. We don't use ;require here because the proxy's exact
-    # provider id ("anthropic" vs "anthropic-direct" etc.) isn't a stable
-    # public contract; over-constraining trips 503s on coherent calls.
+    # provider-hint comma-list (HARD — ;require): satisfy-any across the
+    # three Anthropic-family provider_type values llm-proxy2 may run for
+    # us — claude-oauth (current Pro Max OAuth path), anthropic (legacy
+    # name), anthropic-direct (held in reserve). Per ops 2026-05-01:
+    # bare "anthropic" alone trips 503 because no current provider has
+    # that exact provider_type; the comma-list covers all three. Proxy
+    # returns 503 if none match; post-call CrossFamilySubstitution check
+    # is the belt-and-braces second line of defense.
     "reasoning":        {"cost": "premium", "cascade": "auto"},
     "tax-review":       {"cost": "premium", "cascade": "auto",
-                         "provider-hint": "anthropic"},
+                         "provider-hint": "claude-oauth,anthropic,anthropic-direct",
+                         "provider-hint-required": True},
 
     # Free-text summary generation
     "summarize":        {"cost": "standard"},
 
-    # Bank-importer codegen agent (Phase 11D-E) — premium + long context
-    # provider-hint=anthropic (soft) + post-call CrossFamilySubstitution
-    # exception: bank importer code is security-sensitive (user banking
-    # creds + MFA flows). We prefer anthropic but accept the proxy's
-    # judgment IF it scores anthropic as best. If it cross-family-falls-
-    # back to a non-anthropic upstream, the post-call check refuses the
-    # response so we never ship substituted code.
+    # Bank-importer codegen agent (Phase 11D-E) — premium + long context.
+    # Hard ;require on the Anthropic-family comma-list (claude-oauth, the
+    # legacy "anthropic" name, anthropic-direct held in reserve). Bank
+    # importer code is security-sensitive (handles user banking creds +
+    # MFA flows); refuse cross-family substitution at the proxy boundary
+    # instead of post-call so we never spend codegen tokens on a
+    # substituted upstream.
     "codegen":          {"cost": "premium", "context-length": 60000,
-                         "provider-hint": "anthropic"},
+                         "provider-hint": "claude-oauth,anthropic,anthropic-direct",
+                         "provider-hint-required": True},
 
     # Vision / image-modality calls
     "vision":           {"cost": "standard"},

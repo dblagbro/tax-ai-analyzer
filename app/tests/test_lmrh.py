@@ -249,18 +249,22 @@ def test_lmrh_provider_hint_optional_no_require():
     assert "provider-hint=anthropic;require" not in out
 
 
-def test_lmrh_tax_review_preset_has_soft_provider_hint():
-    """Strict-provider tasks default to provider-hint=anthropic (SOFT, no
-    ;require). Hard backstop is the post-call CrossFamilySubstitution
-    exception — using ;require trips 503s when the proxy's exact provider
-    id doesn't match the family name."""
+def test_lmrh_strict_tasks_use_comma_list_with_require():
+    """Per llm-proxy2 ops 2026-05-01: provider-hint matches against
+    provider_type OR display name. Bare "anthropic" trips 503 because the
+    current fleet runs claude-oauth (Pro Max OAuth) with anthropic-direct
+    held in reserve. Use a comma-list to satisfy-any across all three
+    Anthropic-family provider_types we might be routed to."""
     from app.llm_client.lmrh import build_lmrh_header
-    out = build_lmrh_header("tax-review")
-    assert "provider-hint=anthropic" in out
-    assert ";require" not in out
-    out2 = build_lmrh_header("codegen")
-    assert "provider-hint=anthropic" in out2
-    assert ";require" not in out2
+    for task in ("tax-review", "codegen"):
+        out = build_lmrh_header(task)
+        # All three family members covered
+        assert "claude-oauth" in out, f"{task}: claude-oauth missing"
+        assert "anthropic-direct" in out, f"{task}: anthropic-direct missing"
+        # Hard constraint — fail-fast at proxy
+        assert ";require" in out, f"{task}: ;require missing"
+        # Bundled into a single provider-hint dim
+        assert "provider-hint=claude-oauth,anthropic,anthropic-direct" in out
 
 
 def test_lmrh_exclude_dim():
