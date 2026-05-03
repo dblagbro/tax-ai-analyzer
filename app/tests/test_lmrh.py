@@ -249,13 +249,18 @@ def test_lmrh_provider_hint_optional_no_require():
     assert "provider-hint=anthropic;require" not in out
 
 
-def test_lmrh_tax_review_preset_has_provider_hint_required():
-    """Strict-provider tasks default to provider-hint=anthropic;require."""
+def test_lmrh_tax_review_preset_has_soft_provider_hint():
+    """Strict-provider tasks default to provider-hint=anthropic (SOFT, no
+    ;require). Hard backstop is the post-call CrossFamilySubstitution
+    exception — using ;require trips 503s when the proxy's exact provider
+    id doesn't match the family name."""
     from app.llm_client.lmrh import build_lmrh_header
     out = build_lmrh_header("tax-review")
-    assert "provider-hint=anthropic;require" in out
+    assert "provider-hint=anthropic" in out
+    assert ";require" not in out
     out2 = build_lmrh_header("codegen")
-    assert "provider-hint=anthropic;require" in out2
+    assert "provider-hint=anthropic" in out2
+    assert ";require" not in out2
 
 
 def test_lmrh_exclude_dim():

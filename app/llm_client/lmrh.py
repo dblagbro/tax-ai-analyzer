@@ -51,23 +51,30 @@ TASK_PRESETS: dict[str, dict] = {
     # Reasoning-heavy: tax review, multi-document synthesis. cascade=auto
     # lets the proxy chain a cheap reasoning model with a quality model
     # behind a single answer — better quality-per-dollar on reasoning.
-    # tax-review pins provider=anthropic;require so the proxy fails-fast
-    # (HTTP 503) instead of cross-family substituting per v3.0.46. Codegen
-    # gets the same guardrail (correctness > availability for both).
+    #
+    # provider-hint=anthropic (SOFT — no ;require): prefer anthropic when
+    # available, but allow the proxy to score-pick a substitute. The
+    # post-call CrossFamilySubstitution exception in proxy_call.py is the
+    # hard backstop — if the proxy actually substitutes, we refuse the
+    # response. We don't use ;require here because the proxy's exact
+    # provider id ("anthropic" vs "anthropic-direct" etc.) isn't a stable
+    # public contract; over-constraining trips 503s on coherent calls.
     "reasoning":        {"cost": "premium", "cascade": "auto"},
     "tax-review":       {"cost": "premium", "cascade": "auto",
-                         "provider-hint": "anthropic", "provider-hint-required": True},
+                         "provider-hint": "anthropic"},
 
     # Free-text summary generation
     "summarize":        {"cost": "standard"},
 
     # Bank-importer codegen agent (Phase 11D-E) — premium + long context
-    # provider-hint=anthropic;require: bank importer code is security-sensitive
-    # (it handles user banking creds + MFA flows). Refuse cross-family
-    # substitution; we'd rather see a 503 and retry than ship code emitted
-    # by a substituted upstream we didn't request.
+    # provider-hint=anthropic (soft) + post-call CrossFamilySubstitution
+    # exception: bank importer code is security-sensitive (user banking
+    # creds + MFA flows). We prefer anthropic but accept the proxy's
+    # judgment IF it scores anthropic as best. If it cross-family-falls-
+    # back to a non-anthropic upstream, the post-call check refuses the
+    # response so we never ship substituted code.
     "codegen":          {"cost": "premium", "context-length": 60000,
-                         "provider-hint": "anthropic", "provider-hint-required": True},
+                         "provider-hint": "anthropic"},
 
     # Vision / image-modality calls
     "vision":           {"cost": "standard"},
