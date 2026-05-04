@@ -263,6 +263,9 @@ Sidebar → **LLM Routing** → Per-task LMRH hints panel.
 3. `docker restart tax-ai-analyzer` — boot migration auto-rewrites the api_key on every existing endpoint row
 4. Hit "Test" in the admin UI to confirm the new key round-trips
 
+### Direct-Anthropic-SDK fallback is decommissioned
+The original `LLMClient._call_anthropic` direct-vendor path (used as last-resort fallback when the proxy chain is exhausted) is no longer functional — Anthropic account closed 2026-05-01. `LLM_API_KEY` env var is intentionally empty. Proxy chain is the ONLY production LLM path now; if it's down, calls fail loudly rather than silently degrade. **Don't add a new direct-Anthropic key unless you're spinning up a new account on purpose** — the proxy is the single source of truth for routing decisions.
+
 ### Hard rule: no local-access URLs for LLM/proxy
 Always public URL: `https://www.voipguru.org/llm-proxy2/v1`. NEVER `localhost`, `host.docker.internal`, internal docker names. The app has a defense-in-depth normalizer that rewrites local URLs to public on every boot, but don't rely on it — fix the env at the source.
 
