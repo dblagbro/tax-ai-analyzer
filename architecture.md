@@ -314,17 +314,17 @@ codegen, gmail/ai_review, cloud-import doc analysis — routes through:
 
 Per-task hints (in `app/llm_client/lmrh.py:TASK_PRESETS`):
 
-| Task          | cost     | extras                                   |
-|---------------|----------|------------------------------------------|
-| analysis      | standard | safety-min=3                             |
-| extraction    | economy  |                                          |
-| classification| economy  |                                          |
-| chat          | premium  |                                          |
-| reasoning     | premium  | cascade=auto                             |
-| tax-review    | premium  | cascade=auto                             |
-| summarize     | standard |                                          |
-| codegen       | premium  | context-length=60000                     |
-| vision        | standard |                                          |
+| Task          | cost     | extras                                                                                |
+|---------------|----------|---------------------------------------------------------------------------------------|
+| analysis      | standard | safety-min=3                                                                          |
+| extraction    | economy  |                                                                                       |
+| classification| economy  |                                                                                       |
+| chat          | premium  |                                                                                       |
+| reasoning     | premium  | cascade=auto                                                                          |
+| tax-review    | premium  | cascade=auto, provider-hint=claude-oauth,anthropic,anthropic-direct;require           |
+| summarize     | standard |                                                                                       |
+| codegen       | premium  | context-length=60000, provider-hint=claude-oauth,anthropic,anthropic-direct;require   |
+| vision        | standard |                                                                                       |
 
 Operator can override any task's hint via `db.set_setting("lmrh.hint.<task>")`
 or via the LLM Routing admin tab. Response headers `LLM-Capability` and
@@ -334,6 +334,44 @@ or via the LLM Routing admin tab. Response headers `LLM-Capability` and
 Circuit breaker (`proxy_manager`): 3 failures within window → 60-s cooldown
 per endpoint. Process-local state. Reset via the admin tab's "Reset" button
 or `mark_endpoint_success()`.
+
+### Cross-family substitution defense (post-v3.0.46)
+
+llm-proxy2 v3.0.46 introduced silent paid-plan substitution (e.g. gpt-4o
+requests routed to gpt-5.5 via Codex subscription). Tax-ai-analyzer
+defends in three layers:
+
+1. **Hard `;require` at the proxy** — `tax-review` and `codegen` presets
+   emit `provider-hint=claude-oauth,anthropic,anthropic-direct;require`.
+   Comma-list "satisfy-any" against the proxy's `provider_type` or
+   display name (case-insensitive) — covers the current claude-oauth
+   path, the legacy `anthropic` family name, and `anthropic-direct`
+   held in reserve. Proxy returns 503 if none match (per ops 2026-05-01).
+2. **Logged warning on substitution** — `_log_lmrh_diagnostics` parses
+   `LLM-Capability` for `chosen-because=cross-family-fallback` and logs
+   at WARNING level for *every* operation, not just strict ones.
+3. **Post-call exception** — `proxy_call.CrossFamilySubstitution` raised
+   when an operation in `_STRICT_PROVIDER_TASKS = {"tax-review", "codegen"}`
+   sees a substituted response. Bubbles past the chain-walk loop because
+   trying the next endpoint won't help (proxy makes the same decision).
+   Caller can opt in via `strict_provider=True` for any operation.
+
+Bulk operations (analysis, chat, classification) accept proxy substitution
+when the substitute satisfies the dims — only correctness-critical paths
+hard-fail.
+
+### Cache token reporting (claude-oauth gotcha)
+
+With our `;require` comma-list pinning routing to the Anthropic family,
+and that family currently being all `claude-oauth` (Pro Max OAuth path)
+in the proxy fleet, `usage.cache_creation_input_tokens` and
+`usage.cache_read_input_tokens` will report 0 even on prompt-cached calls.
+Per llm-proxy2 ops 2026-05-01: claude-oauth doesn't surface those fields
+to API callers by design — savings ARE happening and are recorded
+server-side in the proxy's `event_meta`. Don't treat 0 as "cache miss";
+query the proxy's activity log if you need actual cache numbers.
+`anthropic-direct` (held in reserve) does expose them, so non-zero values
+in our logs mean we routed there.
 
 ## Bank-onboarding pipeline (Phase 11A-F)
 

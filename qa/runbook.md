@@ -266,6 +266,24 @@ Sidebar → **LLM Routing** → Per-task LMRH hints panel.
 ### Hard rule: no local-access URLs for LLM/proxy
 Always public URL: `https://www.voipguru.org/llm-proxy2/v1`. NEVER `localhost`, `host.docker.internal`, internal docker names. The app has a defense-in-depth normalizer that rewrites local URLs to public on every boot, but don't rely on it — fix the env at the source.
 
+### Diagnose a `CrossFamilySubstitution` exception
+Raised when `tax-review` or `codegen` got a `chosen-because=cross-family-fallback` response from the proxy (rare under our `;require` config — should normally fail-fast at the proxy with 503 instead).
+1. Check the WARNING log line — full `LLM-Capability` string is included.
+2. If `requested-model` differs from `served-model`, the proxy substituted across families.
+3. The `provider-hint=claude-oauth,anthropic,anthropic-direct;require` LMRH hint should have prevented this — if it didn't, our hint may have a typo or the proxy fleet's provider_type values changed. Run `docker exec tax-ai-analyzer python3 -c "from app.llm_client.lmrh import build_lmrh_header; print(build_lmrh_header('codegen'))"` to confirm the hint shape.
+4. Caller falls through to direct vendor SDK on this exception; no user-visible failure unless that fallback also dies.
+
+### Cache tokens reporting 0 on prompt-cached calls
+**Expected.** `claude-oauth` (Pro Max OAuth path) doesn't surface cache fields to API callers — savings are recorded server-side. Don't chase. Query the proxy's activity log if you need real cache numbers:
+
+```bash
+curl ".../api/monitoring/activity?api_key_id=885b4635c8653425&event_type=llm_request&since=$(date -u -d '1 hour ago' +%FT%TZ)" \
+  -H "Cookie: ..." \
+  | jq '.[] | select(.metadata.requested_model != .metadata.served_model)'
+```
+
+Non-zero values in our local logs mean we routed to `anthropic-direct` (held in reserve, exposes the fields).
+
 ## 9c. Bank-Onboarding Wizard (Phase 11A-F)
 
 ### Submit a new bank
