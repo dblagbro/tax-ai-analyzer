@@ -12,8 +12,20 @@
   <div class="stat-grid" style="margin-bottom:16px">
     <div class="stat-card"><div class="stat-label">Total API Calls</div><div class="stat-value" id="ac-calls">—</div></div>
     <div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value" id="ac-tokens">—</div></div>
-    <div class="stat-card"><div class="stat-label">Total Cost</div><div class="stat-value" id="ac-cost">—</div></div>
+    <div class="stat-card"
+         title="Rate-card cost (what we'd have paid at the model's public per-token rate)"><div class="stat-label">Rate-Card Cost</div><div class="stat-value" id="ac-cost">—</div></div>
+    <div class="stat-card"
+         title="Actual billable cost — excludes calls served via subscription/free tiers"><div class="stat-label">Billable Cost</div><div class="stat-value" id="ac-billable">—</div></div>
+    <div class="stat-card"
+         title="Savings from subscription-tier providers (claude-oauth, codex-oauth) — rate-card value covered by quota"><div class="stat-label">Subscription Savings</div><div class="stat-value" id="ac-savings">—</div></div>
     <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value" id="ac-success">—</div></div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title" title="Free / subscription / paid breakdown of LLM spend (per llm-proxy2 v3.0.50)">Cost by Tier</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Cost Class</th><th>Calls</th><th>Tokens</th><th>Rate-Card</th><th>Billable</th></tr></thead>
+      <tbody id="ac-by-cost-class"><tr><td colspan="5"><div class="empty">Loading…</div></td></tr></tbody>
+    </table></div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
     <div class="card">

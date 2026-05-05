@@ -74,6 +74,38 @@ def _detect_substitution(operation: str, headers: dict) -> tuple[bool, str]:
     return ("chosen-because=cross-family-fallback" in cap), cap
 
 
+def _extract_cost_class(headers: dict) -> str:
+    """Pull the cost_class dim from the LLM-Capability response header.
+
+    llm-proxy2 v3.0.50+: subscription-tier providers (claude-oauth, codex-
+    oauth) emit cost_class=subscription so callers can distinguish quota-
+    based zero-cost calls from paid pay-per-call. Pay-per-call upstreams
+    emit cost_class=paid. Returns "" if absent (pre-v3.0.50 proxy or
+    direct-vendor SDK path).
+
+    Capability header is a comma-separated list of `key=value` pairs per
+    LMRH 1.0 §6. Be tolerant of arbitrary whitespace between items.
+    """
+    if not headers:
+        return ""
+    lc = {k.lower(): v for k, v in headers.items()}
+    cap = lc.get("llm-capability", "") or ""
+    if "cost_class=" not in cap and "cost-class=" not in cap:
+        return ""
+    # Walk comma-separated items; tolerate either underscore or hyphen
+    for raw in cap.split(","):
+        item = raw.strip()
+        for prefix in ("cost_class=", "cost-class="):
+            if item.startswith(prefix):
+                value = item[len(prefix):].strip()
+                # Stop at any structured-field parameter separator
+                for sep in (";", " "):
+                    if sep in value:
+                        value = value.split(sep, 1)[0]
+                return value.strip()
+    return ""
+
+
 def _log_lmrh_diagnostics(operation: str, headers: dict) -> None:
     """Surface llm-proxy2 response headers as log lines for ops visibility.
 
@@ -217,13 +249,16 @@ def call_chat(
                         f"_STRICT_PROVIDER_TASKS."
                     )
             proxy_manager.mark_success(eid)
+            cost_class = _extract_cost_class(resp_headers)
             logger.info(
                 f"[proxy] ✓ {operation} via ep={eid} model={model_used} "
-                f"in={in_tok} out={out_tok} {time.time()-t0:.2f}s"
+                f"in={in_tok} out={out_tok} cost_class={cost_class or '?'} "
+                f"{time.time()-t0:.2f}s"
             )
             return {
                 "content": content, "model": model_used, "endpoint_id": eid,
                 "in_tokens": in_tok, "out_tokens": out_tok,
+                "cost_class": cost_class,
             }
         except CrossFamilySubstitution:
             # Policy failure, not transport — bubble up immediately. Trying
@@ -329,15 +364,17 @@ def call_anthropic_messages(
                     )
 
             proxy_manager.mark_success(eid)
+            cost_class = _extract_cost_class(resp_headers)
             logger.info(
                 f"[proxy/anthropic] ✓ {operation} via ep={eid} model={model_used} "
                 f"in={in_tok} out={out_tok} cache+={cache_create} cache↩={cache_read} "
-                f"{time.time()-t0:.2f}s"
+                f"cost_class={cost_class or '?'} {time.time()-t0:.2f}s"
             )
             return {
                 "response": resp, "endpoint_id": eid, "model": model_used,
                 "in_tokens": in_tok, "out_tokens": out_tok,
                 "cache_creation": cache_create, "cache_read": cache_read,
+                "cost_class": cost_class,
             }
         except CrossFamilySubstitution:
             raise

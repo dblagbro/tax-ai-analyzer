@@ -38,6 +38,10 @@ def _init_db():
             return
         os.makedirs(os.path.dirname(_USAGE_DB_PATH), exist_ok=True)
         conn = _get_connection()
+        # Order matters: CREATE TABLE IF NOT EXISTS is a no-op when the
+        # table already exists, so any cost_class index in this script would
+        # reference a column that hasn't been ALTERed in yet. Do indexes that
+        # depend on potentially-newer columns AFTER the migration runs.
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS llm_usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,13 +55,21 @@ def _init_db():
                 cost_usd REAL DEFAULT 0.0,
                 success INTEGER DEFAULT 1,
                 doc_id INTEGER,
-                error_msg TEXT
+                error_msg TEXT,
+                cost_class TEXT DEFAULT ''
             );
 
             CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage(ts);
             CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(model);
             CREATE INDEX IF NOT EXISTS idx_llm_usage_operation ON llm_usage(operation);
         """)
+        # Migration for pre-cost_class DBs (idempotent — ALTER skipped when col exists)
+        existing_cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(llm_usage)").fetchall()}
+        if "cost_class" not in existing_cols:
+            conn.execute("ALTER TABLE llm_usage ADD COLUMN cost_class TEXT DEFAULT ''")
+        # Now safe to create the cost_class index — column guaranteed to exist
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_cost_class ON llm_usage(cost_class)")
         conn.commit()
         conn.close()
         _initialized = True
@@ -114,20 +126,29 @@ def log_usage(
     success: bool = True,
     doc_id: Optional[int] = None,
     error_msg: str = "",
+    cost_class: str = "",
 ):
     """
     Record a single API call.
 
     Args:
-        provider: "anthropic" or "openai"
+        provider: "anthropic" or "openai" (or "proxy:anthropic" etc.)
         model: Model identifier string
         operation: Logical operation name (e.g. "analyze_document", "chat")
         input_tokens: Prompt/input token count
         output_tokens: Completion/output token count
-        cost: Computed cost in USD
+        cost: Computed cost in USD (locally computed; for subscription-tier
+              calls the proxy may report cost_usd=$0 on its side — we still
+              compute the rate-card-equivalent via compute_cost() for
+              accounting, then mark the call with cost_class="subscription"
+              so the dashboard can distinguish it from paid pay-per-call).
         success: Whether the call succeeded
         doc_id: Optional Paperless document ID being processed
         error_msg: Error message if success=False
+        cost_class: "" (unknown / pre-v3.0.50), "paid" (pay-per-call billed),
+              "subscription" (zero-cost via codex-oauth / claude-oauth quota),
+              "free" (provider-side complimentary). Extracted from the
+              proxy's LLM-Capability response header by proxy_call when present.
     """
     _init_db()
     total = input_tokens + output_tokens
@@ -138,12 +159,13 @@ def log_usage(
                 """
                 INSERT INTO llm_usage
                     (provider, model, operation, input_tokens, output_tokens,
-                     total_tokens, cost_usd, success, doc_id, error_msg)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
+                     total_tokens, cost_usd, success, doc_id, error_msg, cost_class)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     provider, model, operation, input_tokens, output_tokens,
                     total, cost, 1 if success else 0, doc_id, error_msg or None,
+                    cost_class or "",
                 ),
             )
             conn.commit()
@@ -265,14 +287,55 @@ def get_stats(days: int = 30) -> dict:
                 for r in day_rows
             ]
 
+            # By cost_class — distinguish free/subscription/paid spend.
+            # Empty cost_class string is bucketed as "unknown" so old rows
+            # without the field don't get conflated with paid pay-per-call.
+            cc_rows = conn.execute(
+                """
+                SELECT
+                    CASE WHEN cost_class IS NULL OR cost_class = ''
+                         THEN 'unknown' ELSE cost_class END AS cc,
+                    COUNT(*) as calls,
+                    COALESCE(SUM(total_tokens),0) as tokens,
+                    COALESCE(SUM(cost_usd),0) as rate_card_cost
+                FROM llm_usage WHERE ts >= ?
+                GROUP BY cc
+                ORDER BY rate_card_cost DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+
+            by_cost_class = {}
+            for r in cc_rows:
+                by_cost_class[r["cc"]] = {
+                    "calls": r["calls"],
+                    "tokens": r["tokens"],
+                    # Rate-card cost — what we WOULD have paid at the model's
+                    # public rate. For cost_class="subscription" this is the
+                    # quota_usd value the proxy reports; actual billable cost
+                    # is $0 (paid for via subscription).
+                    "rate_card_cost_usd": round(r["rate_card_cost"], 6),
+                    "billable_cost_usd": (
+                        0.0 if r["cc"] in ("subscription", "free")
+                        else round(r["rate_card_cost"], 6)
+                    ),
+                }
+
+            # Total billable cost = total minus subscription/free portions
+            billable_cost = sum(v["billable_cost_usd"] for v in by_cost_class.values())
+            subscription_cost = total_cost - billable_cost
+
             return {
                 "period_days": days,
                 "total_calls": total_calls,
                 "total_tokens": total_tokens,
-                "total_cost_usd": total_cost,
+                "total_cost_usd": total_cost,  # rate-card total (kept for back-compat)
+                "billable_cost_usd": round(billable_cost, 6),
+                "subscription_savings_usd": round(subscription_cost, 6),
                 "success_rate": round(success_rate, 4),
                 "by_model": by_model,
                 "by_operation": by_operation,
+                "by_cost_class": by_cost_class,
                 "by_day": by_day,
             }
         finally:

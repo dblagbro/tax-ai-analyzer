@@ -386,6 +386,7 @@ def _call_codegen_llm(
     # Anthropic SDK call so codegen stays operational when the proxies are down.
     resp = None
     proxy_endpoint_id = None
+    cost_class = ""
     try:
         from app.llm_client import proxy_call
         result = proxy_call.call_anthropic_messages(
@@ -398,7 +399,8 @@ def _call_codegen_llm(
         resp = result["response"]
         proxy_endpoint_id = result["endpoint_id"]
         chosen_model = result["model"]  # whatever the proxy actually picked
-        logger.info(f"bank_codegen routed via proxy ep={proxy_endpoint_id}")
+        cost_class = result.get("cost_class", "")
+        logger.info(f"bank_codegen routed via proxy ep={proxy_endpoint_id} cost_class={cost_class or '?'}")
     except Exception as proxy_err:
         logger.warning(
             f"bank_codegen proxy chain failed ({proxy_err}); "
@@ -431,6 +433,7 @@ def _call_codegen_llm(
         provider=provider_label, model=chosen_model, operation="bank_codegen",
         input_tokens=in_tok + cache_create + cache_read,
         output_tokens=out_tok, cost=cost, success=True,
+        cost_class=cost_class,
     )
     logger.info(
         f"codegen tokens — input={in_tok} cache_create={cache_create} "

@@ -7,7 +7,30 @@ async function loadAiCosts() {
   document.getElementById('ac-calls').textContent = (s.total_calls||0).toLocaleString();
   document.getElementById('ac-tokens').textContent = (s.total_tokens||0).toLocaleString();
   document.getElementById('ac-cost').textContent = '$'+(s.total_cost_usd||0).toFixed(4);
+  const billable = document.getElementById('ac-billable');
+  if (billable) billable.textContent = '$'+(s.billable_cost_usd||0).toFixed(4);
+  const savings = document.getElementById('ac-savings');
+  if (savings) savings.textContent = '$'+(s.subscription_savings_usd||0).toFixed(4);
   document.getElementById('ac-success').textContent = ((s.success_rate||1)*100).toFixed(1)+'%';
+  // By cost class (free / subscription / paid / unknown)
+  const ccTbody = document.getElementById('ac-by-cost-class');
+  if (ccTbody) {
+    const byCC = s.by_cost_class || {};
+    const order = ['paid','subscription','free','unknown'];
+    const sortedKeys = Object.keys(byCC).sort((a,b) => {
+      const ai = order.indexOf(a), bi = order.indexOf(b);
+      return (ai===-1?99:ai) - (bi===-1?99:bi);
+    });
+    ccTbody.innerHTML = sortedKeys.length ? sortedKeys.map(cc => {
+      const v = byCC[cc];
+      const label = cc==='subscription'
+        ? `<span class="badge badge-income" title="Quota-based zero-cost via claude-oauth / codex-oauth">${esc(cc)}</span>`
+        : cc==='free' ? `<span class="badge badge-income">${esc(cc)}</span>`
+        : cc==='paid' ? `<span class="badge badge-expense">${esc(cc)}</span>`
+        : `<span class="badge badge-other">${esc(cc)}</span>`;
+      return `<tr><td>${label}</td><td>${v.calls}</td><td>${(v.tokens||0).toLocaleString()}</td><td>$${(v.rate_card_cost_usd||0).toFixed(5)}</td><td>$${(v.billable_cost_usd||0).toFixed(5)}</td></tr>`;
+    }).join('') : '<tr><td colspan="5"><div class="empty">No data.</div></td></tr>';
+  }
   const bm = document.getElementById('ac-by-model');
   const byModel = s.by_model||{};
   bm.innerHTML = Object.keys(byModel).length ? Object.entries(byModel).sort((a,b)=>b[1].cost_usd-a[1].cost_usd).map(([m,v])=>

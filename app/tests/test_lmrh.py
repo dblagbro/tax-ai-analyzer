@@ -274,6 +274,73 @@ def test_lmrh_exclude_dim():
     assert "exclude=anthropic-direct;require" in out
 
 
+def test_extract_cost_class_subscription():
+    from app.llm_client.proxy_call import _extract_cost_class
+    headers = {"LLM-Capability": "v=1, provider=anthropic, model=claude-haiku, chosen-because=score, cost_class=subscription"}
+    assert _extract_cost_class(headers) == "subscription"
+
+
+def test_extract_cost_class_paid_with_hyphen_form():
+    from app.llm_client.proxy_call import _extract_cost_class
+    headers = {"LLM-Capability": "v=1, provider=anthropic, cost-class=paid"}
+    assert _extract_cost_class(headers) == "paid"
+
+
+def test_extract_cost_class_absent():
+    from app.llm_client.proxy_call import _extract_cost_class
+    headers = {"LLM-Capability": "v=1, provider=anthropic, model=claude-haiku, chosen-because=score"}
+    assert _extract_cost_class(headers) == ""
+
+
+def test_extract_cost_class_no_headers():
+    from app.llm_client.proxy_call import _extract_cost_class
+    assert _extract_cost_class({}) == ""
+    assert _extract_cost_class(None or {}) == ""
+
+
+def test_log_usage_persists_cost_class():
+    """log_usage should round-trip cost_class through to the DB row."""
+    import os, sqlite3, tempfile
+    from app import llm_usage_tracker as tracker
+    orig_path = tracker._USAGE_DB_PATH
+    orig_init = tracker._initialized
+    tmp = tempfile.mkdtemp()
+    try:
+        tracker._USAGE_DB_PATH = os.path.join(tmp, "usage_probe.db")
+        tracker._initialized = False
+        tracker.log_usage(
+            provider="proxy:anthropic", model="claude-haiku-4-5-20251001",
+            operation="classification", input_tokens=100, output_tokens=10,
+            cost=0.0, cost_class="subscription",
+        )
+        tracker.log_usage(
+            provider="anthropic", model="claude-opus-4-7",
+            operation="codegen", input_tokens=20000, output_tokens=8000,
+            cost=0.30, cost_class="paid",
+        )
+        conn = sqlite3.connect(tracker._USAGE_DB_PATH)
+        rows = conn.execute(
+            "SELECT operation, cost_class FROM llm_usage ORDER BY id"
+        ).fetchall()
+        conn.close()
+        assert rows == [("classification", "subscription"), ("codegen", "paid")]
+        # get_stats should bucket them correctly
+        stats = tracker.get_stats(days=30)
+        assert "subscription" in stats["by_cost_class"]
+        assert "paid" in stats["by_cost_class"]
+        # Subscription billable is $0; paid billable matches cost
+        assert stats["by_cost_class"]["subscription"]["billable_cost_usd"] == 0.0
+        assert stats["by_cost_class"]["paid"]["billable_cost_usd"] > 0
+        assert stats["billable_cost_usd"] > 0
+        assert stats["subscription_savings_usd"] == 0.0  # no rate-card cost was logged for sub
+    finally:
+        tracker._USAGE_DB_PATH = orig_path
+        tracker._initialized = orig_init
+        if os.path.exists(tmp + "/usage_probe.db"):
+            os.remove(tmp + "/usage_probe.db")
+        os.rmdir(tmp)
+
+
 def test_substitution_detect_recognizes_cross_family_fallback():
     from app.llm_client.proxy_call import _detect_substitution
     headers = {"LLM-Capability": "v=1, provider=openai, model=gpt-5.5, chosen-because=cross-family-fallback, requested-model=gpt-4o"}
