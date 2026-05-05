@@ -797,3 +797,69 @@ sets `geoip=True` so the fingerprint TZ/locale match the proxy egress IP.
 
 - Container pytest: 210 passed, 30 skipped (host-only JS)
 - Up from 144 (Phase 11E-H session close) → 210 in 30 commits
+
+---
+
+## Phase 13.5 — substitution-guard + claude-oauth gotchas (2026-05-01)
+
+llm-proxy2 v3.0.46 introduced silent paid-plan substitution (gpt-4o →
+gpt-5.5 via Codex). Three-layer defense added:
+1. Hard `;require` LMRH dim with comma-list `provider-hint=
+   claude-oauth,anthropic,anthropic-direct;require` for `tax-review`
+   + `codegen` task presets — proxy returns 503 if no anthropic-family
+   upstream is enabled (per ops 2026-05-01 the bare "anthropic" name
+   alone trips 503; multi-value list satisfies-any).
+2. WARNING-level log on `chosen-because=cross-family-fallback` for
+   every operation.
+3. Post-call `CrossFamilySubstitution` exception scoped to
+   `_STRICT_PROVIDER_TASKS` — refuses substituted output that slipped
+   through.
+
+`LLM-Capability` and `X-LMRH-Warnings` response headers captured via
+SDK `with_raw_response` wrapper in `proxy_call.py`. `cache_creation_
+input_tokens` / `cache_read_input_tokens` documented as 0-by-design
+on claude-oauth (savings recorded server-side in proxy event_meta).
+
+Repository sweep: stripped `Co-Authored-By: Claude` trailer from all
+historic commits across 6 repos (171 commits total). `pre-claude-strip-
+2026-05-01` backup tag exists on each. Going-forward policy in
+`feedback_no_claude_attribution.md` memory.
+
+## Phase 14 — cost_class accounting + shared run_bank_import orchestrator (2026-05-01)
+
+Two complementary changes:
+
+**Cost-class accounting.** llm-proxy2 v3.0.50 emits `cost_class`
+(`paid` | `subscription` | `free`) on `LLM-Capability`. Pipeline:
+- `proxy_call._extract_cost_class` parses the dim
+- `proxy_call.call_*` returns it on the result dict
+- `llm_usage_tracker.log_usage` accepts + persists it (new column,
+  ALTER migration)
+- `get_stats()` adds `by_cost_class`, `billable_cost_usd`,
+  `subscription_savings_usd`
+- AI Costs tab gains 3 stat cards + Cost-by-Tier table
+
+**Shared orchestrator.** `base_bank_importer.run_bank_import(slug,
+login_fn, download_fn, discover_fn=None, years=, cookies=,
+headless=, log=)` extracts the 30-LOC `launch → cookie-inject →
+login → year-loop → cleanup` shell that all 5 Playwright importers
+re-implement. Refactored `merrick_importer` first (~50 LOC →
+~10). The other 4 (`usbank`, `chime`, `capitalone`, `verizon`)
+left unchanged on purpose — converting them is one-per-commit to
+keep blast radius small per the rule "don't refactor in a way that
+puts every live bank in the same change."
+
+## Test totals at 2026-05-04 close
+
+- Container pytest: 236 passed, 30 skipped (host-only JS)
+- Up from 210 → 236 across substitution-guard, no-Claude-strip,
+  cost_class, and run_bank_import work
+
+## Next refactor targets (still deferred)
+
+- `usbank_importer`, `chime_importer`, `capitalone_importer`,
+  `verizon_importer` — apply Phase 14 `run_bank_import` pattern
+  one importer per commit, one bank's traffic at a time.
+- `transactions.js` 563 LOC — splittable into tab logic / bulk-edit
+  / vendor-merge sub-files. Lower payoff right now.
+- `db/import_jobs.py` 330 LOC — getting wide; revisit at ~500 LOC.

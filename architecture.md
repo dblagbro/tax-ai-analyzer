@@ -360,6 +360,21 @@ Bulk operations (analysis, chat, classification) accept proxy substitution
 when the substitute satisfies the dims — only correctness-critical paths
 hard-fail.
 
+### Cost-class tracking (Phase 14)
+
+llm-proxy2 v3.0.50+ emits `cost_class` (`paid` | `subscription` | `free`)
+in the `LLM-Capability` response header. We parse it via
+`proxy_call._extract_cost_class` and forward to `llm_usage_tracker.log_usage`.
+The `llm_usage` table gains a `cost_class` column (idempotent ALTER
+migration). `get_stats()` returns a `by_cost_class` bucket plus
+top-level `billable_cost_usd` (excludes subscription/free) and
+`subscription_savings_usd` (rate-card amount covered by quota).
+
+The AI Costs admin tab surfaces three new stat cards (Rate-Card Cost,
+Billable Cost, Subscription Savings) and a Cost-by-Tier table. Empty
+`cost_class` is bucketed as `unknown` so pre-v3.0.50 rows aren't
+conflated with paid pay-per-call.
+
 ### Cache token reporting (claude-oauth gotcha)
 
 With our `;require` comma-list pinning routing to the Anthropic family,
@@ -372,6 +387,41 @@ server-side in the proxy's `event_meta`. Don't treat 0 as "cache miss";
 query the proxy's activity log if you need actual cache numbers.
 `anthropic-direct` (held in reserve) does expose them, so non-zero values
 in our logs mean we routed there.
+
+## Shared bank-import orchestrator (Phase 14)
+
+Each Playwright bank importer (`usbank`, `chime`, `merrick`, `capitalone`,
+`verizon`) historically re-implemented the same outer shell: open browser,
+inject saved cookies, call bank-specific `_login`, optionally call
+`_discover_accounts`, iterate accounts × years calling `_download_year`,
+accumulate totals, clean up. ~30 LOC of identical boilerplate per importer.
+
+`base_bank_importer.run_bank_import(slug, login_fn, download_fn,
+discover_fn=None, years=, cookies=, headless=, log=)` hoists that shell.
+Callables receive `(page, context)` positionally so they can reach the
+live Playwright objects without out-of-band closures.
+
+A bank importer's `run_import()` becomes ~10 lines of pure delegation:
+
+```python
+def run_import(username, password, years, consume_path, entity_slug,
+               job_id, log=logger.info, cookies=None):
+    def _login_fn(page, context):
+        _login(page, username, password, log, cookies, job_id)
+    def _download_fn(page, context, _account, year):
+        return _download_year(page, context, year,
+                              consume_path, entity_slug, log)
+    return run_bank_import(
+        slug="merrick",
+        login_fn=_login_fn, download_fn=_download_fn,
+        years=years, cookies=cookies, headless=True, log=log,
+    )
+```
+
+Currently `merrick_importer` uses the helper. The other 4 are intentionally
+unrefactored — converting them is a one-importer-per-commit job to keep
+blast radius small. Bank-specific `_login` and `_download_year` are
+unaffected by the refactor.
 
 ## Bank-onboarding pipeline (Phase 11A-F)
 
