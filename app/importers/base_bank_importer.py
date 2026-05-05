@@ -688,3 +688,95 @@ try:
     from datetime import datetime
 except ImportError:
     pass
+
+
+# ── shared run_import orchestration (Phase 14) ────────────────────────────────
+
+def run_bank_import(
+    slug: str,
+    *,
+    login_fn: Callable,            # (page, context) → None
+    download_fn: Callable,         # (page, context, account, year) → (imp, skip, err)
+    discover_fn: Optional[Callable] = None,  # (page, context) → list[dict] | None
+    years: list,
+    cookies: Optional[list] = None,
+    headless: bool = True,
+    log: Callable[[str], None] = logger.info,
+) -> dict:
+    """Run the standard launch → login → discover → year-loop → cleanup flow.
+
+    Each Playwright bank importer re-implements the same outer shell — open
+    a browser, optionally inject saved cookies, log in (with bank-specific
+    selectors and MFA flow), iterate over accounts × years, download
+    statements per pair, clean up. This helper hoists the shell so importers
+    only have to supply the bank-specific bits via callables.
+
+    The callables receive `page` and `context` as positional args so they
+    can reach the live Playwright objects without resorting to global state
+    or out-of-band closures.
+
+    Args:
+      slug: Bank slug used by launch_browser (profile dir, screenshots).
+      login_fn(page, context): bank-specific login. Should raise on failure.
+        Should call `save_auth_cookies(context, slug, log)` once
+        authenticated (we don't auto-save here because not every login flow
+        reaches a stable cookie-able state at the same point).
+      download_fn(page, context, account, year): bank-specific download for
+        one (account, year) pair. Returns `(imported, skipped, errors)`.
+        `account` is None for single-account banks; otherwise whatever
+        `discover_fn` returned for that entry.
+      discover_fn(page, context): optional. Returns a list of accounts
+        (dicts with at least a "name" key) or None. When None or returning
+        empty, we run a single iteration with account=None.
+      years, cookies, headless, log: passed through.
+
+    Returns: `{"imported": int, "skipped": int, "errors": int}`.
+    """
+    imported = skipped = errors = 0
+    pw = context = page = None
+
+    try:
+        pw, context, page = launch_browser(slug, headless=headless, log=log)
+
+        if cookies:
+            log(f"Injecting {len(cookies)} saved cookies…")
+            try:
+                context.add_cookies(cookies)
+            except Exception as e:
+                log(f"  cookie injection failed: {e!r} — proceeding without")
+
+        login_fn(page, context)
+
+        if discover_fn is not None:
+            try:
+                accounts = discover_fn(page, context) or []
+            except Exception as e:
+                log(f"discover_fn failed: {e!r} — falling back to single-account flow")
+                accounts = []
+        else:
+            accounts = []
+
+        loop_accounts = accounts if accounts else [None]
+        for acct in loop_accounts:
+            label = (acct.get("name") if isinstance(acct, dict) else None) or "default"
+            log(f"── Account: {label} ──")
+            for year in years:
+                try:
+                    yi, ys, ye = download_fn(page, context, acct, year)
+                    imported += yi; skipped += ys; errors += ye
+                except Exception as e:
+                    import traceback
+                    log(f"Error downloading {label}/{year}: {e}")
+                    log(traceback.format_exc()[:400])
+                    errors += 1
+
+    finally:
+        if context:
+            try: context.close()
+            except Exception: pass
+        if pw:
+            try: pw.stop()
+            except Exception: pass
+
+    log(f"{slug} done — imported: {imported}, skipped: {skipped}, errors: {errors}")
+    return {"imported": imported, "skipped": skipped, "errors": errors}
