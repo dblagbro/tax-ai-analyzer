@@ -28,7 +28,7 @@ from app.importers.base_bank_importer import (
     find_element, find_in_frames, find_all_in_frames,
     handle_captcha_if_present,
     human_click, human_move, human_type,
-    launch_browser, save_auth_cookies, save_debug_screenshot,
+    launch_browser, run_bank_import, save_auth_cookies, save_debug_screenshot,
     wait_for_element, wait_for_mfa_code,
 )
 
@@ -63,57 +63,34 @@ def run_import(
     are also parsed and upserted into the DB.
 
     Returns {"imported": int, "skipped": int, "errors": int}.
+
+    Phase 14 refactor: delegates to run_bank_import. Combines chime's
+    bool→raise translation (US Bank's _login returns bool) with
+    capitalone's multi-account discover_fn pattern (with synthetic-
+    account fallback when discovery yields nothing).
     """
-    imported = skipped = errors = 0
-    pw = context = page = None
-
-    try:
-        pw, context, page = launch_browser("usbank", headless=True, log=log)
-
-        if cookies:
-            log(f"Injecting {len(cookies)} saved cookies…")
-            context.add_cookies(cookies)
-
-        logged_in = _login(page, username, password, log, cookies, job_id)
-        if not logged_in:
+    def _login_fn(page, context):
+        if not _login(page, username, password, log, cookies, job_id):
             raise RuntimeError("US Bank login failed — check credentials or MFA.")
 
+    def _discover_fn(page, context):
         accounts = _discover_accounts(page, log)
         if not accounts:
             log("No accounts discovered — trying generic download URL.")
-            accounts = [{"name": "account", "id": "", "url": None}]
+            return [{"name": "account", "id": "", "url": None}]
+        return accounts
 
-        for acct in accounts:
-            log(f"── Account: {acct['name']} ──")
-            for year in years:
-                try:
-                    yi, ys, ye = _download_year(
-                        page, context, acct, year,
-                        consume_path, entity_slug, log, entity_id,
-                    )
-                    imported += yi
-                    skipped += ys
-                    errors += ye
-                except Exception as e:
-                    import traceback
-                    log(f"Error downloading {acct['name']} / {year}: {e}")
-                    log(traceback.format_exc()[:400])
-                    errors += 1
+    def _download_fn(page, context, account, year):
+        return _download_year(
+            page, context, account, year,
+            consume_path, entity_slug, log, entity_id,
+        )
 
-    finally:
-        if context:
-            try:
-                context.close()
-            except Exception:
-                pass
-        if pw:
-            try:
-                pw.stop()
-            except Exception:
-                pass
-
-    log(f"US Bank done — imported: {imported}, skipped: {skipped}, errors: {errors}")
-    return {"imported": imported, "skipped": skipped, "errors": errors}
+    return run_bank_import(
+        slug="usbank",
+        login_fn=_login_fn, download_fn=_download_fn, discover_fn=_discover_fn,
+        years=years, cookies=cookies, headless=True, log=log,
+    )
 
 
 # ── login ─────────────────────────────────────────────────────────────────────

@@ -202,6 +202,31 @@ def test_verizon_importer_uses_run_bank_import():
     assert "Verizon login failed" in src
 
 
+def test_capitalone_importer_uses_run_bank_import():
+    """Phase 14 conversion #4 — capitalone is multi-account, exercises
+    the discover_fn branch of run_bank_import. Synthetic-account fallback
+    when _discover_accounts returns empty must be preserved."""
+    from app.importers import capitalone_importer
+    src = open(capitalone_importer.__file__).read()
+    assert "run_bank_import" in src
+    assert "discover_fn=" in src
+    # Synthetic-account fallback wording (don't drop this — it's how the
+    # generic dashboard download path gets reached when discovery fails)
+    assert "generic download from dashboard" in src
+
+
+def test_usbank_importer_uses_run_bank_import():
+    """Phase 14 conversion #5 — usbank combines both wrinkles:
+    bool→raise translation (like chime/verizon) AND multi-account
+    discover_fn (like capitalone)."""
+    from app.importers import usbank_importer
+    src = open(usbank_importer.__file__).read()
+    assert "run_bank_import" in src
+    assert "discover_fn=" in src
+    assert "US Bank login failed" in src
+    assert "trying generic download URL" in src
+
+
 def test_chime_importer_uses_run_bank_import():
     """Phase 14 conversion #2 — chime now delegates to run_bank_import.
     Includes the bool→raise translation since chime's _login returns bool."""
