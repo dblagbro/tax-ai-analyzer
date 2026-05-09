@@ -91,26 +91,43 @@ The JSON must match this exact schema:
 }
 
 ═══ Hard rules for source_code ═══
+
+— Module shape —
 - Module docstring at the top, mirroring the style of usbank_importer.py.
 - `from __future__ import annotations` at the top, then standard-lib imports, then \
 `from app.importers.base_bank_importer import (...)` — reuse the base helpers, \
-never reimplement them.
-- Public function: `run_import(username, password, years, consume_path, entity_slug, job_id, log=logger.info, cookies=None, entity_id=None) -> dict` \
-returning `{"imported": int, "skipped": int, "errors": int}`.
-- Public function: `set_mfa_code(job_id: int, code: str) -> None` that delegates to `mfa_registry.set_code`.
+never reimplement them. Always include `run_bank_import` in that import list.
 - Constant `SOURCE = "<slug>"` at module scope.
-- Use `launch_browser(slug, headless=True, log=log)` to start the browser.
-- Always call `save_auth_cookies(page.context, slug, log)` immediately after a successful login — this is how persistent sessions work in our codebase.
-- If the HAR shows MFA, implement MFA the same way usbank_importer does: detect the page, call `db.update_import_job(job_id, status="mfa_pending")`, then `wait_for_mfa_code(job_id, log)`, then submit the code.
+- Public function: `set_mfa_code(job_id: int, code: str) -> None` that delegates to `mfa_registry.set_code`.
+
+— `run_import` is a THIN delegator (do NOT inline browser launch / cleanup) —
+- Signature: `run_import(username, password, years, consume_path, entity_slug, job_id, log=logger.info, cookies=None, entity_id=None) -> dict`.
+- Body: build closures `_login_fn(page, context)`, `_download_fn(page, context, account, year)`, optionally `_discover_fn(page, context)`, then RETURN the result of `run_bank_import(slug=..., login_fn=..., download_fn=..., [discover_fn=...], years=years, cookies=cookies, headless=True, log=log)`.
+- DO NOT call `launch_browser` directly, DO NOT write a `try/finally` for cleanup, DO NOT iterate over years. The orchestrator does all of that. Look at usbank_importer.py / capitalone_importer.py / chime_importer.py — they all use this pattern. Mirror them exactly.
+
+— `_login(page, username, password, log, cookies, job_id)` —
+- Bank-specific. Receives the live page; performs the login form fill + MFA dance. Returns `None` on success (raise on auth rejection) OR returns `bool` (True on success, False on failure). If the bank's login can return False the closure should translate to `raise RuntimeError("<Bank> login failed — check credentials or MFA.")` — see chime_importer / verizon_importer / usbank_importer for the bool→raise pattern.
 - Use `human_click`, `human_type`, `human_move` for ALL user interactions — never raw page.click()/page.fill() (Akamai/Shape will flag linear input).
 - Use `find_element` / `wait_for_element` / `find_in_frames` for selector lookups — banks frequently embed forms in iframes.
 - Use multiple selector candidates per field — list all selectors you see in the HAR, in order of confidence.
 - Handle CAPTCHA by calling `handle_captcha_if_present(page, log)` after login submit.
 - Save debug screenshots at every meaningful step using `save_debug_screenshot(page, "<slug>_<step>")`.
-- Wrap the whole flow in `try/finally` that closes context + stops playwright cleanly, just like usbank_importer.
-- Date-range download: parse the user's `years` list and download per-year files into `<consume_path>/<entity_slug>/<year>/`. Filename should include the year and the source slug.
-- Never log secrets. Truncate any partial-credential output to `[2 chars]****` like the reference does.
+- Always call `save_auth_cookies(page.context, slug, log)` immediately after a successful login — this is how persistent sessions work in our codebase.
+- If the HAR shows MFA: detect the page, call `db.update_import_job(job_id, status="mfa_pending")`, then `wait_for_mfa_code(job_id, log)`, then submit the code.
+
+— `_download_year(page, context, [account,] year, consume_path, entity_slug, log, ...) -> tuple[int, int, int]` —
+- Returns `(imported, skipped, errors)` for a single (account, year) pair.
+- Multi-account banks: include the `account` parameter (a dict from `_discover_accounts`); single-account banks omit it.
+- Save downloads under `<consume_path>/<entity_slug>/<year>/`. Filename should include the year and the source slug.
 - If the HAR shows a downloadable file (PDF/CSV/QFX/OFX), fetch it the same way our reference does — by clicking the link inside Playwright (cookies travel automatically), NOT by reconstructing an authenticated requests.get call.
+
+— Optional `_discover_accounts(page, log) -> list[dict]` —
+- Only for multi-account banks. Returns list of `{"name": str, "id": str, "url": str}` dicts.
+- The closure `_discover_fn(page, context)` should call it AND substitute a synthetic single-account fallback if it returns empty (see capitalone_importer.py's "generic download from dashboard" pattern).
+- Single-account banks omit this entirely.
+
+— Universal —
+- Never log secrets. Truncate any partial-credential output to `[2 chars]****` like the reference does.
 
 ═══ Hard rules for test_code ═══
 A short pytest module that verifies the importer's *shape* without actually \

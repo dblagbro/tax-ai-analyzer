@@ -181,7 +181,10 @@ def api_generated_approve(bank_id, gen_id):
         return jsonify({"error": "not found"}), 404
     vs = (gen.get("validation_status") or "").strip()
     force = request.args.get("force") == "1"
-    if vs and vs != "pass" and not force:
+    # pattern_warning is advisory (old code shape but still functional) —
+    # only hard-error statuses block approval without ?force=1.
+    BLOCKING = {"syntax_error", "shape_error", "import_error"}
+    if vs in BLOCKING and not force:
         return jsonify({
             "error": (
                 f"importer failed validation ({vs}). "

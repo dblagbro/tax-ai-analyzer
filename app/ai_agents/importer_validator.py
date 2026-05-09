@@ -1,6 +1,6 @@
 """Static + shape validation for LLM-generated bank importer source.
 
-Runs three cheap checks before we accept the output:
+Runs four cheap checks before we accept the output:
   1. Compile: `compile(source, filename, "exec")` — catches syntax errors.
   2. Shape:   parse the AST and assert the module exports the public surface
               (`run_import`, `set_mfa_code`, `SOURCE`) with the right call
@@ -8,12 +8,18 @@ Runs three cheap checks before we accept the output:
   3. Imports: every `from app.importers.base_bank_importer import (...)` name
               actually exists in the real module. Catches the "model
               hallucinated a helper" failure mode early.
+  4. Pattern: `run_import` should delegate to `run_bank_import` (Phase 14
+              orchestrator pattern). Codegen prompt instructs the model to
+              do this; if the model regresses to the old launch_browser +
+              try/finally inline pattern, flag it as `pattern_warning`
+              (non-blocking — old pattern still works, just noisier).
 
 We deliberately do NOT actually exec/import the generated source — that would
 run module-level code from an untrusted LLM. AST inspection is enough.
 
 Returns a 2-tuple: (status, notes_str)
-  status ∈ {"pass", "syntax_error", "shape_error", "import_error"}
+  status ∈ {"pass", "syntax_error", "shape_error", "import_error",
+            "pattern_warning"}
 """
 from __future__ import annotations
 
@@ -47,6 +53,11 @@ def validate(source: str) -> tuple[str, str]:
     import_err = _check_base_imports(tree)
     if import_err:
         return "import_error", import_err
+
+    # 4. Phase 14 pattern check (non-blocking — old pattern still works)
+    pattern_warn = _check_phase14_pattern(tree)
+    if pattern_warn:
+        return "pattern_warning", pattern_warn
 
     return "pass", ""
 
@@ -116,3 +127,57 @@ def _check_base_imports(tree: ast.Module) -> str:
         return ("imports nonexistent names from base_bank_importer: "
                 + ", ".join(hallucinated))
     return ""
+
+
+def _check_phase14_pattern(tree: ast.Module) -> str:
+    """Check that run_import delegates to run_bank_import (Phase 14 pattern)
+    rather than inlining launch_browser + try/finally.
+
+    Non-blocking — returns a warning string if the new pattern is missing.
+    The old pattern still works at runtime; this exists to nudge codegen
+    output toward the cleaner shape and surface drift early.
+    """
+    # Look for `run_bank_import` import from base_bank_importer
+    imports_helper = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) \
+                and node.module == "app.importers.base_bank_importer":
+            for alias in node.names:
+                if alias.name == "run_bank_import":
+                    imports_helper = True
+                    break
+
+    # Look for run_import calling run_bank_import
+    run_import_fn = None
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.name == "run_import":
+            run_import_fn = node
+            break
+
+    calls_helper = False
+    if run_import_fn is not None:
+        for node in ast.walk(run_import_fn):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id == "run_bank_import":
+                    calls_helper = True
+                    break
+                if isinstance(func, ast.Attribute) and func.attr == "run_bank_import":
+                    calls_helper = True
+                    break
+
+    if imports_helper and calls_helper:
+        return ""  # ideal: imported and used
+
+    if not imports_helper:
+        return ("does not import `run_bank_import` from base_bank_importer "
+                "(Phase 14 orchestrator pattern — see usbank_importer.py / "
+                "merrick_importer.py for the canonical shape). The output "
+                "uses the older inline launch_browser + try/finally style. "
+                "It still runs, but new bank importers should delegate to "
+                "run_bank_import for consistency with the rest of the family.")
+    # imported but not called inside run_import
+    return ("imports `run_bank_import` but `run_import` doesn't call it. "
+            "The Phase 14 pattern is to build closures _login_fn / _download_fn "
+            "and `return run_bank_import(...)` from run_import.")

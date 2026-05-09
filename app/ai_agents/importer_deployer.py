@@ -69,9 +69,12 @@ def deploy(
             "Approve it first."
         )
 
-    # Validation check — never deploy code that didn't pass our static checks
+    # Validation check — never deploy code that didn't pass our static checks.
+    # pattern_warning is advisory (Phase 14 helper not used but code is
+    # functionally valid) so it doesn't block deploy.
     vs = (gen.get("validation_status") or "").strip()
-    if vs and vs != "pass" and not force:
+    BLOCKING = {"syntax_error", "shape_error", "import_error"}
+    if vs in BLOCKING and not force:
         raise DeployError(
             f"validation failed ({vs}). Re-run codegen with a better recording, "
             f"or pass force=True to deploy anyway. Notes: "
