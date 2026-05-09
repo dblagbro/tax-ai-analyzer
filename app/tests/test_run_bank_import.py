@@ -187,6 +187,18 @@ def test_merrick_importer_uses_run_bank_import():
     from app.importers import merrick_importer
     assert callable(merrick_importer.run_import)
     assert callable(merrick_importer.set_mfa_code)
-    # The refactored module should still import the helper
     src = open(merrick_importer.__file__).read()
     assert "run_bank_import" in src
+
+
+def test_chime_importer_uses_run_bank_import():
+    """Phase 14 conversion #2 — chime now delegates to run_bank_import.
+    Includes the bool→raise translation since chime's _login returns bool."""
+    from app.importers import chime_importer
+    assert callable(chime_importer.run_import)
+    assert callable(chime_importer.set_mfa_code)
+    src = open(chime_importer.__file__).read()
+    assert "run_bank_import" in src
+    # Confirm the bool-to-raise adapter is in place — without it, a False
+    # login would silently proceed to download instead of failing fast
+    assert "Chime login failed" in src
