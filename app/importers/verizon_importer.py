@@ -25,7 +25,7 @@ from typing import Callable, Optional
 from app.importers.base_bank_importer import (
     find_element, find_in_frames, find_all_in_frames,
     human_click, human_move, human_type,
-    launch_browser, save_auth_cookies, save_debug_screenshot,
+    launch_browser, run_bank_import, save_auth_cookies, save_debug_screenshot,
     wait_for_element, wait_for_mfa_code,
 )
 
@@ -58,50 +58,26 @@ def run_import(
     Log into My Verizon, download bill PDFs, parse line items, write to DB.
 
     Returns {"imported": int, "skipped": int, "errors": int}.
+
+    Phase 14 refactor: delegates to run_bank_import. _login here returns
+    bool, so the closure translates False → RuntimeError (same pattern
+    as chime_importer).
     """
-    imported = skipped = errors = 0
-    pw = context = page = None
-
-    try:
-        pw, context, page = launch_browser("verizon", headless=True, log=log)
-
-        if cookies:
-            log(f"Injecting {len(cookies)} saved cookies…")
-            context.add_cookies(cookies)
-
-        logged_in = _login(page, username, password, log, cookies, job_id)
-        if not logged_in:
+    def _login_fn(page, context):
+        if not _login(page, username, password, log, cookies, job_id):
             raise RuntimeError("Verizon login failed — check credentials or MFA.")
 
-        for year in years:
-            try:
-                yi, ys, ye = _download_year(
-                    page, context, year,
-                    consume_path, entity_slug, entity_id, log,
-                )
-                imported += yi
-                skipped += ys
-                errors += ye
-            except Exception as e:
-                import traceback
-                log(f"Error downloading year {year}: {e}")
-                log(traceback.format_exc()[:400])
-                errors += 1
+    def _download_fn(page, context, _account, year):
+        return _download_year(
+            page, context, year,
+            consume_path, entity_slug, entity_id, log,
+        )
 
-    finally:
-        if context:
-            try:
-                context.close()
-            except Exception:
-                pass
-        if pw:
-            try:
-                pw.stop()
-            except Exception:
-                pass
-
-    log(f"Verizon done — imported: {imported}, skipped: {skipped}, errors: {errors}")
-    return {"imported": imported, "skipped": skipped, "errors": errors}
+    return run_bank_import(
+        slug="verizon",
+        login_fn=_login_fn, download_fn=_download_fn,
+        years=years, cookies=cookies, headless=True, log=log,
+    )
 
 
 # ── login ─────────────────────────────────────────────────────────────────────

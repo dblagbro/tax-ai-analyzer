@@ -191,6 +191,17 @@ def test_merrick_importer_uses_run_bank_import():
     assert "run_bank_import" in src
 
 
+def test_verizon_importer_uses_run_bank_import():
+    """Phase 14 conversion #3 — verizon delegates to run_bank_import.
+    Same bool→raise translation pattern as chime."""
+    from app.importers import verizon_importer
+    assert callable(verizon_importer.run_import)
+    assert callable(verizon_importer.set_mfa_code)
+    src = open(verizon_importer.__file__).read()
+    assert "run_bank_import" in src
+    assert "Verizon login failed" in src
+
+
 def test_chime_importer_uses_run_bank_import():
     """Phase 14 conversion #2 — chime now delegates to run_bank_import.
     Includes the bool→raise translation since chime's _login returns bool."""
