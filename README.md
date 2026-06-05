@@ -86,7 +86,7 @@ AI-powered financial document management and tax preparation tool. Organizes doc
 | `LLM_API_KEY` | ✅ | Anthropic (Claude) API key — used as direct-SDK fallback when the proxy pool is exhausted |
 | `LLM_MODEL` | | Model name (default: `claude-sonnet-4-6`). Note: with LMRH routing, the proxy picks the model from `task=`/`cost=` hints; this only matters for the direct-SDK fallback path |
 | `LLM_PROXY2_KEY` | | `llmp-*` key for the LMRH-aware proxy chain (preferred). Falls back to `LLM_PROXY_KEY` for back-compat |
-| `LLM_PROXY2_URL` | | Public URL of the proxy. Defaults to `https://www.voipguru.org/llm-proxy2/v1`. Local-access URLs are auto-rewritten — never use `localhost`/`host.docker.internal`/internal docker names |
+| `LLM_PROXY2_URL` | | Public URL of the proxy. Defaults to `https://www.voipguru.org/llm-proxy/v1` (no "2" — post-2026-06-05 cluster split moved tax-ai onto the full-catalog fleet; the old `/llm-proxy2/` compliance-locked fleet has no Anthropic providers). Local-access URLs are auto-rewritten — never use `localhost`/`host.docker.internal`/internal docker names. |
 | `PAPERLESS_API_BASE_URL` | | Paperless-ngx API URL |
 | `PAPERLESS_API_TOKEN` | | Paperless-ngx API token |
 | `SECRET_KEY` / `FLASK_SECRET_KEY` | ✅ | Flask secret key (generate a random string) |

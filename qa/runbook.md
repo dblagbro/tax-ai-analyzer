@@ -258,16 +258,23 @@ Sidebar → **LLM Routing** → Per-task LMRH hints panel.
 - Save persists to `db.set_setting(f"lmrh.hint.{task}")`.
 
 ### Rotate the `llmp-*` proxy key
-1. Provision a new key in the llm-proxy2 admin UI (separate project on `https://www.voipguru.org/llm-proxy2/`)
-2. Update `LLM_PROXY2_KEY` in `/home/dblagbro/docker/.env`
-3. `docker restart tax-ai-analyzer` — boot migration auto-rewrites the api_key on every existing endpoint row
+1. Provision a new key in the llm-proxy admin UI at `https://www.voipguru.org/llm-proxy/keys` — separate session cookie `llmproxy_clone_session` per the 2026-06-05 cluster-split memo.
+2. Update `LLM_PROXY2_KEY` in `/home/dblagbro/docker/.env` (env var name retained for back-compat; the "2" now refers to LMRH v2 protocol, NOT the URL path)
+3. `docker restart tax-ai-analyzer` — boot migration auto-rewrites the api_key on every existing endpoint row, AND auto-rewrites the URL from the old `/llm-proxy2/` path to the new `/llm-proxy/` path.
 4. Hit "Test" in the admin UI to confirm the new key round-trips
 
 ### Direct-Anthropic-SDK fallback is decommissioned
 The original `LLMClient._call_anthropic` direct-vendor path (used as last-resort fallback when the proxy chain is exhausted) is no longer functional — Anthropic account closed 2026-05-01. `LLM_API_KEY` env var is intentionally empty. Proxy chain is the ONLY production LLM path now; if it's down, calls fail loudly rather than silently degrade. **Don't add a new direct-Anthropic key unless you're spinning up a new account on purpose** — the proxy is the single source of truth for routing decisions.
 
 ### Hard rule: no local-access URLs for LLM/proxy
-Always public URL: `https://www.voipguru.org/llm-proxy2/v1`. NEVER `localhost`, `host.docker.internal`, internal docker names. The app has a defense-in-depth normalizer that rewrites local URLs to public on every boot, but don't rely on it — fix the env at the source.
+Always public URL: `https://www.voipguru.org/llm-proxy/v1` (NOT `/llm-proxy2/v1` — see cluster-split note below). NEVER `localhost`, `host.docker.internal`, internal docker names. The app has a defense-in-depth normalizer that rewrites local URLs AND old `/llm-proxy2/` references to the new canonical public URL on every boot, but don't rely on it — fix the env at the source.
+
+### Cluster-split note (2026-06-05)
+The proxy fleet was split into two clusters that day:
+- `/llm-proxy2/` — compliance-locked. NO Anthropic providers available. Used by coordinator-hub and gov-compliance flows.
+- `/llm-proxy/` — full catalog. All 11 providers including Anthropic-Max (Gmail+VG), Cohere, Devin-Codex, Google×2, Grok-Web, OpenRouter, Cursor-oAuth. **This is what tax-ai-analyzer uses.**
+
+API keys are NOT cluster-synced. A key created on one cluster doesn't exist on the other until provisioned separately. If you ever see 401 "Invalid or disabled API key" after a cluster move, the most likely cause is a stale key from the wrong cluster.
 
 ### Diagnose a `CrossFamilySubstitution` exception
 Raised when `tax-review` or `codegen` got a `chosen-because=cross-family-fallback` response from the proxy (rare under our `;require` config — should normally fail-fast at the proxy with 503 instead).

@@ -513,16 +513,32 @@ def _migrate(conn):
 # ── LLM proxy endpoint pool helpers (Phase 12) ────────────────────────────────
 
 
-# Public URL for llm-proxy2. Per Devin's directive (2026-04-30): NEVER use
-# local-access URLs (localhost, host.docker.internal, internal docker names)
-# for LLM/AI/proxy calls. Always use the public URL — even if the proxy is
-# on the same host. We normalize any local URL we see (in env, in seed,
-# in DB rows) to this canonical value.
-PUBLIC_LLM_PROXY2_URL = "https://www.voipguru.org/llm-proxy2/v1"
+# Public URL for the llm-proxy. Per Devin's directive (2026-04-30): NEVER
+# use local-access URLs for LLM/AI/proxy calls. Always the public URL.
+#
+# 2026-06-05 cluster-split (memo from llm-proxy2 ops): /llm-proxy2/ is now
+# the compliance-locked fleet (no Anthropic providers). tax-ai-analyzer is
+# explicitly recommended onto /llm-proxy/ (no "2"), the full-catalog
+# fleet. The constant below switched paths accordingly.
+#
+# Variable name retained as PUBLIC_LLM_PROXY2_URL to avoid a noisy
+# rename across the call sites — the "2" now refers to the LMRH v2
+# protocol family (claude-oauth, anthropic-direct, etc.), not the URL
+# path. Future cleanup: rename to PUBLIC_LLM_PROXY_URL if/when we
+# touch every reader.
+PUBLIC_LLM_PROXY2_URL = "https://www.voipguru.org/llm-proxy/v1"
 
+# Substring fragments that mark a URL as "should be rewritten on next boot."
+# Includes:
+#   - true local-access hosts (localhost, 127.0.0.1, ::1, host.docker.internal)
+#   - decommissioned internal docker names (llm-proxy-manager — v1, gone)
+#   - the OLD cluster URL path fragment (llm-proxy2) — post-2026-06-05
+#     cluster split, all live rows pointing at /llm-proxy2/ should migrate
+#     to the canonical /llm-proxy/ URL on next init_db.
 _LOCAL_HOST_FRAGMENTS = (
     "localhost", "127.0.0.1", "host.docker.internal", "::1",
-    "llm-proxy2", "llm-proxy-manager",  # internal docker names
+    "llm-proxy2",          # old compliance-cluster path; rewrite to /llm-proxy/
+    "llm-proxy-manager",   # v1 internal docker name (decommissioned)
 )
 
 

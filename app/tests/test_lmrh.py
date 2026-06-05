@@ -459,6 +459,28 @@ def test_public_url_passes_through():
     assert _normalize_llm_proxy_url(other) == other
 
 
+def test_cluster_split_old_url_rewrites_to_new():
+    """2026-06-05 cluster split: the OLD compliance-cluster public URL
+    (/llm-proxy2/v1) must be rewritten to the new full-catalog URL
+    (/llm-proxy/v1). This is the migration path that boot rewrites apply
+    to any existing llm_proxy_endpoints rows still pointing at the old
+    fleet.
+    """
+    from app.db.core import _normalize_llm_proxy_url, PUBLIC_LLM_PROXY2_URL
+    # Sanity: the canonical URL has migrated to /llm-proxy/ (no "2")
+    assert PUBLIC_LLM_PROXY2_URL == "https://www.voipguru.org/llm-proxy/v1"
+
+    # The old cluster URL should be flagged as "needs rewrite" and migrate
+    old_compliance_url = "https://www.voipguru.org/llm-proxy2/v1"
+    rewritten = _normalize_llm_proxy_url(old_compliance_url)
+    assert rewritten == PUBLIC_LLM_PROXY2_URL, \
+        f"expected {PUBLIC_LLM_PROXY2_URL}, got {rewritten}"
+
+    # The new canonical URL must NOT be flagged (would cause rewrite churn)
+    new_url = PUBLIC_LLM_PROXY2_URL
+    assert _normalize_llm_proxy_url(new_url) == new_url
+
+
 def test_boot_migration_rewrites_local_url_and_swaps_key():
     """A pre-existing endpoint with a local URL + old key gets rewritten on
     every boot to public URL + LLM_PROXY2_KEY (if set)."""

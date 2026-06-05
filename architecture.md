@@ -302,8 +302,9 @@ All LLM traffic — analyze, extract, classify, summarize, chat, tax_review,
 codegen, gmail/ai_review, cloud-import doc analysis — routes through:
 
 1. **The proxy pool** (one or more `llm_proxy_endpoints` rows). Default pool
-   has a single endpoint: `https://www.voipguru.org/llm-proxy2/v1` (public
-   URL only — local-access URLs are explicitly rejected by
+   has a single endpoint: `https://www.voipguru.org/llm-proxy/v1` (public
+   URL only — local-access URLs and the old compliance-cluster `/llm-proxy2/`
+   path are explicitly rejected by
    `_normalize_llm_proxy_url`). Per-call LMRH hint emitted via the
    `LLM-Hint` HTTP header per the LMRH 1.0 spec
    (https://www.voipguru.org/llm-proxy2/lmrh.md). Proxy picks model+provider;
