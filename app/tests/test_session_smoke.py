@@ -215,10 +215,23 @@ class TestFreshDbInit:
             conn = dbcore.get_connection()
             try:
                 checks = [
+                    # historical migrations (pre-Phase-11)
                     ("transactions", "vendor_normalized"),
                     ("analyzed_documents", "cross_source_duplicate"),
                     ("analyzed_documents", "is_duplicate"),
                     ("import_jobs", "created_at"),
+                    # Phase 11D+ — bank-onboarding pipeline columns added
+                    # via inline CREATE + idempotent ALTER. LOW-POST14-3
+                    # regression guard: ensures fresh-init creates ALL of
+                    # them so a future ALTER typo (reserved word, dup name)
+                    # is caught by CI.
+                    ("generated_importers", "validation_status"),
+                    ("generated_importers", "validation_notes"),
+                    ("generated_importers", "deployed_path"),
+                    ("generated_importers", "deployed_at"),
+                    ("generated_importers", "deployed_by"),
+                    ("generated_importers", "parent_id"),
+                    ("generated_importers", "feedback_text"),
                 ]
                 for table, col in checks:
                     cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}

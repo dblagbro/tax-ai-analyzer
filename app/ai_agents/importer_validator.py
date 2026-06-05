@@ -30,9 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 REQUIRED_PUBLIC_NAMES = ("run_import", "set_mfa_code", "SOURCE")
+
+# Required parameters on the run_import() signature, EXCLUDING the credential
+# parameter (which has alternative names depending on the bank's auth model).
 REQUIRED_RUN_IMPORT_PARAMS = (
-    "username", "password", "years", "consume_path", "entity_slug", "job_id",
+    "password", "years", "consume_path", "entity_slug", "job_id",
 )
+
+# At least ONE of these must be present in run_import's signature — banks
+# differ on whether they auth by username or by email. `chime_importer` uses
+# `email` (Chime's actual auth model); most others use `username`. Codegen
+# output should use whichever the HAR shows.
+CRED_PARAM_ALTERNATIVES = ("username", "email")
 
 
 def validate(source: str) -> tuple[str, str]:
@@ -89,12 +98,16 @@ def _check_shape(tree: ast.Module) -> str:
     if missing:
         return "missing public surface: " + "; ".join(missing)
 
-    # Verify run_import signature contains the expected parameters
+    # Verify run_import signature contains the expected parameters.
+    # The credential parameter has alternative names — accept any of
+    # CRED_PARAM_ALTERNATIVES. The rest are required exactly.
     fn = found_funcs.get("run_import")
     if fn:
         param_names = {a.arg for a in fn.args.args} \
             | {a.arg for a in fn.args.kwonlyargs}
         miss_params = [p for p in REQUIRED_RUN_IMPORT_PARAMS if p not in param_names]
+        if not any(c in param_names for c in CRED_PARAM_ALTERNATIVES):
+            miss_params.append(f"one of {CRED_PARAM_ALTERNATIVES}")
         if miss_params:
             return f"run_import() missing parameters: {miss_params}"
 

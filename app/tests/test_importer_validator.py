@@ -124,6 +124,62 @@ def test_missing_run_import_param_caught():
     assert "missing parameters" in notes
 
 
+def test_email_cred_importer_passes():
+    """Chime-shaped (`email` not `username`) source should validate.
+
+    Phase 14 / HIGH-POST14-2: the validator previously rejected any
+    importer that didn't have `username` as a parameter. Chime uses
+    `email` because that's Chime's actual auth model. The fix accepts
+    either as the credential parameter.
+    """
+    from app.ai_agents.importer_validator import validate
+    src = '''
+"""Email-cred importer."""
+from __future__ import annotations
+from app.importers.base_bank_importer import run_bank_import
+SOURCE = "email_bank"
+def run_import(email, password, years, consume_path, entity_slug, job_id,
+               log=None, cookies=None, entity_id=None):
+    def _login_fn(page, context): pass
+    def _download_fn(page, context, _account, year): return (0,0,0)
+    return run_bank_import(slug="email_bank", login_fn=_login_fn,
+        download_fn=_download_fn, years=years, cookies=cookies,
+        headless=True, log=log)
+def set_mfa_code(job_id, code): pass
+'''
+    status, notes = validate(src)
+    assert status == "pass", f"expected pass, got {status}: {notes}"
+
+
+def test_real_chime_importer_passes_validation():
+    """Direct regression guard: feed the real chime_importer.py source
+    through validate(). Before HIGH-POST14-2 fix this returned shape_error
+    because chime uses `email`. After the fix it must return pass."""
+    from app.ai_agents.importer_validator import validate
+    from app.importers import chime_importer
+    src = open(chime_importer.__file__).read()
+    status, notes = validate(src)
+    # chime_importer is a production-shipped Phase-14 importer; it must pass.
+    # The only legal non-"pass" outcome is "pattern_warning" if for some
+    # reason the helper-usage check fails — but it shouldn't.
+    assert status in ("pass", "pattern_warning"), \
+        f"chime_importer should validate; got {status}: {notes}"
+
+
+def test_missing_both_credentials_caught():
+    """Sanity: a source with NEITHER username NOR email should still fail."""
+    from app.ai_agents.importer_validator import validate
+    src = (
+        'SOURCE = "x"\n'
+        "def run_import(password, years, consume_path, entity_slug, "
+        "job_id): pass\n"
+        "def set_mfa_code(j, c): pass\n"
+    )
+    status, notes = validate(src)
+    assert status == "shape_error"
+    assert "username" in notes or "email" in notes
+
+
 def test_hallucinated_base_import_caught():
     from app.ai_agents.importer_validator import validate
     src = (
