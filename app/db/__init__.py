@@ -163,3 +163,9 @@ from app.db.bank_onboarding import (
     list_recordings,
     update_pending_bank,
 )
+
+# Phase 14B (post-Phase-14 QA): daemon heartbeats for accurate health check
+from app.db.daemons import (
+    record_heartbeat,
+    get_heartbeats,
+)

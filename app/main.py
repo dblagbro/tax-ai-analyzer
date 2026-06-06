@@ -225,6 +225,15 @@ def analysis_daemon():
             _log(f"Analysis daemon cycle error: {e}")
         finally:
             _analysis_status["running"] = False
+            # Phase 14B: write a heartbeat so /api/health/extended knows
+            # we're alive even when the endpoint is hit from a different
+            # process. Best-effort — a heartbeat write failure must never
+            # take down the daemon thread.
+            try:
+                from app import db as _db
+                _db.record_heartbeat("analysis-daemon")
+            except Exception as hb_err:
+                _log(f"Heartbeat write failed (non-fatal): {hb_err}")
 
         time.sleep(config.POLL_INTERVAL)
 
@@ -313,6 +322,11 @@ def main():
                     _log(f"Pruned {pruned} old import jobs (>90 days)")
             except Exception as e:
                 _log(f"Import job prune error: {e}")
+            # Phase 14B heartbeat (see analysis daemon for rationale).
+            try:
+                db.record_heartbeat("dedup-scheduler")
+            except Exception as hb_err:
+                _log(f"Dedup heartbeat write failed (non-fatal): {hb_err}")
             time.sleep(86400)  # 24 hours
 
     dedup_thread = threading.Thread(target=_daily_dedup, daemon=True, name="dedup-scheduler")

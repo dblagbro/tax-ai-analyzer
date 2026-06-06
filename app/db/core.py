@@ -180,6 +180,18 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_llm_proxy_priority
             ON llm_proxy_endpoints(enabled, priority ASC);
+
+        -- Phase 14B (post-Phase-14 QA): persistent daemon liveness via
+        -- heartbeat rows. /api/health/extended used to call
+        -- threading.enumerate() which is process-local; calling it from
+        -- test_client (or any non-daemon-bearing process) gave false
+        -- "degraded" reports. Daemons now write a heartbeat each cycle
+        -- and the health endpoint reads from this table — accurate
+        -- regardless of which process serves the request.
+        CREATE TABLE IF NOT EXISTS daemon_heartbeats (
+            name TEXT PRIMARY KEY,
+            ts   TEXT NOT NULL DEFAULT (datetime('now'))
+        );
     """)
     conn.commit()
     _migrate(conn)

@@ -257,16 +257,42 @@ def api_health_extended():
     except Exception as e:
         out["row_counts"] = {"error": str(e)[:120]}
 
-    # ── background threads ──────────────────────────────────────────────
+    # ── background threads / daemon liveness ────────────────────────────
+    # Phase 14B (MED-POST14-1): inspect both threading.enumerate() AND
+    # the daemon_heartbeats DB table. threading.enumerate() is process-
+    # local (gives bogus "degraded" when this endpoint is called via
+    # test_client from a non-daemon-bearing process). Heartbeats are
+    # cross-process — each daemon writes one per cycle and we trust the
+    # most recent timestamp.
     try:
         threads = {t.name: {"alive": t.is_alive(), "daemon": t.daemon}
                    for t in threading.enumerate()}
+
+        # Daemon-name → max-seconds-between-beats. analysis-daemon polls
+        # on config.POLL_INTERVAL (default 2000s in some configs / 2ms
+        # actually — POLL_INTERVAL is in seconds per config.py); dedup
+        # runs every 24h. Use 2× the interval as the slack window.
+        expected_intervals = {
+            "analysis-daemon": max(60, getattr(config, "POLL_INTERVAL", 60) * 2),
+            "dedup-scheduler": 86400 * 2,  # 48h slack
+        }
+        heartbeats = db.get_heartbeats(expected_intervals=expected_intervals)
+
         expected = {"analysis-daemon", "dedup-scheduler"}
+        # A daemon is "present" if EITHER it's in this process's thread
+        # list (the live Flask main process) OR its heartbeat is fresh.
+        # Either signal counts as alive.
+        present = {}
+        for n in expected:
+            in_threads = (n in threads and threads[n]["alive"])
+            hb_alive = (n in heartbeats and heartbeats[n].get("alive", False))
+            present[n] = in_threads or hb_alive
+
         out["threads"] = {
             "alive": threads,
             "count": len(threads),
-            "expected_present": {n: (n in threads and threads[n]["alive"])
-                                 for n in expected},
+            "expected_present": present,
+            "heartbeats": heartbeats,  # full payload incl. seconds_since
         }
     except Exception as e:
         out["threads"] = {"error": str(e)[:120]}
