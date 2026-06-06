@@ -479,3 +479,26 @@ last-resort when Chrome paths are detected by a specific bank.
 Optional residential proxy (Step 6): `<slug>_proxy_url` setting plumbs
 through to both engines via Playwright's `proxy={server,username,password}`
 config. Provider-agnostic (any HTTP/SOCKS5 URL).
+
+## URL / tab-key naming convention (LOW-POST14-1)
+
+The SPA uses two different identifier conventions in parallel:
+
+- **URL paths use hyphens** (web-conventional):
+  - `/tax-ai-analyzer/folder-manager`
+  - `/tax-ai-analyzer/ai-costs`
+  - `/tax-ai-analyzer/tax-review`
+  - `/tax-ai-analyzer/api/admin/llm-proxies`
+  - `/tax-ai-analyzer/api/admin/llm-hints`
+- **JS tab-loader keys + Jinja DOM IDs use underscores** (JS-conventional):
+  - `folder_manager`, `ai_costs`, `tax_review`, `bank_onboarding`, `llm_routing`
+  - `<div id="tab-folder_manager">`, `registerTabLoader("folder_manager", fn)`
+
+The `loadTab()` helper in `core.js` substitutes between the two forms
+when navigating. Searching the codebase for `tax-review` will find URL
+routes but not the JS handler (registered as `tax_review`); vice versa.
+Both forms are intentional — don't try to unify, just be aware.
+
+`session_smoke.py::TestTabRegistry.EXPECTED_TABS` uses the JS-key
+(underscore) form, since it greps the JS source. Page route handlers in
+`app/routes/pages.py` use the URL (hyphen) form.

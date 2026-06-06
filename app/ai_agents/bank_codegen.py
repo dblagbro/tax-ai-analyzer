@@ -101,7 +101,7 @@ never reimplement them. Always include `run_bank_import` in that import list.
 - Public function: `set_mfa_code(job_id: int, code: str) -> None` that delegates to `mfa_registry.set_code`.
 
 — `run_import` is a THIN delegator (do NOT inline browser launch / cleanup) —
-- Signature: `run_import(username, password, years, consume_path, entity_slug, job_id, log=logger.info, cookies=None, entity_id=None) -> dict`.
+- Signature: `run_import(<cred>, password, years, consume_path, entity_slug, job_id, log=logger.info, cookies=None, entity_id=None) -> dict`. `<cred>` is `username` for password-login banks (most banks) OR `email` for email-login banks (e.g. Chime, Robinhood). Pick whichever the HAR actually shows the bank's auth form expecting.
 - Body: build closures `_login_fn(page, context)`, `_download_fn(page, context, account, year)`, optionally `_discover_fn(page, context)`, then RETURN the result of `run_bank_import(slug=..., login_fn=..., download_fn=..., [discover_fn=...], years=years, cookies=cookies, headless=True, log=log)`.
 - DO NOT call `launch_browser` directly, DO NOT write a `try/finally` for cleanup, DO NOT iterate over years. The orchestrator does all of that. Look at usbank_importer.py / capitalone_importer.py / chime_importer.py — they all use this pattern. Mirror them exactly.
 
