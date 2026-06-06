@@ -82,7 +82,12 @@ def test_regenerate_chains_via_parent_id():
     from app.ai_agents.bank_codegen import generate_importer
     bank_id, rec_id, draft_id, har_path = _seed_bank_with_first_draft()
     try:
-        with patch("anthropic.Anthropic") as fake_cls, \
+        # Post-HIGH-POST14-1: LLM_API_KEY is empty in prod; tests that mock
+        # the direct-SDK fallback need to inject one so the guard passes
+        # and the mock is reached. The actual key value is irrelevant —
+        # the Anthropic SDK constructor is patched.
+        with patch("app.config.LLM_API_KEY", "sk-ant-test-fake"), \
+             patch("anthropic.Anthropic") as fake_cls, \
              patch("app.llm_client.proxy_call.call_anthropic_messages",
                    side_effect=Exception("force direct fallback")):
             fake_client = MagicMock()
@@ -118,7 +123,8 @@ def test_regenerate_includes_prior_source_in_prompt():
     bank_id, rec_id, draft_id, har_path = _seed_bank_with_first_draft()
     captured = {}
     try:
-        with patch("anthropic.Anthropic") as fake_cls, \
+        with patch("app.config.LLM_API_KEY", "sk-ant-test-fake"), \
+             patch("anthropic.Anthropic") as fake_cls, \
              patch("app.llm_client.proxy_call.call_anthropic_messages",
                    side_effect=Exception("force direct")):
             fake_client = MagicMock()
@@ -185,7 +191,8 @@ def test_first_pass_has_no_parent():
     bank_id, rec_id, draft_id, har_path = _seed_bank_with_first_draft(
         label="FreshGen")
     try:
-        with patch("anthropic.Anthropic") as fake_cls, \
+        with patch("app.config.LLM_API_KEY", "sk-ant-test-fake"), \
+             patch("anthropic.Anthropic") as fake_cls, \
              patch("app.llm_client.proxy_call.call_anthropic_messages",
                    side_effect=Exception("force direct")):
             fake_client = MagicMock()
