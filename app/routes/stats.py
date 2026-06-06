@@ -4,7 +4,7 @@ import logging
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
 
-from app import db
+from app import config, db
 from app.config import URL_PREFIX
 from app.routes.helpers import _row_list
 
@@ -315,7 +315,13 @@ def api_health_extended():
             "plaid_configured":    bool(db.get_setting("plaid_client_id")),
             "imap_configured":     bool(db.get_setting("imap_host")) and bool(db.get_setting("imap_password")),
             "simplefin_connected": bool(db.get_setting("simplefin_access_url")),
-            "paperless_configured":bool(db.get_setting("paperless_token")),
+            # MED-POST14-3: paperless_client reads (DB setting OR env var);
+            # health predicate must match that real-config check, not just
+            # the DB setting. Otherwise env-only configurations report as
+            # paperless_configured=false even when the integration works.
+            "paperless_configured":bool(
+                db.get_setting("paperless_token") or config.PAPERLESS_API_TOKEN
+            ),
             "accountant_portal_active": bool(db.get_setting("accountant_token")),
         }
         out["features"] = cfg

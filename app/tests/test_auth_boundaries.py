@@ -245,17 +245,78 @@ class TestRateLimitXffBypass:
     (127.0.0.1) — the rate limiter must still fire."""
 
     def test_xff_rotation_cannot_bypass_limit(self):
-        client = flask_app.test_client()
-        codes = []
-        for i in range(15):
-            resp = client.post(
-                "/tax-ai-analyzer/login",
-                data={"username": "nobody", "password": f"wrong{i}"},
-                headers={"X-Forwarded-For": f"10.{i}.{i}.{i}"},
+        # Ensure no DEV_BYPASS env var leaks in from the host shell.
+        import os
+        orig = os.environ.pop("DEV_BYPASS_RATELIMIT_LOOPBACK", None)
+        try:
+            # Reset rate-limit log so an earlier test doesn't poison the count
+            from app.routes import auth as _auth_mod
+            with _auth_mod._login_lock:
+                _auth_mod._login_fail_log.clear()
+            client = flask_app.test_client()
+            codes = []
+            for i in range(15):
+                resp = client.post(
+                    "/tax-ai-analyzer/login",
+                    data={"username": "nobody", "password": f"wrong{i}"},
+                    headers={"X-Forwarded-For": f"10.{i}.{i}.{i}"},
+                )
+                codes.append(resp.status_code)
+            n_429 = codes.count(429)
+            assert n_429 >= 3, (
+                f"expected rate-limiter to fire ≥3x during 15 XFF-rotated bad "
+                f"logins; got status codes: {codes}"
             )
-            codes.append(resp.status_code)
-        n_429 = codes.count(429)
-        assert n_429 >= 3, (
-            f"expected rate-limiter to fire ≥3x during 15 XFF-rotated bad "
-            f"logins; got status codes: {codes}"
-        )
+        finally:
+            if orig is not None:
+                os.environ["DEV_BYPASS_RATELIMIT_LOOPBACK"] = orig
+
+
+class TestDevLoopbackBypass:
+    """MED-POST14-4: DEV_BYPASS_RATELIMIT_LOOPBACK env-gated bypass.
+
+    Default off — production behavior unchanged. When set to "1", loopback
+    IPs (127.0.0.1, ::1) skip the rate limiter so QA/test-client probes
+    don't lock out legitimate local logins. Public IPs are still limited.
+    """
+
+    def test_default_off_loopback_still_limited(self):
+        from app.routes.auth import _rate_limited, _login_fail_log, _login_lock
+        import os
+        orig = os.environ.pop("DEV_BYPASS_RATELIMIT_LOOPBACK", None)
+        try:
+            # Fill the bucket for 127.0.0.1
+            with _login_lock:
+                _login_fail_log["127.0.0.1"].clear()
+                from collections import deque
+                import time
+                now = time.time()
+                _login_fail_log["127.0.0.1"] = deque([now] * 12)
+            assert _rate_limited("127.0.0.1") is True
+        finally:
+            if orig is not None:
+                os.environ["DEV_BYPASS_RATELIMIT_LOOPBACK"] = orig
+            with _login_lock:
+                _login_fail_log.pop("127.0.0.1", None)
+
+    def test_bypass_on_skips_loopback(self):
+        from app.routes.auth import _rate_limited, _login_fail_log, _login_lock
+        import os
+        os.environ["DEV_BYPASS_RATELIMIT_LOOPBACK"] = "1"
+        try:
+            with _login_lock:
+                from collections import deque
+                import time
+                now = time.time()
+                _login_fail_log["127.0.0.1"] = deque([now] * 99)
+                _login_fail_log["::1"]        = deque([now] * 99)
+                _login_fail_log["10.0.0.5"]   = deque([now] * 99)
+            # Loopback IPs bypass; public IP still rate-limited
+            assert _rate_limited("127.0.0.1") is False
+            assert _rate_limited("::1") is False
+            assert _rate_limited("10.0.0.5") is True
+        finally:
+            os.environ.pop("DEV_BYPASS_RATELIMIT_LOOPBACK", None)
+            with _login_lock:
+                for ip in ("127.0.0.1", "::1", "10.0.0.5"):
+                    _login_fail_log.pop(ip, None)

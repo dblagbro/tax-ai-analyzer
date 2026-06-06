@@ -51,6 +51,21 @@ def _safe_next(next_url: str) -> str | None:
 
 
 def _rate_limited(ip: str) -> bool:
+    # MED-POST14-4: dev/QA bypass for loopback IPs. ProxyFix is gated on
+    # TRUST_PROXY_HEADERS — when unset (typical dev/local config) every
+    # request from inside the container's network looks like 127.0.0.1,
+    # so test_client probes and ad-hoc auth scripts share one bucket with
+    # the local user's legitimate logins. The bucket fills up after 10
+    # auth-failures and locks out the real user until container restart.
+    #
+    # When DEV_BYPASS_RATELIMIT_LOOPBACK=1 (default off in prod, optional
+    # in dev compose), bypass the limit for loopback IPs only. Public IPs
+    # are still rate-limited normally.
+    import os
+    if os.environ.get("DEV_BYPASS_RATELIMIT_LOOPBACK") == "1" \
+            and ip in ("127.0.0.1", "::1"):
+        return False
+
     now = time.time()
     with _login_lock:
         q = _login_fail_log[ip]

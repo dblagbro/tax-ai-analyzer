@@ -284,6 +284,49 @@ class TestHealthExtended:
         assert "status" in data["overall"]
         assert isinstance(data["row_counts"].get("transactions"), int)
 
+    def test_paperless_configured_honors_env_var(self):
+        """MED-POST14-3 regression guard: paperless_configured predicate must
+        check the same fallback chain that paperless_client actually uses
+        (DB setting OR env var), not just the DB setting. Pre-fix, an env-
+        only configuration reported false even when the integration worked.
+        """
+        import os
+        from unittest.mock import patch
+        _, client = _client_with_admin()
+
+        # Scenario: DB setting empty (None/""), env var SET. Should be true.
+        with patch("app.config.PAPERLESS_API_TOKEN", "fake-env-token"):
+            # Make sure DB setting is empty
+            from app import db
+            orig = db.get_setting("paperless_token")
+            db.set_setting("paperless_token", "")
+            try:
+                r = client.get("/tax-ai-analyzer/api/health/extended")
+                features = (r.get_json() or {}).get("features", {})
+                assert features.get("paperless_configured") is True, (
+                    f"env-only config should report paperless_configured=true; "
+                    f"got features={features}"
+                )
+            finally:
+                if orig:
+                    db.set_setting("paperless_token", orig)
+
+        # Scenario: both empty. Should be false.
+        with patch("app.config.PAPERLESS_API_TOKEN", ""):
+            from app import db
+            orig = db.get_setting("paperless_token")
+            db.set_setting("paperless_token", "")
+            try:
+                r = client.get("/tax-ai-analyzer/api/health/extended")
+                features = (r.get_json() or {}).get("features", {})
+                assert features.get("paperless_configured") is False, (
+                    f"empty config should report paperless_configured=false; "
+                    f"got features={features}"
+                )
+            finally:
+                if orig:
+                    db.set_setting("paperless_token", orig)
+
 
 # ---------------------------------------------------------------------------
 # Allow running as a script
