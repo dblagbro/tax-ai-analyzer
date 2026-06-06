@@ -8,12 +8,13 @@ for each batch.
 
 | Metric | Pre-remediation | Post-remediation |
 |---|---|---|
-| HEAD | `8eab99d` | `76be477` |
+| HEAD | `8eab99d` | `5455b5c` |
 | Pytest passing | 242 | **256** (+14 net) |
 | Pytest skipped | 30 | 30 (unchanged) |
-| Open findings | 13 (from `bug-log-post-phase14.md`) | 2 deferred + 1 operator-blocked |
+| Open findings | 13 (from `bug-log-post-phase14.md`) | 1 deferred (real-bank retest) + 1 awaiting proxy team |
 | Schema migrations | — | +1 table (`daemon_heartbeats`) |
-| Live LLM functionality | broken (401) | **still broken** (CRIT-POST14-1 operator gate) |
+| Live LLM functionality | broken (401) | **restored** — 1078ms claude-haiku round-trip verified |
+| `LLM_API_KEY` env state | set (closed account) | **empty** (verified post-recreate) |
 
 Backup tags pushed: `pre-batch1-2026-06-05` … `pre-batch6-2026-06-05`.
 Data tarball at `/mnt/s/router_and_LAN/backups/www1/manual/tax-ai-data-2026-06-05_pre-batch5.tar.gz`.
@@ -22,7 +23,7 @@ Data tarball at `/mnt/s/router_and_LAN/backups/www1/manual/tax-ai-data-2026-06-0
 
 ### Batch 1 — Cluster URL switch (CRIT-POST14-1 + HIGH-POST14-1)
 
-**Status**: code-side complete (`52ca829`); operator step still required.
+**Status**: ✅ **COMPLETE** (`52ca829` code + operator step + `5455b5c` test follow-up). Live LLM verified 2026-06-05 ~20:50 EDT.
 
 **Code shipped**:
 - `PUBLIC_LLM_PROXY2_URL` constant flipped to `https://www.voipguru.org/llm-proxy/v1`.
@@ -34,27 +35,42 @@ Data tarball at `/mnt/s/router_and_LAN/backups/www1/manual/tax-ai-data-2026-06-0
   "Cluster-split note (2026-06-05)" runbook subsection.
 - 1 new test: `test_cluster_split_old_url_rewrites_to_new`.
 
-**Operator action still required** (BLOCKING live LLM recovery):
-1. Provision a new `llmp-*` key at `https://www.voipguru.org/llm-proxy/keys`
-   (separate session cookie `llmproxy_clone_session`).
-2. Edit `/home/dblagbro/docker/.env`:
-   - `LLM_PROXY2_KEY=<new-key>`
-   - `LLM_API_KEY=` (clear — HIGH-POST14-1)
-   - `LLM_PROXY2_URL=https://www.voipguru.org/llm-proxy/v1` (optional)
-3. `docker restart tax-ai-analyzer`. Migration auto-rewrites the URL
-   and the api_key on the live `llm_proxy_endpoints` row.
+**Operator action done** (2026-06-05 ~20:50 EDT):
+1. Same `llmp-*` key (suffix `…Zuc8`) was re-provisioned/activated on
+   `/llm-proxy/` cluster — the original 401 was an artifact of the
+   compliance cluster split, not a key invalidation.
+2. `LLM_API_KEY` cleared in `/home/dblagbro/docker/.env` (HIGH-POST14-1).
+3. `docker compose up -d --force-recreate --no-deps tax-ai-analyzer` —
+   container recreated, new env loaded, boot migration re-confirmed the
+   `llm_proxy_endpoints` row already at the new URL (was migrated by
+   Batch 5's restart earlier in the wave).
 
-**Verification probe** (run AFTER operator step):
-```python
-from app.llm_client.proxy_manager import build_anthropic_client
-from app import db
-ep = db.llm_proxy_list_endpoints(include_disabled=True)[0]
-assert ep["url"] == "https://www.voipguru.org/llm-proxy/v1"
-client = build_anthropic_client(ep, lmrh_hint="task=classification, cost=economy")
-r = client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=8,
-                            messages=[{"role":"user","content":"OK"}])
-print(r.content[0].text)  # → "OK"
+**Verification probes run** (live, post-recreate):
 ```
+endpoint URL:  https://www.voipguru.org/llm-proxy/v1
+key tail:      …Zuc8
+LLM_API_KEY:   <empty> (len 0)
+
+Probe 1 (task=classification, cost=economy):
+  ✓ 1278ms model=claude-haiku-4-5-20251001 reply='OK'
+
+Probe 2 (task=codegen, cost=premium, provider-hint=claude-oauth,anthropic,
+         anthropic-direct;require):
+  ✓ 930ms model=claude-haiku-4-5-20251001 reply='OK'
+
+Probe 3 (after container --force-recreate):
+  ✓ 1078ms model=claude-haiku-4-5-20251001 reply='OK'
+```
+
+**Follow-up patch `5455b5c`**: three tests in
+`test_bank_codegen_regenerate.py` started failing post-recreate because
+they force the proxy chain to fail and mock the direct-SDK fallback.
+The codegen guard reads `config.LLM_API_KEY` (module constant evaluated
+at import time from env, now empty). Patched the affected tests to
+`patch("app.config.LLM_API_KEY", "sk-ant-test-fake")` so the mock is
+reached. Not a production bug — those tests exercise a decommissioned
+path and should eventually be refactored to mock the proxy path
+instead.
 
 ### Batch 2 — Validator + schema test (HIGH-POST14-2 + LOW-POST14-3)
 
@@ -119,8 +135,8 @@ Post-Batch-6:              256 passed, 30 skipped  (+0 — doc/prompt only)
 
 | ID | Title | Status |
 |---|---|---|
-| CRIT-POST14-1 | Proxy chain 401 | **code-side fixed; operator step pending** (provision new key + edit `.env`) |
-| HIGH-POST14-1 | `LLM_API_KEY` still set | **deferred to operator** (operator clears `.env` in same edit as CRIT-POST14-1) |
+| CRIT-POST14-1 | Proxy chain 401 | **fixed + verified** (Batch 1 code + operator step done 2026-06-05) |
+| HIGH-POST14-1 | `LLM_API_KEY` still set | **fixed + verified** (`.env` cleared, container recreated) |
 | HIGH-POST14-2 | Validator rejects email-cred | **fixed** (Batch 2) |
 | MED-POST14-1 | Health endpoint process-local | **fixed** (Batch 5) |
 | MED-POST14-2 | Orphan empty DBs | **fixed** (Batch 3) |
@@ -129,11 +145,11 @@ Post-Batch-6:              256 passed, 30 skipped  (+0 — doc/prompt only)
 | LOW-POST14-1 | Hyphen vs underscore | **fixed** (Batch 6, docs) |
 | LOW-POST14-2 | Dispatcher 400 vs 404 | **fixed** (Batch 3) |
 | LOW-POST14-3 | Schema test column gap | **fixed** (Batch 2) |
-| ENH-POST14-1 | `cost_class` verification | **deferred** until live proxy works (Batch 1 operator step) |
+| ENH-POST14-1 | `cost_class` verification | **investigated** — plumbing correct, proxy `LLM-Capability` header does NOT emit `cost_class=` dim. 4768 historical rows all empty. Needs llm-proxy2 team Q: is `cost_class` opt-in or restricted to certain provider_types? |
 | ENH-POST14-2 | Codegen prompt email-aware | **fixed** (Batch 6) |
 | ENH-POST14-3 | Real-bank retest | **deferred** (user-triggered, no automation available) |
 
-**Tally**: 10 fixed in code, 2 deferred to operator (CRIT-POST14-1 + HIGH-POST14-1 — single edit), 1 deferred until proxy works (ENH-POST14-1), 1 user-triggered (ENH-POST14-3).
+**Final tally**: **12 of 13 closed.** 1 user-triggered (ENH-POST14-3 real-bank retest), and ENH-POST14-1 reduced to a single ops question for the llm-proxy team (plumbing verified end-to-end; just no header dim to extract).
 
 ## Image artifacts
 
@@ -160,16 +176,15 @@ curl -sf "https://hub.docker.com/v2/repositories/dblagbro/tax-ai-analyzer/tags/?
 
 ## What's NOT covered
 
-- **Live LLM round-trip**: still blocked on Batch 1 operator step. No real LLM call has succeeded since the cluster split memo of 2026-06-05.
+- **`cost_class` populated in `llm_usage`**: end-to-end plumbing verified by direct probe (4 calls, header captured, extract function called). Proxy doesn't emit the dim. Need ops Q to llm-proxy2 team. Cosmetic — AI Costs UI just shows everything as "unknown" until the dim flows.
 - **Real-bank retest** (ENH-POST14-3): the 5 Phase-14-refactored importers (merrick, chime, verizon, capitalone, usbank) have not been exercised against live banks since the orchestrator refactor. Closures pass structural tests but real-bank integration is the only proof. Recommended first re-test: merrick (no MFA, simplest closure shape).
 - **Playwright browser UI**: no automated browser-driven UI tests possible from this environment.
 
 ## Recommended next steps
 
-1. **Operator** (highest priority): complete Batch 1's pending step. New `llmp-*` key on `/llm-proxy/`, edit `.env`, restart container. Probe with the verification snippet above.
-2. **Once live LLM works**: run the deferred ENH-POST14-1 probe (fire ~10 mixed-task calls, query `SELECT cost_class, COUNT(*) FROM llm_usage GROUP BY cost_class`).
-3. **At user signal**: trigger ENH-POST14-3 real-bank retest (merrick first).
-4. **Memory refresh**: when this is fully closed, update `tax_ai_resume_2026_05_01.md` to point at HEAD `76be477` + the new Docker Hub tag.
+1. **Ask llm-proxy2 ops**: is `cost_class` an opt-in dim, restricted to certain provider_types, or coming in a future LMRH version? Our 4-probe test showed `LLM-Capability: v=1, provider=…, model=…, task=…, safety=…, latency=…, cost=…` with no `cost_class=`. We extract correctly (`_extract_cost_class`) but get empty strings.
+2. **At user signal**: trigger ENH-POST14-3 real-bank retest. Merrick first (no MFA, simplest closure shape). Then USAlliance for the MFA dance.
+3. **Memory refresh**: update `tax_ai_resume_2026_05_01.md` to point at HEAD `5455b5c` + the new Docker Hub tag `phase-14-remediated-2026-06-05`.
 
 ## Cross-batch invariants — held
 
@@ -182,4 +197,4 @@ curl -sf "https://hub.docker.com/v2/repositories/dblagbro/tax-ai-analyzer/tags/?
 ## Effort accounting
 
 Plan estimate was ~4.5 hours code + 10 min operator.
-Actual: ~2 hours of focused code work + image build + Hub push (operator step pending).
+Actual: ~2.5 hours total — 6 code commits + 1 follow-up test patch + image build + Hub push + operator `.env` edit + container recreate + live LLM verification. **All inside one session.**
