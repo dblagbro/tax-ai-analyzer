@@ -41,21 +41,30 @@ _SAFE_SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 def _resolve_importer(slug: str):
-    """Return the importer module for a deployed bank slug, or (None, errstr)."""
+    """Return (module, error_msg, http_status) for a deployed bank slug.
+
+    On success: (module, "", 200).
+    On failure: (None, descriptive_message, http_status) where http_status
+    distinguishes client errors (invalid input shape) from missing resources:
+      400 — slug fails the safe-identifier regex
+      404 — slug shape OK but no bank/deployed importer matches
+      500 — importer module fails to import (deployed bank but its on-disk
+            file is broken — internal misconfig, not a client error)
+    """
     if not _SAFE_SLUG_RE.match(slug):
-        return None, "invalid slug"
+        return None, f"invalid slug format (must match {_SAFE_SLUG_RE.pattern})", 400
     bank = db.get_pending_bank_by_slug(slug)
     if not bank:
-        return None, "bank not found"
+        return None, "bank not found", 404
     deployed = [g for g in db.list_generated_importers(bank["id"])
                 if g.get("deployed_path") and g.get("deployed_at")]
     if not deployed:
-        return None, "bank has no deployed importer"
+        return None, "bank has no deployed importer", 404
     try:
         mod = importlib.import_module(f"app.importers.{slug}_importer")
     except Exception as e:
-        return None, f"import failed: {e}"
-    return mod, ""
+        return None, f"import failed: {e}", 500
+    return mod, "", 200
 
 
 def _setting_keys(slug: str) -> dict:
@@ -69,9 +78,9 @@ def _setting_keys(slug: str) -> dict:
 @bp.route(URL_PREFIX + "/api/import/auto/<slug>/credentials", methods=["POST"])
 @login_required
 def api_auto_credentials(slug):
-    mod, err = _resolve_importer(slug)
+    mod, err, status = _resolve_importer(slug)
     if err:
-        return jsonify({"error": err}), 404
+        return jsonify({"error": err}), status
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
     password = (data.get("password") or "").strip()
@@ -86,9 +95,9 @@ def api_auto_credentials(slug):
 @bp.route(URL_PREFIX + "/api/import/auto/<slug>/cookies", methods=["POST"])
 @login_required
 def api_auto_cookies_save(slug):
-    mod, err = _resolve_importer(slug)
+    mod, err, status = _resolve_importer(slug)
     if err:
-        return jsonify({"error": err}), 404
+        return jsonify({"error": err}), status
     data = request.get_json() or {}
     raw = data.get("cookies")
     if not raw:
@@ -111,9 +120,9 @@ def api_auto_cookies_save(slug):
 @bp.route(URL_PREFIX + "/api/import/auto/<slug>/cookies", methods=["DELETE"])
 @login_required
 def api_auto_cookies_clear(slug):
-    mod, err = _resolve_importer(slug)
+    mod, err, status = _resolve_importer(slug)
     if err:
-        return jsonify({"error": err}), 404
+        return jsonify({"error": err}), status
     db.set_setting(_setting_keys(slug)["cookies"], "")
     return jsonify({"status": "cleared"})
 
@@ -121,9 +130,9 @@ def api_auto_cookies_clear(slug):
 @bp.route(URL_PREFIX + "/api/import/auto/<slug>/status", methods=["GET"])
 @login_required
 def api_auto_status(slug):
-    mod, err = _resolve_importer(slug)
+    mod, err, status = _resolve_importer(slug)
     if err:
-        return jsonify({"error": err}), 404
+        return jsonify({"error": err}), status
     keys = _setting_keys(slug)
     user = db.get_setting(keys["username"]) or ""
     cookies_raw = db.get_setting(keys["cookies"]) or ""
@@ -144,9 +153,9 @@ def api_auto_status(slug):
 @bp.route(URL_PREFIX + "/api/import/auto/<slug>/mfa", methods=["POST"])
 @login_required
 def api_auto_mfa(slug):
-    mod, err = _resolve_importer(slug)
+    mod, err, status = _resolve_importer(slug)
     if err:
-        return jsonify({"error": err}), 404
+        return jsonify({"error": err}), status
     data = request.get_json() or {}
     job_id = data.get("job_id")
     code = (data.get("code") or "").strip()
@@ -162,9 +171,9 @@ def api_auto_mfa(slug):
 @bp.route(URL_PREFIX + "/api/import/auto/<slug>/start", methods=["POST"])
 @login_required
 def api_auto_start(slug):
-    mod, err = _resolve_importer(slug)
+    mod, err, status = _resolve_importer(slug)
     if err:
-        return jsonify({"error": err}), 404
+        return jsonify({"error": err}), status
     run_import = getattr(mod, "run_import", None)
     if not callable(run_import):
         return jsonify({"error": "importer does not implement run_import"}), 500

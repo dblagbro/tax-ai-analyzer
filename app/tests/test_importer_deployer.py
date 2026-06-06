@@ -194,6 +194,32 @@ def test_auto_dispatcher_404s_unknown_slug():
         s["_user_id"] = "1"; s["_fresh"] = True
     r = client.get("/tax-ai-analyzer/api/import/auto/no_such_slug/status")
     assert r.status_code == 404
+    body = r.get_json()
+    assert "bank not found" in (body or {}).get("error", "").lower()
+
+
+def test_auto_dispatcher_400s_invalid_slug_shape():
+    """LOW-POST14-2 regression guard: slugs that fail the safe-identifier
+    regex (uppercase, dashes, leading digit, path traversal) get 400 NOT
+    404. 'bank not found' would be misleading for a malformed-input case."""
+    from app.web_ui import app
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["_user_id"] = "1"; s["_fresh"] = True
+
+    cases = [
+        "with-dash",       # contains dash (regex allows only [a-z0-9_])
+        "UpperCase",       # uppercase letter
+        "1startsdigit",    # starts with a digit
+        "_leading_under",  # starts with underscore
+    ]
+    for slug in cases:
+        r = client.get(f"/tax-ai-analyzer/api/import/auto/{slug}/status")
+        assert r.status_code == 400, \
+            f"{slug!r}: expected 400, got {r.status_code} body={r.get_json()}"
+        body = r.get_json()
+        assert "invalid slug format" in (body or {}).get("error", "").lower(), \
+            f"{slug!r}: expected 'invalid slug format' in error, got {body!r}"
 
 
 def test_auto_dispatcher_finds_deployed_module():
