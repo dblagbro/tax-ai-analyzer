@@ -37,8 +37,11 @@ def api_analyze_trigger():
             llm_model = db.get_setting("llm_model") or config.LLM_MODEL
             paperless_token = db.get_setting("paperless_api_token") or config.PAPERLESS_API_TOKEN
 
-            if not llm_api_key:
-                db.log_activity("analysis_error", "LLM API key not configured")
+            # 2026-09-05: gate on proxy-aware capability check, not raw key.
+            from app.llm_client import has_llm_capability
+            if not has_llm_capability(llm_api_key):
+                db.log_activity("analysis_error",
+                                "No LLM capability (no API key AND no enabled proxy endpoints)")
                 return
 
             client = PaperlessClient(token=paperless_token)

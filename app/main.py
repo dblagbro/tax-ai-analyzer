@@ -65,8 +65,15 @@ def analysis_daemon():
             llm_model = db.get_setting("llm_model") or config.LLM_MODEL
             paperless_token = db.get_setting("paperless_api_token") or config.PAPERLESS_API_TOKEN
 
-            if not llm_api_key:
-                _log("LLM API key not configured — skipping analysis cycle")
+            # Fixed 2026-09-05 per llm-proxy2 ops feedback: gate on
+            # has_llm_capability(), which accepts EITHER direct-SDK key OR
+            # a configured proxy endpoint. The previous `if not llm_api_key`
+            # gate silently skipped the analysis daemon for months while
+            # our proxy chain was fully working, because LLM_API_KEY has
+            # been intentionally empty since 2026-05-01.
+            from app.llm_client import has_llm_capability
+            if not has_llm_capability(llm_api_key):
+                _log("No LLM capability (no API key AND no enabled proxy endpoints) — skipping analysis cycle")
                 time.sleep(config.POLL_INTERVAL)
                 continue
 

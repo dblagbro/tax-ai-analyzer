@@ -528,29 +528,38 @@ def _migrate(conn):
 # Public URL for the llm-proxy. Per Devin's directive (2026-04-30): NEVER
 # use local-access URLs for LLM/AI/proxy calls. Always the public URL.
 #
-# 2026-06-05 cluster-split (memo from llm-proxy2 ops): /llm-proxy2/ is now
-# the compliance-locked fleet (no Anthropic providers). tax-ai-analyzer is
-# explicitly recommended onto /llm-proxy/ (no "2"), the full-catalog
-# fleet. The constant below switched paths accordingly.
+# 2026-09-05 v1 retirement (memo from llm-proxy2 ops): the v1 container was
+# retired 2026-08-17. /llm-proxy/ still resolves via a compatibility repoint
+# to llm-proxy2, but ops explicitly asked us not to build on it — the
+# canonical URL is /llm-proxy2/v1 again.
 #
-# Variable name retained as PUBLIC_LLM_PROXY2_URL to avoid a noisy
-# rename across the call sites — the "2" now refers to the LMRH v2
-# protocol family (claude-oauth, anthropic-direct, etc.), not the URL
-# path. Future cleanup: rename to PUBLIC_LLM_PROXY_URL if/when we
-# touch every reader.
-PUBLIC_LLM_PROXY2_URL = "https://www.voipguru.org/llm-proxy/v1"
+# Historical note: the 2026-06-05 cluster-split memo had migrated us from
+# /llm-proxy2/ to /llm-proxy/. That was correct then but is now reversed;
+# the fleet consolidated. Any legacy row still pointing at /llm-proxy/
+# should be migrated to /llm-proxy2/ on next init_db.
+#
+# Variable name retained as PUBLIC_LLM_PROXY2_URL because it's the accurate
+# name today. (Naming that briefly looked stale in June-Sept is correct again.)
+PUBLIC_LLM_PROXY2_URL = "https://www.voipguru.org/llm-proxy2/v1"
 
 # Substring fragments that mark a URL as "should be rewritten on next boot."
 # Includes:
 #   - true local-access hosts (localhost, 127.0.0.1, ::1, host.docker.internal)
 #   - decommissioned internal docker names (llm-proxy-manager — v1, gone)
-#   - the OLD cluster URL path fragment (llm-proxy2) — post-2026-06-05
-#     cluster split, all live rows pointing at /llm-proxy2/ should migrate
-#     to the canonical /llm-proxy/ URL on next init_db.
+#   - /llm-proxy/ path — post-2026-09-05, this is a compatibility repoint
+#     only; canonical URL is /llm-proxy2/. Migrate on init_db.
+#
+# Substring matching is precise about docker-internal-hostname vs public-URL-path:
+#   //llm-proxy2:   catches http://llm-proxy2:3000/... (docker hostname form)
+#                   but NOT https://www.voipguru.org/llm-proxy2/v1 (public path)
+#   /llm-proxy/     catches .../llm-proxy/v1 (legacy path)
+#                   but NOT .../llm-proxy2/v1 (canonical — no trailing /)
 _LOCAL_HOST_FRAGMENTS = (
     "localhost", "127.0.0.1", "host.docker.internal", "::1",
-    "llm-proxy2",          # old compliance-cluster path; rewrite to /llm-proxy/
-    "llm-proxy-manager",   # v1 internal docker name (decommissioned)
+    "//llm-proxy2:",        # internal docker hostname (rewrite to public)
+    "//llm-proxy-manager:", # v1 internal docker (decommissioned)
+    "llm-proxy-manager.",   # covers old FQDN forms
+    "/llm-proxy/",          # legacy public path — migrate to /llm-proxy2/
 )
 
 

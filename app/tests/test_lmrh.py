@@ -459,20 +459,24 @@ def test_public_url_passes_through():
     assert _normalize_llm_proxy_url(other) == other
 
 
-def test_cluster_split_old_url_rewrites_to_new():
-    """2026-06-05 cluster split: the OLD compliance-cluster public URL
-    (/llm-proxy2/v1) must be rewritten to the new full-catalog URL
-    (/llm-proxy/v1). This is the migration path that boot rewrites apply
-    to any existing llm_proxy_endpoints rows still pointing at the old
-    fleet.
+def test_cluster_reconsolidation_legacy_path_rewrites_to_canonical():
+    """2026-09-05 v1 retirement: /llm-proxy/ is now a compatibility repoint
+    only. Canonical URL is /llm-proxy2/v1 again. Any live row still pointing
+    at /llm-proxy/ should migrate to /llm-proxy2/ on boot.
+
+    Historical context: June 2026 the fleet split into /llm-proxy2/
+    (compliance) vs /llm-proxy/ (full-catalog) and we migrated to
+    /llm-proxy/. September 2026 v1 was retired, the split dissolved, and
+    /llm-proxy2/ became canonical again. This test guards against a future
+    regression back to /llm-proxy/.
     """
     from app.db.core import _normalize_llm_proxy_url, PUBLIC_LLM_PROXY2_URL
-    # Sanity: the canonical URL has migrated to /llm-proxy/ (no "2")
-    assert PUBLIC_LLM_PROXY2_URL == "https://www.voipguru.org/llm-proxy/v1"
+    # Sanity: canonical URL has migrated back to /llm-proxy2/
+    assert PUBLIC_LLM_PROXY2_URL == "https://www.voipguru.org/llm-proxy2/v1"
 
-    # The old cluster URL should be flagged as "needs rewrite" and migrate
-    old_compliance_url = "https://www.voipguru.org/llm-proxy2/v1"
-    rewritten = _normalize_llm_proxy_url(old_compliance_url)
+    # The legacy compatibility URL should be flagged and rewritten
+    legacy_url = "https://www.voipguru.org/llm-proxy/v1"
+    rewritten = _normalize_llm_proxy_url(legacy_url)
     assert rewritten == PUBLIC_LLM_PROXY2_URL, \
         f"expected {PUBLIC_LLM_PROXY2_URL}, got {rewritten}"
 
