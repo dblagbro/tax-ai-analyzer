@@ -356,10 +356,17 @@ async function loadGmailImportStatus() {
         credentials.json ${cred?'loaded':'not configured'}
        </span>`+
       `<span style="display:inline-flex;align-items:center;gap:6px">
-        <span style="width:8px;height:8px;border-radius:50%;background:${auth?'#28a745':'#ffc107'};display:inline-block"></span>
-        OAuth ${auth?'authorized — ready to import':'not authorized'}
+        <span style="width:8px;height:8px;border-radius:50%;background:${auth?'#28a745':(s.has_token?'#dc3545':'#ffc107')};display:inline-block"></span>
+        OAuth ${auth?'authorized — ready to import':(s.has_token?'token expired — reconnect required':'not authorized')}
        </span>`;
-    if(!auth && s.callback_url) {
+    // 2026-09-06: a stored-but-dead token used to render as "authorized".
+    if(!auth && s.has_token && s.token_error) {
+      html += `<div style="margin-top:8px;padding:8px 10px;background:#fdecea;border:1px solid #f5c6cb;border-radius:6px;font-size:.78rem;color:#555">
+        <strong style="color:#b71c1c">&#9888; Gmail token no longer works:</strong> ${esc(s.token_error)}<br>
+        <span style="display:block;margin-top:4px;color:#888">Click <em>Connect Gmail</em> below to re-authorize — imports fail until you do.</span>
+      </div>`;
+    }
+    if(!auth && !s.has_token && s.callback_url) {
       html += `<div style="margin-top:8px;padding:8px 10px;background:#fff8e1;border:1px solid #ffd54f;border-radius:6px;font-size:.78rem;color:#555">
         <strong style="color:#e65100">&#9888; Action required:</strong> Add this Authorized Redirect URI to your Google Cloud credential:<br>
         <code style="background:#f5f5f5;padding:2px 6px;border-radius:3px;user-select:all">${esc(s.callback_url)}</code>

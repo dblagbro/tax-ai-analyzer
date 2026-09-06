@@ -196,11 +196,18 @@ def gmail_clear_credentials():
 @login_required
 def gmail_status_api():
     from app.config import GMAIL_SEARCH_TERMS
+    from app.importers.gmail.auth import token_health
     token_in_db = bool(db.get_setting("gmail_oauth_token"))
+    # 2026-09-06: "authenticated" now means the token actually works (cached
+    # 60 s), not merely that a token row exists — the stored refresh token had
+    # been dead for months while this endpoint kept saying true.
+    th = token_health(force=bool(request.args.get("force")))
     return jsonify({
         "has_credentials": os.path.exists(GMAIL_CREDENTIALS_FILE),
         "has_token": os.path.exists(GMAIL_TOKEN_FILE) or token_in_db,
-        "authenticated": token_in_db,
+        "authenticated": bool(th["valid"]),
+        "token_valid": bool(th["valid"]),
+        "token_error": th["error"],
         "search_terms": GMAIL_SEARCH_TERMS,
         "callback_url": _gmail_callback_url(),
     })

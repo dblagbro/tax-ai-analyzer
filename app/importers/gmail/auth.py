@@ -90,6 +90,8 @@ def get_credentials() -> Optional["google.oauth2.credentials.Credentials"]:
             })
         except Exception as e:
             logger.warning(f"Gmail token refresh failed: {e}")
+            global _LAST_REFRESH_ERROR
+            _LAST_REFRESH_ERROR = str(e)[:200]
             return None
     return creds if creds.valid else None
 
@@ -132,6 +134,42 @@ def is_authenticated() -> bool:
         return get_credentials() is not None
     except Exception:
         return False
+
+
+# 2026-09-06: the status endpoint used to report authenticated=true whenever
+# a token ROW existed. The stored refresh token had been dead (invalid_grant)
+# for months and nothing in the UI said so. token_health() actually exercises
+# the token (refreshing if needed) and is cached so the Import tab can poll it.
+_LAST_REFRESH_ERROR = ""
+_TOKEN_HEALTH_CACHE: dict = {"ts": 0.0, "result": None}
+
+
+def token_health(max_age_s: int = 60, force: bool = False) -> dict:
+    """{"has_token": bool, "valid": bool, "error": str}. Network call at most
+    once per max_age_s; never raises."""
+    import time
+    global _LAST_REFRESH_ERROR
+    now = time.time()
+    cached = _TOKEN_HEALTH_CACHE["result"]
+    if cached is not None and not force and now - _TOKEN_HEALTH_CACHE["ts"] < max_age_s:
+        return dict(cached)
+    if not _load_token_from_db():
+        result = {"has_token": False, "valid": False, "error": "no Gmail token stored — connect Gmail"}
+    else:
+        _LAST_REFRESH_ERROR = ""
+        try:
+            creds = get_credentials()
+            if creds is not None:
+                result = {"has_token": True, "valid": True, "error": ""}
+            else:
+                why = _LAST_REFRESH_ERROR or "token invalid"
+                hint = " — Google expired the refresh token; reconnect Gmail" if "invalid_grant" in why else ""
+                result = {"has_token": True, "valid": False, "error": f"{why}{hint}"}
+        except Exception as e:
+            result = {"has_token": True, "valid": False, "error": str(e)[:200]}
+    _TOKEN_HEALTH_CACHE["ts"] = now
+    _TOKEN_HEALTH_CACHE["result"] = dict(result)
+    return result
 
 
 # ── search / fetch helpers ─────────────────────────────────────────────────────
