@@ -96,6 +96,93 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
     net_color = "#28a745" if net >= 0 else "#dc3545"
     generated_ts = datetime.now().strftime("%B %d, %Y at %I:%M %p")
 
+    # ── Coverage & gaps (2026-09-06) ──────────────────────────────────────────
+    # The accountant's first question is "is this complete?" — answer it on
+    # page 1 instead of making them infer it from thin sections below.
+    gaps_section = ""
+    try:
+        from app.routes.reports import _monthly_coverage, _EXPECTED_TAX_FORMS
+        from app.db.core import get_connection as _gc
+        _conn = _gc()
+        try:
+            _months = _monthly_coverage(_conn, year, entity_id=(entity_obj["id"] if entity_obj else None))
+            _present = {
+                r[0] for r in _conn.execute(
+                    "SELECT DISTINCT doc_type FROM analyzed_documents "
+                    "WHERE tax_year = ? AND (? IS NULL OR entity_id = ?) "
+                    "AND (is_duplicate = 0 OR is_duplicate IS NULL)",
+                    (year, entity_obj["id"] if entity_obj else None,
+                     entity_obj["id"] if entity_obj else None),
+                ).fetchall()
+            }
+        finally:
+            _conn.close()
+        _missing_forms = [f for f in _EXPECTED_TAX_FORMS if f not in _present]
+        _sparse = [m for m in _months if m["transactions"] < 10]
+        _covered = 12 - len(_sparse)
+        _cov_color = "#28a745" if _covered >= 11 else ("#e0a800" if _covered >= 6 else "#dc3545")
+        _month_cells = "".join(
+            f'<td style="text-align:center;padding:4px;background:{"#f8d7da" if m["transactions"] < 10 else "#d4edda"}">'
+            f'<div style="font-size:8pt;color:#666">{m["month"][5:]}</div>'
+            f'<div style="font-weight:bold">{m["transactions"]}</div></td>'
+            for m in _months
+        )
+        _missing_html = (
+            "".join(f'<span style="display:inline-block;background:#f8d7da;color:#721c24;'
+                    f'padding:2px 6px;margin:2px;border-radius:3px;font-size:8pt">{f}</span>'
+                    for f in _missing_forms)
+            if _missing_forms else '<span style="color:#28a745">All expected forms present</span>'
+        )
+        gaps_section = f"""
+<h2>Coverage &amp; Gaps</h2>
+<div style="display:table;width:100%;margin:8px 0">
+  <div style="display:table-cell;width:30%;padding:8px 12px;border:1px solid #ddd;background:#f8f9fa;vertical-align:top">
+    <div class="summary-label">Months with data</div>
+    <div class="summary-amount" style="color:{_cov_color}">{_covered} / 12</div>
+    <div style="font-size:8pt;color:#666">≥10 transactions = covered</div>
+  </div>
+  <div style="display:table-cell;padding:8px 12px;border:1px solid #ddd;vertical-align:top">
+    <div class="summary-label">Expected tax forms not yet on file</div>
+    <div style="margin-top:6px">{_missing_html}</div>
+  </div>
+</div>
+<table style="margin-top:6px"><tr>{_month_cells}</tr></table>
+<div style="font-size:8pt;color:#856404;margin-top:4px">
+  Red months have fewer than 10 transactions — usually a bank or card statement that hasn't been imported yet.
+  Sections below only reflect what has been ingested; totals will change as coverage fills in.
+</div>"""
+    except Exception as _e:  # never let the gap panel break the whole report
+        gaps_section = f'<div style="font-size:8pt;color:#999">(coverage panel unavailable: {_e})</div>'
+
+    # ── Source document manifest (2026-09-06) ─────────────────────────────────
+    # Every figure above traces back to a document. List them all so the
+    # accountant can spot-check any line against the original.
+    _manifest_docs = sorted(
+        [d for d in documents if d.get("paperless_doc_id")],
+        key=lambda x: (x.get("date") or "", x.get("vendor") or ""),
+    )
+    _manifest_rows = "".join(
+        f"<tr><td>{d.get('date') or ''}</td>"
+        f"<td>{d.get('vendor') or ''}</td>"
+        f"<td>{d.get('doc_type') or ''}</td>"
+        f"<td>{d.get('category') or ''}</td>"
+        f"<td style='text-align:right'>${float(d.get('amount') or 0):,.2f}</td>"
+        f"<td style='font-family:monospace;font-size:8pt'>"
+        f"<a href='https://www.voipguru.org/tax-paperless/documents/{d.get('paperless_doc_id')}/'>#{d.get('paperless_doc_id')}</a></td></tr>"
+        for d in _manifest_docs
+    )
+    manifest_section = (
+        f"""<h2 style="page-break-before:always">Source Document Manifest <span class="section-count">({len(_manifest_docs)} documents)</span></h2>
+<div style="font-size:8pt;color:#666;margin-bottom:6px">
+  Every line in this report traces to a stored document. Click a Paperless ID to open the original.
+</div>
+<table>
+  <tr><th>Date</th><th>Party</th><th>Type</th><th>Category</th><th>Amount</th><th>Paperless</th></tr>
+  {_manifest_rows}
+</table>"""
+        if _manifest_docs else ""
+    )
+
     # Pre-compute sections that can't be inlined in f-strings
     other_docs_section = (
         f"""<h2>Other Documents <span class="section-count">({len(other_docs)} total)</span></h2>
@@ -169,6 +256,8 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
   </div>
 </div>
 
+{gaps_section}
+
 <!-- Income section -->
 <h2>Income Documents <span class="section-count">({len(income_docs)} total)</span></h2>
 
@@ -202,6 +291,8 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
 </table>
 
 {other_docs_section}
+
+{manifest_section}
 
 <div class="disclaimer">
   <strong>For Accountant Review Only</strong> — This report was generated by an AI document analysis
