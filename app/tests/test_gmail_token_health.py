@@ -1,9 +1,11 @@
 """/api/import/gmail/status must report whether the token WORKS, not whether
-a token row exists. (2026-09-06 — the stored refresh token was dead for
-months while the endpoint said authenticated=true.)"""
+a token row exists. google-auth calls a stored access token "valid" until it
+is used, so token_health() makes a real (cheap) getProfile call.
+(2026-09-06 — the stored refresh token was dead for months while the endpoint
+said authenticated=true.)"""
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -15,6 +17,15 @@ def _reset_cache():
     auth._TOKEN_HEALTH_CACHE["result"] = None
 
 
+def _fake_build(profile=None, error=None):
+    svc = MagicMock()
+    if error:
+        svc.users.return_value.getProfile.return_value.execute.side_effect = error
+    else:
+        svc.users.return_value.getProfile.return_value.execute.return_value = profile or {"emailAddress": "me@example.com"}
+    return lambda *a, **k: svc
+
+
 def test_no_token_stored():
     _reset_cache()
     with patch.object(auth, "_load_token_from_db", return_value=None):
@@ -22,7 +33,7 @@ def test_no_token_stored():
     assert th == {"has_token": False, "valid": False, "error": "no Gmail token stored — connect Gmail"}
 
 
-def test_dead_refresh_token_reports_invalid_with_hint():
+def test_refresh_failure_reports_invalid_with_hint():
     _reset_cache()
 
     def fake_get_credentials():
@@ -36,6 +47,17 @@ def test_dead_refresh_token_reports_invalid_with_hint():
     assert "invalid_grant" in th["error"] and "reconnect" in th["error"]
 
 
+def test_dead_token_only_fails_on_real_call():
+    """The exact production shape: creds look valid, the API call raises."""
+    _reset_cache()
+    with patch.object(auth, "_load_token_from_db", return_value={"refresh_token": "x"}), \
+         patch.object(auth, "get_credentials", return_value=object()), \
+         patch.object(auth, "_google_imports",
+                      return_value=(None, None, _fake_build(error=RuntimeError("invalid_grant: Bad Request")))):
+        th = auth.token_health(force=True)
+    assert th["valid"] is False and "invalid_grant" in th["error"] and "reconnect" in th["error"]
+
+
 def test_valid_token_and_cache():
     _reset_cache()
     calls = {"n": 0}
@@ -45,8 +67,10 @@ def test_valid_token_and_cache():
         return object()
 
     with patch.object(auth, "_load_token_from_db", return_value={"refresh_token": "x"}), \
-         patch.object(auth, "get_credentials", side_effect=fake_get_credentials):
-        assert auth.token_health(force=True)["valid"] is True
+         patch.object(auth, "get_credentials", side_effect=fake_get_credentials), \
+         patch.object(auth, "_google_imports", return_value=(None, None, _fake_build())):
+        th = auth.token_health(force=True)
+        assert th["valid"] is True and th["email"] == "me@example.com"
         assert auth.token_health()["valid"] is True  # served from cache
     assert calls["n"] == 1
 

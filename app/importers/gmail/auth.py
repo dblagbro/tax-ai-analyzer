@@ -159,10 +159,23 @@ def token_health(max_age_s: int = 60, force: bool = False) -> dict:
         _LAST_REFRESH_ERROR = ""
         try:
             creds = get_credentials()
-            if creds is not None:
-                result = {"has_token": True, "valid": True, "error": ""}
-            else:
+            if creds is None:
                 why = _LAST_REFRESH_ERROR or "token invalid"
+            else:
+                # google-auth reports a stored access token as "valid" until it
+                # is actually used; a dead refresh token only surfaces as
+                # invalid_grant on a real call. So make one — the cheapest
+                # Gmail call there is.
+                try:
+                    _, _, build = _google_imports()
+                    svc = build("gmail", "v1", credentials=creds, cache_discovery=False)
+                    prof = svc.users().getProfile(userId="me").execute()
+                    why = ""
+                    result = {"has_token": True, "valid": True, "error": "",
+                              "email": str(prof.get("emailAddress", ""))}
+                except Exception as e:
+                    why = str(e)[:200]
+            if why:
                 hint = " — Google expired the refresh token; reconnect Gmail" if "invalid_grant" in why else ""
                 result = {"has_token": True, "valid": False, "error": f"{why}{hint}"}
         except Exception as e:
