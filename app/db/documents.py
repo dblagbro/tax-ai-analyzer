@@ -64,6 +64,24 @@ def get_analyzed_doc_ids() -> set:
         conn.close()
 
 
+def get_provisional_doc_ids(limit: int = 500) -> list:
+    """Paperless IDs of documents whose stored analysis came from the
+    rules-only fallback (app.rules_analyzer) rather than the LLM. Oldest
+    first so a long outage drains in the order it was queued. The analysis
+    daemon re-runs these through the LLM as soon as it is reachable again."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT paperless_doc_id FROM analyzed_documents
+               WHERE extracted_json LIKE '%"provisional": true%'
+               ORDER BY analyzed_at ASC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+
 def get_analyzed_documents(
     entity_id: int = None,
     tax_year: str = None,

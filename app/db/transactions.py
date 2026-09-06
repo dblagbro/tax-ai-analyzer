@@ -260,3 +260,25 @@ def add_transaction(data: dict) -> dict:
         return dict(row) if row else {}
     finally:
         conn.close()
+
+
+def transaction_exists(source: str, source_id: str) -> bool:
+    """True when a row with this (source, source_id) is already stored.
+
+    2026-09-06: the transactions table has no UNIQUE index on source_id, so
+    importers that assumed "duplicate → IntegrityError" silently inserted
+    duplicates on every re-upload. Call this before add_transaction for any
+    source that produces a deterministic source_id (OFX FITID, PDF statement
+    line hash, Gmail message-id).
+    """
+    if not source_id:
+        return False
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM transactions WHERE source=? AND source_id=? LIMIT 1",
+            (source, source_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()

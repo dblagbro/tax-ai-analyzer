@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -31,28 +32,41 @@ logger = logging.getLogger(__name__)
 MAX_STATEMENT_BYTES = 25 * 1024 * 1024
 _CONVERT_TIMEOUT_S = 120
 
-# Generic fallback plugins that ship with ofxstatement itself and don't need a
-# per-bank package. Listed first so the UI offers them even before any bank
-# plugin is installed.
+# Converters that need no third-party ofxstatement plugin. Listed FIRST in the
+# UI because, for this user's banks (US Bank, US Alliance, Capital One, Chime,
+# Merrick, Amex, Synchrony, TD), no PyPI plugin exists — the built-in PDF
+# statement parser (app.importers.pdf_statement) is the path that actually
+# fills March–December 2023.
 _BUILTIN_HINTS = {
-    "ofx":      "Already OFX — pass-through (no conversion)",
-    "csv":      "Generic CSV (ofxstatement built-in; column mapping via config)",
+    "pdf-auto": "PDF statement (any US bank/card) — built-in parser, auto-detects bank vs card",
+    "pdf-card": "PDF credit-card statement — built-in parser (charges = money out)",
+    "pdf-bank": "PDF bank/checking statement — built-in parser (deposits in, withdrawals out)",
+    "ofx":      "Already OFX/QFX/QBO — pass-through (no conversion)",
 }
+BUILTIN_PLUGINS = tuple(_BUILTIN_HINTS)
+
+
+def is_builtin(plugin: str) -> bool:
+    return (plugin or "").strip() in _BUILTIN_HINTS
 
 
 def ofxstatement_available() -> bool:
     return shutil.which("ofxstatement") is not None
 
 
-def list_plugins() -> list[dict]:
-    """Return installed ofxstatement plugins as [{name, description}].
+_PLUGIN_LINE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9_.\-]*)\s{2,}(.*\S)\s*$")
 
-    Uses `ofxstatement list-plugins`. Returns [] (never raises) if the CLI is
-    missing, so the UI can show an "install ofxstatement-<bank>" hint instead
-    of a 500.
+
+def list_plugins() -> list[dict]:
+    """Return available converters as [{name, description}] — built-ins first,
+    then whatever `ofxstatement list-plugins` reports.
+
+    Never raises. If the ofxstatement CLI is missing the built-ins are still
+    returned (the PDF parser and OFX pass-through don't need it).
     """
+    plugins: list[dict] = [{"name": n, "description": d} for n, d in _BUILTIN_HINTS.items()]
     if not ofxstatement_available():
-        return []
+        return plugins
     try:
         out = subprocess.run(
             ["ofxstatement", "list-plugins"],
@@ -60,22 +74,27 @@ def list_plugins() -> list[dict]:
         )
     except Exception as e:
         logger.warning(f"ofxstatement list-plugins failed: {e!r}")
-        return []
-    plugins: list[dict] = []
-    for line in (out.stdout or "").splitlines():
-        line = line.strip()
-        # Format is typically:  "<name>  <description>"  — tolerate either spacing
-        if not line or line.lower().startswith(("the following", "no plugins", "plugin")):
-            continue
-        parts = line.split(None, 1)
-        name = parts[0].strip()
-        desc = parts[1].strip() if len(parts) > 1 else ""
-        if name:
-            plugins.append({"name": name, "description": desc})
-    # Always expose the two built-ins so the dropdown is never empty
+        return plugins
+    stdout = out.stdout or ""
+    # "No plugins available. Install plugin eggs or create your own.\nSee https://…"
+    if "no plugins available" in stdout.lower():
+        return plugins
     seen = {p["name"] for p in plugins}
-    for name, desc in _BUILTIN_HINTS.items():
+    for line in stdout.splitlines():
+        low = line.strip().lower()
+        if not low or low.startswith(("the following", "see ", "http")):
+            continue
+        m = _PLUGIN_LINE.match(line)
+        if not m:
+            # tolerate single-space separation: "<name> <desc>"
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2 or "://" in parts[0] or not re.match(r"^[A-Za-z0-9][\w.\-]*$", parts[0]):
+                continue
+            name, desc = parts[0], parts[1].strip()
+        else:
+            name, desc = m.group(1), m.group(2)
         if name not in seen:
+            seen.add(name)
             plugins.append({"name": name, "description": desc})
     return plugins
 
@@ -103,6 +122,11 @@ def convert_to_ofx(
         raise RuntimeError("plugin required (run list_plugins() to see options)")
     if plugin == "ofx":
         return data
+    if plugin.startswith("pdf-"):
+        raise RuntimeError(
+            f"{plugin} is the built-in PDF statement parser — use "
+            "app.importers.pdf_statement.parse_pdf_statement, not convert_to_ofx"
+        )
     if not ofxstatement_available():
         raise RuntimeError(
             "ofxstatement CLI not installed in this image — add it to "

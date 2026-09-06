@@ -212,7 +212,14 @@ _EXPECTED_TAX_FORMS = ("W-2", "1099-NEC", "1099-K", "1099-INT", "1099-DIV",
 
 
 def _monthly_coverage(conn, year: str, entity_id=None) -> list[dict]:
-    """Transaction count + total per calendar month, zero-filled for all 12."""
+    """Per calendar month, zero-filled for all 12:
+      transactions  – rows in `transactions`
+      with_amount   – of those, rows carrying a non-zero amount (Gmail import
+                      creates amount-less pointer rows; they are not coverage)
+      documents     – analyzed (non-duplicate) documents dated in that month
+      total         – Σ|amount| of transactions
+      sources       – distinct transaction sources
+    """
     params: list = [year]
     entity_clause = ""
     if entity_id is not None:
@@ -220,6 +227,7 @@ def _monthly_coverage(conn, year: str, entity_id=None) -> list[dict]:
         params.append(entity_id)
     rows = conn.execute(
         f"""SELECT substr(date,1,7) AS ym, COUNT(*) AS n,
+                   SUM(CASE WHEN amount IS NOT NULL AND amount != 0 THEN 1 ELSE 0 END) AS with_amount,
                    COALESCE(SUM(ABS(amount)),0) AS total,
                    COUNT(DISTINCT source) AS sources
             FROM transactions
@@ -229,6 +237,16 @@ def _monthly_coverage(conn, year: str, entity_id=None) -> list[dict]:
         tuple(params),
     ).fetchall()
     by_month = {r["ym"]: r for r in rows}
+    doc_rows = conn.execute(
+        f"""SELECT substr(date,1,7) AS ym, COUNT(*) AS n
+            FROM analyzed_documents
+            WHERE tax_year = ?{entity_clause}
+              AND date IS NOT NULL AND date != ''
+              AND (is_duplicate = 0 OR is_duplicate IS NULL)
+            GROUP BY ym""",
+        tuple(params),
+    ).fetchall()
+    docs_by_month = {r["ym"]: r["n"] for r in doc_rows}
     out = []
     for m in range(1, 13):
         ym = f"{year}-{m:02d}"
@@ -236,6 +254,8 @@ def _monthly_coverage(conn, year: str, entity_id=None) -> list[dict]:
         out.append({
             "month": ym,
             "transactions": r["n"] if r else 0,
+            "with_amount": (r["with_amount"] or 0) if r else 0,
+            "documents": docs_by_month.get(ym, 0),
             "total": round(r["total"], 2) if r else 0.0,
             "sources": r["sources"] if r else 0,
         })
@@ -262,7 +282,11 @@ def api_gaps():
     conn = get_connection()
     try:
         months = _monthly_coverage(conn, year, entity_id=entity_id)
-        sparse_months = [m["month"] for m in months if m["transactions"] < min_txns]
+        # A month counts as covered when EITHER real transactions or analyzed
+        # documents reach the threshold — a month of PDF statements analyzed by
+        # the daemon is coverage even if no bank feed was imported.
+        sparse_months = [m["month"] for m in months
+                         if m["transactions"] < min_txns and m["documents"] < min_txns]
 
         # Tax forms present / missing
         params: list = [year]
@@ -328,7 +352,7 @@ def api_gaps():
         conn.close()
 
     total_txns = sum(m["transactions"] for m in months)
-    covered_months = sum(1 for m in months if m["transactions"] >= min_txns)
+    covered_months = 12 - len(sparse_months)  # same rule as sparse_months above
 
     return jsonify({
         "year": year,

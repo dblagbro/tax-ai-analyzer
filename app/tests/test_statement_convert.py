@@ -99,10 +99,13 @@ def test_cli_present_failure_surfaces_stderr_and_install_hint():
 # ── list_plugins ────────────────────────────────────────────────────────────
 
 def test_list_plugins_cli_absent_returns_builtins_only():
+    """No ofxstatement CLI → the built-in PDF parser + OFX pass-through are
+    still offered (they don't need it)."""
     from app.importers import statement_convert as sc
     with patch.object(sc.shutil, "which", return_value=None):
         plugins = sc.list_plugins()
-    assert plugins == []  # CLI absent → [] so the route can report available=False
+    assert [p["name"] for p in plugins] == list(sc.BUILTIN_PLUGINS)
+    assert plugins[0]["name"] == "pdf-auto"  # first = default in the UI
 
 
 def test_list_plugins_parses_cli_output_and_adds_builtins():
@@ -117,10 +120,37 @@ def test_list_plugins_parses_cli_output_and_adds_builtins():
     with patch.object(sc.shutil, "which", return_value="/usr/bin/ofxstatement"), \
          patch.object(sc.subprocess, "run", side_effect=fake_run):
         plugins = sc.list_plugins()
-    names = {p["name"] for p in plugins}
-    assert {"chase", "bofa", "ofx", "csv"} <= names
+    names = [p["name"] for p in plugins]
+    assert names[:len(sc.BUILTIN_PLUGINS)] == list(sc.BUILTIN_PLUGINS)  # built-ins first
+    assert {"chase", "bofa"} <= set(names)
     chase = next(p for p in plugins if p["name"] == "chase")
     assert chase["description"] == "Chase Bank CSV"
+
+
+def test_list_plugins_no_plugins_available_message_is_not_a_plugin():
+    """Real ofxstatement 0.9.3 output with nothing installed — the 'See https://…'
+    line used to be parsed as a plugin named 'See'."""
+    from app.importers import statement_convert as sc
+
+    def fake_run(cmd, **kw):
+        return MagicMock(returncode=0, stderr="",
+                         stdout="No plugins available. Install plugin eggs or create your own.\n"
+                                "See https://github.com/kedder/ofxstatement for more info.\n")
+
+    with patch.object(sc.shutil, "which", return_value="/usr/bin/ofxstatement"), \
+         patch.object(sc.subprocess, "run", side_effect=fake_run):
+        plugins = sc.list_plugins()
+    assert [p["name"] for p in plugins] == list(sc.BUILTIN_PLUGINS)
+
+
+def test_pdf_plugins_rejected_by_convert_to_ofx():
+    from app.importers.statement_convert import convert_to_ofx
+    try:
+        convert_to_ofx(b"%PDF", "s.pdf", "pdf-auto")
+    except RuntimeError as e:
+        assert "parse_pdf_statement" in str(e)
+        return
+    raise AssertionError("expected RuntimeError")
 
 
 # ── routes ──────────────────────────────────────────────────────────────────

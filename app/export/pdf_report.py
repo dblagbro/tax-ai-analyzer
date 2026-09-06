@@ -118,13 +118,16 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
         finally:
             _conn.close()
         _missing_forms = [f for f in _EXPECTED_TAX_FORMS if f not in _present]
-        _sparse = [m for m in _months if m["transactions"] < 10]
+        def _thin(m):  # same rule as /api/reports/gaps
+            return m["transactions"] < 10 and m.get("documents", 0) < 10
+        _sparse = [m for m in _months if _thin(m)]
         _covered = 12 - len(_sparse)
         _cov_color = "#28a745" if _covered >= 11 else ("#e0a800" if _covered >= 6 else "#dc3545")
         _month_cells = "".join(
-            f'<td style="text-align:center;padding:4px;background:{"#f8d7da" if m["transactions"] < 10 else "#d4edda"}">'
+            f'<td style="text-align:center;padding:4px;background:{"#f8d7da" if _thin(m) else "#d4edda"}">'
             f'<div style="font-size:8pt;color:#666">{m["month"][5:]}</div>'
-            f'<div style="font-weight:bold">{m["transactions"]}</div></td>'
+            f'<div style="font-weight:bold">{m["transactions"]}</div>'
+            f'<div style="font-size:7pt;color:#666">{m.get("documents", 0)} docs</div></td>'
             for m in _months
         )
         _missing_html = (
@@ -139,7 +142,7 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
   <div style="display:table-cell;width:30%;padding:8px 12px;border:1px solid #ddd;background:#f8f9fa;vertical-align:top">
     <div class="summary-label">Months with data</div>
     <div class="summary-amount" style="color:{_cov_color}">{_covered} / 12</div>
-    <div style="font-size:8pt;color:#666">≥10 transactions = covered</div>
+    <div style="font-size:8pt;color:#666">≥10 transactions or ≥10 documents = covered</div>
   </div>
   <div style="display:table-cell;padding:8px 12px;border:1px solid #ddd;vertical-align:top">
     <div class="summary-label">Expected tax forms not yet on file</div>
@@ -161,21 +164,34 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
         [d for d in documents if d.get("paperless_doc_id")],
         key=lambda x: (x.get("date") or "", x.get("vendor") or ""),
     )
+    def _is_provisional(d) -> bool:
+        # rules-only classification stored while the LLM was unreachable
+        return '"provisional": true' in (d.get("extracted_json") or "")
+    _n_provisional = sum(1 for d in _manifest_docs if _is_provisional(d))
     _manifest_rows = "".join(
         f"<tr><td>{d.get('date') or ''}</td>"
         f"<td>{d.get('vendor') or ''}</td>"
-        f"<td>{d.get('doc_type') or ''}</td>"
+        f"<td>{d.get('doc_type') or ''}"
+        + ("<span style='color:#856404;font-size:7pt'> (provisional — unverified)</span>" if _is_provisional(d) else "")
+        + "</td>"
         f"<td>{d.get('category') or ''}</td>"
         f"<td style='text-align:right'>${float(d.get('amount') or 0):,.2f}</td>"
         f"<td style='font-family:monospace;font-size:8pt'>"
         f"<a href='https://www.voipguru.org/tax-paperless/documents/{d.get('paperless_doc_id')}/'>#{d.get('paperless_doc_id')}</a></td></tr>"
         for d in _manifest_docs
     )
+    _provisional_note = (
+        f"<div style='font-size:8pt;color:#856404;margin-bottom:6px'>{_n_provisional} document(s) marked "
+        f"<em>provisional</em> were classified by keyword rules while the AI service was unavailable; "
+        f"they are re-checked automatically and should be verified against the original before relying on them.</div>"
+        if _n_provisional else ""
+    )
     manifest_section = (
         f"""<h2 style="page-break-before:always">Source Document Manifest <span class="section-count">({len(_manifest_docs)} documents)</span></h2>
 <div style="font-size:8pt;color:#666;margin-bottom:6px">
   Every line in this report traces to a stored document. Click a Paperless ID to open the original.
 </div>
+{_provisional_note}
 <table>
   <tr><th>Date</th><th>Party</th><th>Type</th><th>Category</th><th>Amount</th><th>Paperless</th></tr>
   {_manifest_rows}

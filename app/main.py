@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Activity log for web UI
 _activity_log: list[str] = []
-_analysis_status = {"running": False, "last_run": None, "analyzed_this_cycle": 0}
+_analysis_status = {"running": False, "last_run": None, "analyzed_this_cycle": 0, "mode": None}
 
 
 def _log(msg: str):
@@ -43,6 +43,16 @@ def get_analysis_status() -> dict:
 
 
 from app.checks.financial_rules import apply_business_rules as _apply_business_rules
+
+
+def _llm_analysis_failed(result: dict) -> bool:
+    """True when LLMClient.analyze_document returned its error sentinel
+    (confidence 0.0 + 'Analysis failed: …') rather than a real classification."""
+    try:
+        return (float(result.get("confidence", 0) or 0) <= 0.0
+                and str(result.get("description", "")).startswith("Analysis failed"))
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def analysis_daemon():
@@ -71,25 +81,49 @@ def analysis_daemon():
             # gate silently skipped the analysis daemon for months while
             # our proxy chain was fully working, because LLM_API_KEY has
             # been intentionally empty since 2026-05-01.
+            #
+            # 2026-09-06: no LLM no longer means "do nothing". New documents
+            # get a provisional rules-only classification (app.rules_analyzer)
+            # so uploads during an outage still show up in reports, and are
+            # re-analyzed by the LLM as soon as it is reachable again.
             from app.llm_client import has_llm_capability
-            if not has_llm_capability(llm_api_key):
-                _log("No LLM capability (no API key AND no enabled proxy endpoints) — skipping analysis cycle")
-                time.sleep(config.POLL_INTERVAL)
-                continue
+            from app import rules_analyzer
+            llm_ok = has_llm_capability(llm_api_key)
+            mode = "llm" if llm_ok else "rules-only"
+            if _analysis_status.get("mode") != mode:
+                _log(f"Analysis mode: {mode}" + ("" if llm_ok else
+                     " (no API key AND no enabled proxy endpoint) — new documents get a "
+                     "provisional rules-based classification and are re-analyzed when the LLM is back"))
+            _analysis_status["mode"] = mode
 
             client = PaperlessClient(token=paperless_token)
-            llm = LLMClient(provider=llm_provider, api_key=llm_api_key, model=llm_model)
+            llm = LLMClient(provider=llm_provider, api_key=llm_api_key, model=llm_model) if llm_ok else None
 
             # Get all Paperless doc IDs
             all_ids = client.get_all_document_ids()
             analyzed_ids = db.get_analyzed_doc_ids()
             new_ids = [d for d in all_ids if d not in analyzed_ids]
+            batch = new_ids[:20]
+
+            # With the LLM back, use spare capacity in this cycle to upgrade
+            # provisional (rules-only) results, oldest first.
+            redo_ids: list = []
+            if llm_ok and len(batch) < 20:
+                all_set = set(all_ids)
+                redo_ids = [d for d in db.get_provisional_doc_ids() if d in all_set][:20 - len(batch)]
+                batch += redo_ids
+            redo_set = set(redo_ids)
 
             if new_ids:
-                _log(f"Found {len(new_ids)} unanalyzed documents (processing up to 20)")
+                _log(f"Found {len(new_ids)} unanalyzed documents (processing up to 20, mode={mode})")
+            if redo_ids:
+                _log(f"Re-analyzing {len(redo_ids)} provisional documents with the LLM")
 
             analyzed_this_cycle = 0
-            for doc_id in new_ids[:20]:
+            llm_failures = 0
+            for doc_id in batch:
+                if doc_id in redo_set and not llm_ok:
+                    continue  # LLM went away mid-cycle; leave provisional rows for later
                 try:
                     doc = client.get_document(doc_id)
                     content = doc.get("content", "")
@@ -115,8 +149,30 @@ def analysis_daemon():
                         continue
 
                     _log(f"Analyzing doc {doc_id}: {title[:50]}")
-                    result = llm.analyze_document(content, title, entity_hint, year_hint)
+                    provisional = False
+                    if llm_ok:
+                        result = llm.analyze_document(content, title, entity_hint, year_hint, doc_id=doc_id)
+                        if _llm_analysis_failed(result):
+                            # Never persist "Analysis failed" as a final answer
+                            # (that is exactly what left docs unclassified
+                            # forever before). Store a provisional row instead
+                            # so the doc is retried when the LLM works again.
+                            llm_failures += 1
+                            _log(f"LLM analysis failed for doc {doc_id} "
+                                 f"({str(result.get('description', ''))[:90]}) — storing provisional rules-only result")
+                            result = rules_analyzer.analyze_rules_only(content, title, entity_hint, year_hint)
+                            provisional = True
+                            if llm_failures >= 3:
+                                llm_ok = False
+                                _analysis_status["mode"] = "rules-only"
+                                _log("3 consecutive LLM failures — rules-only for the rest of this cycle")
+                    else:
+                        result = rules_analyzer.analyze_rules_only(content, title, entity_hint, year_hint)
+                        provisional = True
                     result = _apply_business_rules(result, content, title)
+                    if provisional:
+                        result["provisional"] = True
+                        result.setdefault("method", "rules")
 
                     # Look up entity ID
                     entity = db.get_entity(slug=result.get("entity", entity_hint))
@@ -177,38 +233,44 @@ def analysis_daemon():
                         is_duplicate=1 if is_dup else 0,
                     )
 
-                    # Embed into vector store for RAG
-                    try:
-                        from app import vector_store as vs
-                        vs.embed_document(
-                            doc_id=str(doc_id),
-                            title=ai_title,
-                            content=content[:4000],
-                            metadata={
-                                "entity_slug": result.get("entity", entity_hint),
-                                "tax_year": str(tax_year) if tax_year else "",
-                                "doc_type": result.get("doc_type", "other"),
-                                "category": result.get("category", "other"),
-                                "vendor": result.get("vendor", ""),
-                                "amount": str(result.get("amount") or ""),
-                            },
-                        )
-                    except Exception as ve:
-                        _log(f"Vector embed failed for {doc_id}: {ve}")
-
-                    # Apply tags back to Paperless
                     entity_slug = result.get("entity", entity_hint)
                     tag_year = str(tax_year) if tax_year else "unknown"
-                    tags_to_apply = [f"tax-{entity_slug}", f"year-{tag_year}", result.get("doc_type", "other")]
-                    try:
-                        client.apply_tags(doc_id, [t for t in tags_to_apply if t])
-                    except Exception as e:
-                        _log(f"Tag apply failed for {doc_id}: {e}")
 
+                    # Provisional results are guesses: don't push them into the
+                    # vector store or back onto Paperless as tags (a wrong
+                    # year-/tax- tag would feed the LLM a bad hint on re-analysis).
+                    if not provisional:
+                        # Embed into vector store for RAG
+                        try:
+                            from app import vector_store as vs
+                            vs.embed_document(
+                                doc_id=str(doc_id),
+                                title=ai_title,
+                                content=content[:4000],
+                                metadata={
+                                    "entity_slug": entity_slug,
+                                    "tax_year": str(tax_year) if tax_year else "",
+                                    "doc_type": result.get("doc_type", "other"),
+                                    "category": result.get("category", "other"),
+                                    "vendor": result.get("vendor", ""),
+                                    "amount": str(result.get("amount") or ""),
+                                },
+                            )
+                        except Exception as ve:
+                            _log(f"Vector embed failed for {doc_id}: {ve}")
+
+                        # Apply tags back to Paperless
+                        tags_to_apply = [f"tax-{entity_slug}", f"year-{tag_year}", result.get("doc_type", "other")]
+                        try:
+                            client.apply_tags(doc_id, [t for t in tags_to_apply if t])
+                        except Exception as e:
+                            _log(f"Tag apply failed for {doc_id}: {e}")
+
+                    marker = " [provisional]" if provisional else ""
                     db.log_activity("document_analyzed",
-                        f"Doc {doc_id} ({result.get('doc_type')}) → {entity_slug}/{tax_year} ${result.get('amount', 0) or 0:.2f}")
+                        f"Doc {doc_id} ({result.get('doc_type')}) → {entity_slug}/{tax_year} ${result.get('amount', 0) or 0:.2f}{marker}")
                     analyzed_this_cycle += 1
-                    _log(f"Doc {doc_id} → {result.get('doc_type')}/{result.get('category')} ${result.get('amount', 0) or 0:.2f}")
+                    _log(f"Doc {doc_id} → {result.get('doc_type')}/{result.get('category')} ${result.get('amount', 0) or 0:.2f}{marker}")
 
                 except Exception as e:
                     _log(f"Error analyzing doc {doc_id}: {e}")

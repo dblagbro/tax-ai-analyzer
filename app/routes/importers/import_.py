@@ -130,8 +130,13 @@ def api_import_bank_ofx():
         try:
             from app.importers.ofx_importer import parse_ofx
             txns = parse_ofx(data, entity_id=eid, default_year=yr)
-            total = 0
+            total = dup = 0
             for t in txns:
+                # 2026-09-06: transactions has no UNIQUE index — check first,
+                # otherwise re-uploading the same OFX doubles every row.
+                if db.transaction_exists(t.get("source", "ofx_import"), t.get("source_id", "")):
+                    dup += 1
+                    continue
                 try:
                     db.add_transaction(t)
                     total += 1
@@ -139,7 +144,7 @@ def api_import_bank_ofx():
                     pass
             db.update_import_job(jid, status="completed", count_imported=total,
                                  completed_at=datetime.utcnow().isoformat())
-            db.log_activity("import_complete", f"OFX: {total} transactions imported")
+            db.log_activity("import_complete", f"OFX: {total} transactions imported ({dup} already present)")
         except Exception as e:
             db.update_import_job(jid, status="error", error_msg=str(e)[:500],
                                  completed_at=datetime.utcnow().isoformat())
@@ -171,15 +176,22 @@ def api_import_statement_plugins():
 @bp.route(URL_PREFIX + "/api/import/statement/convert", methods=["POST"])
 @login_required
 def api_import_statement_convert():
-    """Multipart: file, plugin, entity_id (int), year (YYYY, optional).
+    """Multipart: file (one or many), plugin, entity_id (int), year (YYYY, optional).
 
-    Converts the upload to OFX with the named plugin, then imports every
-    transaction via the same parse_ofx → db.add_transaction path as
-    /api/import/bank-ofx. Runs as an import_job so the UI can poll the log.
+    plugin:
+      pdf-auto | pdf-card | pdf-bank  built-in PDF statement parser — no
+                                      ofxstatement plugin, no LLM
+                                      (app.importers.pdf_statement)
+      ofx                             upload is already OFX — pass-through
+      <anything else>                 `ofxstatement convert -t <plugin>` → OFX
+
+    Every transaction carries a deterministic source_id and is skipped when
+    already stored, so re-uploading a statement is a no-op. The whole batch
+    runs as ONE import_job so the UI can poll a single log.
     """
-    if "file" not in request.files:
+    files = [f for f in request.files.getlist("file") if f and f.filename]
+    if not files:
         return jsonify({"error": "No file uploaded"}), 400
-    f = request.files["file"]
     plugin = (request.form.get("plugin") or "").strip()
     if not plugin:
         return jsonify({"error": "plugin required — GET /api/import/statement/plugins"}), 400
@@ -187,45 +199,64 @@ def api_import_statement_convert():
     year = (request.form.get("year") or "").strip() or None
     if year and not (len(year) == 4 and year.isdigit()):
         return jsonify({"error": "year must be YYYY"}), 400
-    content = f.read()
-    filename = f.filename or "statement"
+    uploads = [(f.filename or "statement", f.read()) for f in files]
 
     job_id = db.create_import_job(
         "statement_convert", entity_id=entity_id,
-        config_json=json.dumps({"filename": filename, "plugin": plugin, "year": year}),
+        config_json=json.dumps({"files": [u[0] for u in uploads], "plugin": plugin, "year": year}),
     )
 
-    def _run(jid, data, fname, plug, eid, yr):
+    def _run(jid, batch, plug, eid, yr):
         log = lambda m: append_job_log(jid, m)
         db.update_import_job(jid, status="running",
                              started_at=datetime.utcnow().isoformat())
+        imported = skipped = failed = 0
         try:
             from app.importers.statement_convert import convert_to_ofx
             from app.importers.ofx_importer import parse_ofx
-            ofx_bytes = convert_to_ofx(data, fname, plug, log=log)
-            txns = parse_ofx(ofx_bytes, entity_id=eid, default_year=yr)
-            log(f"parsed {len(txns)} transactions from OFX")
-            total = 0
-            for t in txns:
+            from app.importers.pdf_statement import parse_pdf_statement
+            for fname, data in batch:
                 try:
-                    db.add_transaction(t)
-                    total += 1
-                except Exception:
-                    pass  # duplicate source_id — already imported
-            db.update_import_job(jid, status="completed", count_imported=total,
-                                 completed_at=datetime.utcnow().isoformat())
+                    if plug.startswith("pdf-"):
+                        txns = parse_pdf_statement(data, filename=fname, year=yr,
+                                                   entity_id=eid, kind=plug[4:])
+                    else:
+                        ofx_bytes = convert_to_ofx(data, fname, plug, log=log)
+                        txns = parse_ofx(ofx_bytes, entity_id=eid, default_year=yr)
+                except Exception as fe:
+                    failed += 1
+                    log(f"✗ {fname}: {fe}")
+                    continue
+                n_new = n_dup = 0
+                for t in txns:
+                    if db.transaction_exists(t.get("source", ""), t.get("source_id", "")):
+                        n_dup += 1
+                        continue
+                    try:
+                        db.add_transaction(t)
+                        n_new += 1
+                    except Exception as te:
+                        log(f"  row error: {te}")
+                imported += n_new
+                skipped += n_dup
+                log(f"✓ {fname}: {len(txns)} parsed, {n_new} imported, {n_dup} already present")
+            status = "completed" if failed < len(batch) else "error"
+            db.update_import_job(
+                jid, status=status, count_imported=imported, count_skipped=skipped,
+                error_msg=(f"{failed} of {len(batch)} file(s) failed — see log" if failed else None),
+                completed_at=datetime.utcnow().isoformat(),
+            )
             db.log_activity("import_complete",
-                            f"Statement ({plug}): {total} transactions from {fname}")
-            log(f"done — {total} imported ({len(txns) - total} skipped as duplicates)")
+                            f"Statement ({plug}): {imported} transactions from {len(batch)} file(s)")
+            log(f"done — {imported} imported, {skipped} skipped as duplicates, {failed} file(s) failed")
         except Exception as e:
             log(f"FAILED: {e}")
             db.update_import_job(jid, status="error", error_msg=str(e)[:500],
                                  completed_at=datetime.utcnow().isoformat())
 
-    threading.Thread(target=_run,
-                     args=(job_id, content, filename, plugin, entity_id, year),
+    threading.Thread(target=_run, args=(job_id, uploads, plugin, entity_id, year),
                      daemon=True).start()
-    return jsonify({"status": "started", "job_id": job_id})
+    return jsonify({"status": "started", "job_id": job_id, "files": len(uploads)})
 
 
 # ── Local filesystem ──────────────────────────────────────────────────────────

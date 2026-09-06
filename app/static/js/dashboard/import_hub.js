@@ -147,25 +147,31 @@ async function loadStatementPlugins(force) {
   const plugins = r.plugins || [];
   sel.innerHTML = '<option value="">— choose converter —</option>' +
     plugins.map(p => `<option value="${esc(p.name)}">${esc(p.name)}${p.description ? ' — ' + esc(p.description) : ''}</option>`).join('');
+  // Default to the built-in PDF parser — it's the one that works for every bank.
+  if (plugins.some(p => p.name === 'pdf-auto')) sel.value = 'pdf-auto';
   if (hint) {
-    hint.innerHTML = r.available
-      ? `${plugins.length} converter(s) installed. Missing your bank? <code>${esc(r.install_hint||'')}</code>`
-      : `<span style="color:var(--expense)">ofxstatement not installed in this image</span> — only "ofx" pass-through works until the image is rebuilt.`;
+    const extra = plugins.filter(p => !p.name.startsWith('pdf-') && p.name !== 'ofx').length;
+    hint.innerHTML = `Built-in: PDF statement parser (any bank) + OFX pass-through. ` +
+      (r.available
+        ? `${extra} ofxstatement bank plugin(s) installed. Need a CSV converter for a specific bank? <code>${esc(r.install_hint||'')}</code>`
+        : `ofxstatement CLI not in this image — PDF and OFX still work.`);
   }
   _stPluginsLoaded = true;
 }
 
 async function convertStatement() {
-  const f = document.getElementById('stFile').files[0];
-  if(!f){toast('Select a statement file first.','error');return;}
+  const files = document.getElementById('stFile').files;
+  if(!files || !files.length){toast('Select one or more statement files first.','error');return;}
   const plugin = document.getElementById('st-plugin').value;
-  if(!plugin){toast('Choose a converter (bank plugin) first.','error');return;}
-  const fd = new FormData(); fd.append('file',f);
+  if(!plugin){toast('Choose a converter first (PDF statement is the default).','error');return;}
+  const fd = new FormData();
+  for (const f of files) fd.append('file', f);
   fd.append('plugin',plugin);
   fd.append('entity_id',document.getElementById('st-entity').value);
   fd.append('year',document.getElementById('st-year').value);
+  toast(`Uploading ${files.length} file(s)…`,'info');
   const r = await fetch(P+'/api/import/statement/convert',{method:'POST',body:fd}).then(r=>r.json()).catch(()=>({}));
-  r.job_id ? (toast('Statement conversion started. Job #'+r.job_id+' — watch the job log for the transaction count.','success'),loadJobs()) : toast('Error: '+(r.error||'?'),'error');
+  r.job_id ? (toast(`Import started for ${r.files||files.length} file(s). Job #${r.job_id} — the job log shows per-file counts.`,'success'),loadJobs()) : toast('Error: '+(r.error||'?'),'error');
 }
 
 async function scanLocalFs() {

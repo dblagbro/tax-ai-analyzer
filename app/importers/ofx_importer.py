@@ -153,6 +153,9 @@ def parse_ofx(content: str | bytes, entity_id: Optional[int] = None,
                 "tax_year": tax_year,
                 "external_id": fitid,
                 "dedup_hash": dedup,
+                # 2026-09-06: add_transaction keys on source_id; without it every
+                # re-import of the same OFX file created duplicate rows.
+                "source_id": dedup,
             })
         except Exception as e:
             logger.warning(f"OFX: skipping transaction due to error: {e}")

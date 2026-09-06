@@ -14,6 +14,12 @@ import logging
 import re
 from typing import Callable
 
+# 2026-09-06: _AI_TIMEOUT lived in the pre-refactor monolith. After the Phase
+# 11H split it was referenced here but never imported, so every AI review
+# raised NameError inside the try → "defaulting to import" → every email that
+# passed the fast pre-filter was imported unfiltered. Import it explicitly.
+from app.importers.gmail.fetch import _AI_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,12 +28,15 @@ def _ai_review_email(subject: str, sender: str, body_snippet: str,
     log = log_fn or logger.info
     try:
         from app import db, config as cfg
+        from app.llm_client import has_llm_capability
         import anthropic, json as _json
         api_key = db.get_setting("llm_api_key") or cfg.LLM_API_KEY
         model = db.get_setting("llm_model") or cfg.LLM_MODEL
-        if not api_key:
+        # Same gate bug the analysis daemon had (fixed 2026-09-05): an empty
+        # direct key must NOT disable review when the proxy pool is configured.
+        if not has_llm_capability(api_key):
             return {"relevant": True, "doc_type": "email", "vendor": "",
-                    "amount": None, "description": subject[:60], "reason": "no API key"}
+                    "amount": None, "description": subject[:60], "reason": "no LLM capability"}
         prompt = (
             "Is this email a tax-relevant financial document worth keeping "
             "(receipt, invoice, bill, statement, 1099, W-2, payment confirmation, "
@@ -56,6 +65,8 @@ def _ai_review_email(subject: str, sender: str, body_snippet: str,
             resp = result["response"]
             text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
         except proxy_call.NoProxyAvailable:
+            if not api_key:
+                raise RuntimeError("proxy pool exhausted and no direct API key configured")
             client = anthropic.Anthropic(api_key=api_key, timeout=_AI_TIMEOUT)
             resp = client.messages.create(
                 model=model, max_tokens=256,
