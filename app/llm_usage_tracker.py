@@ -78,7 +78,13 @@ def _init_db():
 # ── Pricing table (USD per 1M tokens) ────────────────────────────────────────
 # Format: "provider:model" -> (input_price, output_price)
 _PRICING: dict[str, tuple[float, float]] = {
-    # Anthropic Claude
+    # Anthropic Claude 5 family (2026-09-06). Rate-card estimates — the
+    # authoritative per-call cost lives in llm-proxy2's activity log via
+    # cost_class; these only feed the local AI Costs dashboard.
+    "anthropic:claude-fable-5-1":            ( 5.00,  25.00),
+    "anthropic:claude-opus-5":               ( 5.00,  25.00),
+    "anthropic:claude-sonnet-5":             ( 3.00,  15.00),
+    # Claude 4.x
     "anthropic:claude-opus-4-7":             ( 5.00,  25.00),
     "anthropic:claude-opus-4-6":             (15.00,  75.00),
     "anthropic:claude-sonnet-4-6":           ( 3.00,  15.00),

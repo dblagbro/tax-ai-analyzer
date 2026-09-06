@@ -487,7 +487,13 @@ def test_cluster_reconsolidation_legacy_path_rewrites_to_canonical():
 
 def test_boot_migration_rewrites_local_url_and_swaps_key():
     """A pre-existing endpoint with a local URL + old key gets rewritten on
-    every boot to public URL + LLM_PROXY2_KEY (if set)."""
+    every boot to public URL + LLM_PROXY2_KEY (if set).
+
+    2026-09-06: seed reads ONLY LLM_PROXY2_KEY now. The LLM_PROXY_KEY
+    fallback was removed after llm-proxy2 ops found that var carried
+    devingpt-prod's key in our environment — cross-project key leak.
+    Setting LLM_PROXY_KEY alone must NOT seed an endpoint.
+    """
     import os, sqlite3, tempfile
     from app.db import core as dbcore
 
@@ -498,10 +504,18 @@ def test_boot_migration_rewrites_local_url_and_swaps_key():
     fresh = os.path.join(tmp, "norm_probe.db")
     try:
         dbcore.DB_PATH = fresh
-        # First boot: seed with old vars (local URL, old key)
-        os.environ["LLM_PROXY_KEY"] = "old-key-aaa"
+        # Guard: LLM_PROXY_KEY alone must NOT seed (it's another project's key)
+        os.environ["LLM_PROXY_KEY"] = "devingpt-prod-key-should-be-ignored"
         os.environ.pop("LLM_PROXY2_KEY", None)
         os.environ["LLM_PROXY2_URL"] = "http://llm-proxy2:3000/v1"
+        dbcore.init_db()
+        conn = sqlite3.connect(fresh)
+        n = conn.execute("SELECT COUNT(*) FROM llm_proxy_endpoints").fetchone()[0]
+        conn.close()
+        assert n == 0, "LLM_PROXY_KEY must not seed an endpoint (cross-project key)"
+
+        # First real boot: seed from LLM_PROXY2_KEY with a local URL → normalized
+        os.environ["LLM_PROXY2_KEY"] = "old-key-aaa"
         dbcore.init_db()
         # Confirm initial state — even the seed should normalize the local URL
         conn = sqlite3.connect(fresh)

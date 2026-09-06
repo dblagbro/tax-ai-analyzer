@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Default model. Codegen is high-stakes (security-sensitive auth flows + the
 # importer ships into our app), so we use the most capable available. Override
 # via the `model` kwarg or the LLM_CODEGEN_MODEL env var for testing.
-DEFAULT_MODEL = "claude-opus-4-7"
+DEFAULT_MODEL = "claude-opus-5"  # 2026-09-06: Claude 5 family
 
 # Hard cap on output tokens. Importer source is typically 400-700 LOC ≈
 # 6-12k output tokens, but the JSON wrapper + escape characters roughly

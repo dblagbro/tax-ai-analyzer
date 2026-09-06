@@ -602,10 +602,14 @@ def _seed_llm_proxy_endpoints(conn):
     if existing:
         return
     # Prefer the v2 key; fall back to the legacy var name for back-compat.
-    key = (os.environ.get("LLM_PROXY2_KEY", "").strip()
-           or os.environ.get("LLM_PROXY_KEY", "").strip())
+    # 2026-09-06: LLM_PROXY_KEY fallback REMOVED. Per llm-proxy2 ops, the
+    # LLM_PROXY_KEY in this environment was devingpt-prod's key (id
+    # ed0191d28417b3af), not ours — reading it would have silently
+    # authenticated tax-ai-analyzer as a different project. Only
+    # LLM_PROXY2_KEY is read now.
+    key = os.environ.get("LLM_PROXY2_KEY", "").strip()
     if not key:
-        logger.info("LLM proxy seeding skipped: no LLM_PROXY2_KEY / LLM_PROXY_KEY set")
+        logger.info("LLM proxy seeding skipped: LLM_PROXY2_KEY not set")
         return
     raw_url = os.environ.get("LLM_PROXY2_URL", PUBLIC_LLM_PROXY2_URL)
     proxy2_url = _normalize_llm_proxy_url(raw_url)

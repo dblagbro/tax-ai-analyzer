@@ -19,15 +19,21 @@ PAPERLESS_WEB_URL = os.environ.get("PAPERLESS_WEB_URL", "/tax-paperless")
 # ── LLM ───────────────────────────────────────────────────────────────────────
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-LLM_MODEL = os.environ.get("LLM_MODEL", "claude-sonnet-4-6")
+# Default model for the direct-SDK fallback path. With LMRH routing via
+# llm-proxy2 (Phase 12), the proxy picks the actual model from task=/cost=
+# hints; this default only matters when the proxy pool is exhausted.
+# 2026-09-06: bumped to Claude 5 family.
+LLM_MODEL = os.environ.get("LLM_MODEL", "claude-sonnet-5")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
-# ── LLM Proxy (optional — routes calls through local proxy for redundancy) ────
-# Set LLM_PROXY_URL to the proxy's /v1 base and LLM_PROXY_KEY to its API key.
-# If reachable, all LLM calls go through the proxy with direct-API fallback.
-LLM_PROXY_URL = os.environ.get("LLM_PROXY_URL", "http://localhost:8055/v1")
-LLM_PROXY_KEY = os.environ.get("LLM_PROXY_KEY", "")
+# ── LLM Proxy ─────────────────────────────────────────────────────────────────
+# The proxy pool lives in the llm_proxy_endpoints DB table (Phase 12), seeded
+# from LLM_PROXY2_KEY + LLM_PROXY2_URL on first boot. The legacy single-URL
+# LLM_PROXY_URL / LLM_PROXY_KEY vars are NO LONGER READ — the v1 proxy was
+# retired 2026-08-17, and LLM_PROXY_KEY in this environment was devingpt-prod's
+# key (per llm-proxy2 ops 2026-09-05), not ours. Removed to prevent accidental
+# cross-project key use.
 
 # ── Elasticsearch (optional) ──────────────────────────────────────────────────
 ELASTICSEARCH_URL = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch:9200")

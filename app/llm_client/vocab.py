@@ -12,10 +12,13 @@ VALID_CATEGORIES = {"income", "expense", "deduction", "asset", "other"}
 
 VALID_ENTITIES = {"personal", "voipguru", "martinfeld_ranch"}
 
+# Direct-SDK fallback chain (only reached when the proxy pool is exhausted).
+# 2026-09-06: Claude 5 family. Ordered best-to-cheapest so a rate-limited
+# flagship degrades gracefully rather than failing the call.
 ANTHROPIC_FALLBACK_CHAIN = [
-    "claude-sonnet-4-6",
+    "claude-sonnet-5",
     "claude-haiku-4-5-20251001",
-    "claude-3-haiku-20240307",
+    "claude-sonnet-4-6",
 ]
 
 OPENAI_FALLBACK_CHAIN = [

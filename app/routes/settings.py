@@ -97,14 +97,16 @@ def api_settings_test_paperless():
 @login_required
 def api_llm_models():
     models = {
+        # 2026-09-06: Claude 5 family first. Note: with LMRH proxy routing the
+        # proxy picks the model from task=/cost= hints; this dropdown only
+        # drives the direct-SDK fallback default.
         "anthropic": [
-            "claude-opus-4-6",
-            "claude-sonnet-4-6",
+            "claude-fable-5-1",
+            "claude-opus-5",
+            "claude-sonnet-5",
             "claude-haiku-4-5-20251001",
-            "claude-3-7-sonnet-20250219",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-haiku-20240307",
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
         ],
         "openai": [
             "gpt-4o",
