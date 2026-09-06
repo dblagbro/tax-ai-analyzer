@@ -118,15 +118,15 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
         finally:
             _conn.close()
         _missing_forms = [f for f in _EXPECTED_TAX_FORMS if f not in _present]
-        def _thin(m):  # same rule as /api/reports/gaps
-            return m["transactions"] < 10 and m.get("documents", 0) < 10
+        def _thin(m):  # same rule as /api/reports/gaps: amount-bearing txns OR docs
+            return m.get("with_amount", m["transactions"]) < 10 and m.get("documents", 0) < 10
         _sparse = [m for m in _months if _thin(m)]
         _covered = 12 - len(_sparse)
         _cov_color = "#28a745" if _covered >= 11 else ("#e0a800" if _covered >= 6 else "#dc3545")
         _month_cells = "".join(
             f'<td style="text-align:center;padding:4px;background:{"#f8d7da" if _thin(m) else "#d4edda"}">'
             f'<div style="font-size:8pt;color:#666">{m["month"][5:]}</div>'
-            f'<div style="font-weight:bold">{m["transactions"]}</div>'
+            f'<div style="font-weight:bold">{m.get("with_amount", m["transactions"])}</div>'
             f'<div style="font-size:7pt;color:#666">{m.get("documents", 0)} docs</div></td>'
             for m in _months
         )
@@ -151,7 +151,7 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
 </div>
 <table style="margin-top:6px"><tr>{_month_cells}</tr></table>
 <div style="font-size:8pt;color:#856404;margin-top:4px">
-  Red months have fewer than 10 transactions — usually a bank or card statement that hasn't been imported yet.
+  Red months have fewer than 10 transactions with amounts and fewer than 10 documents — usually a bank or card statement that hasn't been imported yet.
   Sections below only reflect what has been ingested; totals will change as coverage fills in.
 </div>"""
     except Exception as _e:  # never let the gap panel break the whole report

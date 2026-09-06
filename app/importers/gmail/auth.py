@@ -16,6 +16,11 @@ import os
 from typing import Optional
 
 from app.db import settings as db_settings
+# 2026-09-06: GMAIL_SCOPES was referenced 5× below but never imported after the
+# Phase 11H split → get_credentials() raised NameError → every Gmail import
+# died before fetching a single message (while /api/import/gmail/status kept
+# reporting authenticated=true because it only checks that a token exists).
+from app.config import GMAIL_SCOPES
 from app.importers.gmail.fetch import _google_imports
 
 logger = logging.getLogger(__name__)

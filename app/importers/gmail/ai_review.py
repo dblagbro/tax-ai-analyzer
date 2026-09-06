@@ -19,6 +19,7 @@ from typing import Callable
 # raised NameError inside the try → "defaulting to import" → every email that
 # passed the fast pre-filter was imported unfiltered. Import it explicitly.
 from app.importers.gmail.fetch import _AI_TIMEOUT
+from app.importers.gmail.rules_review import rules_review_email
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,11 @@ def _ai_review_email(subject: str, sender: str, body_snippet: str,
         model = db.get_setting("llm_model") or cfg.LLM_MODEL
         # Same gate bug the analysis daemon had (fixed 2026-09-05): an empty
         # direct key must NOT disable review when the proxy pool is configured.
+        # And no LLM no longer means "import everything" — use the rules triage.
         if not has_llm_capability(api_key):
-            return {"relevant": True, "doc_type": "email", "vendor": "",
-                    "amount": None, "description": subject[:60], "reason": "no LLM capability"}
+            r = rules_review_email(subject, sender, body_snippet, date_str)
+            r["reason"] = "no LLM capability; " + r["reason"]
+            return r
         prompt = (
             "Is this email a tax-relevant financial document worth keeping "
             "(receipt, invoice, bill, statement, 1099, W-2, payment confirmation, "
@@ -79,6 +82,7 @@ def _ai_review_email(subject: str, sender: str, body_snippet: str,
         log(f"  AI: {result.get('relevant')} — {result.get('reason','')[:80]}")
         return result
     except Exception as e:
-        log(f"  [AI review error: {e}] — defaulting to import")
-        return {"relevant": True, "doc_type": "email", "vendor": "",
-                "amount": None, "description": subject[:60], "reason": "error"}
+        log(f"  [AI review error: {str(e)[:80]}] — falling back to rules triage")
+        r = rules_review_email(subject, sender, body_snippet, date_str)
+        r["reason"] = f"AI error ({str(e)[:40]}); " + r["reason"]
+        return r

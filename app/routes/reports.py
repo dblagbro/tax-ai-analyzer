@@ -282,11 +282,12 @@ def api_gaps():
     conn = get_connection()
     try:
         months = _monthly_coverage(conn, year, entity_id=entity_id)
-        # A month counts as covered when EITHER real transactions or analyzed
-        # documents reach the threshold — a month of PDF statements analyzed by
-        # the daemon is coverage even if no bank feed was imported.
+        # A month counts as covered when EITHER transactions that carry an
+        # amount or analyzed documents reach the threshold. Amount-less rows
+        # (Gmail pointer rows) are deliberately NOT coverage — 130 of the 160
+        # January-2023 rows had no amount and made the month look complete.
         sparse_months = [m["month"] for m in months
-                         if m["transactions"] < min_txns and m["documents"] < min_txns]
+                         if m["with_amount"] < min_txns and m["documents"] < min_txns]
 
         # Tax forms present / missing
         params: list = [year]

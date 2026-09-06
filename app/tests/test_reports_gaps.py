@@ -1,5 +1,7 @@
-"""Coverage-gap report: month strip counts transactions AND analyzed documents,
-and a month of analyzed documents counts as covered. (2026-09-06)"""
+"""Coverage-gap report: month strip counts transactions, amount-bearing
+transactions AND analyzed documents; a month is covered by amount-bearing
+transactions or documents — never by amount-less Gmail pointer rows.
+(2026-09-06)"""
 import os
 import sys
 
@@ -28,25 +30,35 @@ def _cleanup():
     conn.close()
 
 
-def test_gaps_shape_and_document_coverage():
+def test_gaps_shape_and_coverage_rules():
     from app import db
     _cleanup()
     try:
-        for i in range(12):  # 12 docs in March 2099, none elsewhere
+        for i in range(12):  # 12 docs in March
             db.mark_document_analyzed(DOC_BASE + i, None, YEAR, "receipt", "expense",
                                       "Vendor", 10.0, f"{YEAR}-03-{i + 1:02d}", 0.9, "{}")
+        for i in range(12):  # 12 amount-less pointer rows in May → NOT coverage
+            db.add_transaction({"source": "gmail", "source_id": f"gaps-t-may-{i}", "tax_year": YEAR,
+                                "date": f"{YEAR}-05-{i + 1:02d}", "amount": 0, "description": "ptr"})
+        for i in range(12):  # 12 real rows in June → coverage
+            db.add_transaction({"source": "pdf_statement", "source_id": f"gaps-t-jun-{i}", "tax_year": YEAR,
+                                "date": f"{YEAR}-06-{i + 1:02d}", "amount": -5.0, "description": "real"})
         c = _client()
         r = c.get(f"/tax-ai-analyzer/api/reports/gaps?year={YEAR}&min_txns=10")
         assert r.status_code == 200
         body = r.get_json()
-        months = body["months"]
+        months = {m["month"]: m for m in body["months"]}
         assert len(months) == 12
-        assert {"month", "transactions", "with_amount", "documents", "total", "sources"} <= set(months[0])
-        march = next(m for m in months if m["month"] == f"{YEAR}-03")
-        assert march["documents"] == 12 and march["transactions"] == 0
-        assert f"{YEAR}-03" not in body["sparse_months"]
-        assert f"{YEAR}-04" in body["sparse_months"]
-        assert body["summary"]["months_covered"] == 1
+        assert {"month", "transactions", "with_amount", "documents", "total", "sources"} <= set(months[f"{YEAR}-03"])
+        assert months[f"{YEAR}-03"]["documents"] == 12
+        assert months[f"{YEAR}-05"]["transactions"] == 12 and months[f"{YEAR}-05"]["with_amount"] == 0
+        assert months[f"{YEAR}-06"]["with_amount"] == 12
+        sparse = set(body["sparse_months"])
+        assert f"{YEAR}-03" not in sparse   # documents
+        assert f"{YEAR}-06" not in sparse   # amount-bearing transactions
+        assert f"{YEAR}-05" in sparse       # pointer rows only
+        assert f"{YEAR}-04" in sparse
+        assert body["summary"]["months_covered"] == 2
     finally:
         _cleanup()
 
