@@ -35,6 +35,34 @@
         <input type="file" id="bkFile" style="display:none" accept=".csv" onchange="document.getElementById('bkName').textContent=this.files[0].name">
         <br><button class="btn btn-primary" onclick="importBank()">Import CSV</button>
       </div>
+      <!-- 2026-09-06: LLM-free, scraper-free path for statements the bank won't
+           let us scrape. Download from the bank portal → pick the matching
+           ofxstatement plugin → it becomes OFX → normal OFX import. -->
+      <div class="card">
+        <div class="card-title">Convert Bank / Card Statement &rarr; OFX</div>
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+          For banks we can't scrape: download the statement (CSV or PDF) from the bank portal,
+          choose the matching converter, and it imports as transactions.
+          No AI, no browser automation &mdash; works even when the LLM proxy is down.
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Entity</label><select id="st-entity" class="form-control">{% for e in entities %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label>Year (optional)</label><select id="st-year" class="form-control"><option value="">Auto-detect from file</option>{% for y in tax_years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="form-group">
+          <label>Converter (bank plugin)</label>
+          <select id="st-plugin" class="form-control" onfocus="loadStatementPlugins()">
+            <option value="">Loading converters&hellip;</option>
+          </select>
+          <div id="st-plugin-hint" style="font-size:.76rem;color:var(--muted);margin-top:4px"></div>
+        </div>
+        <div class="upload-area" onclick="document.getElementById('stFile').click()">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          <span id="stName">Click to select statement (.csv / .pdf / .ofx)</span>
+        </div>
+        <input type="file" id="stFile" style="display:none" accept=".csv,.pdf,.ofx,.qfx,.qbo,.txt" onchange="document.getElementById('stName').textContent=this.files[0].name">
+        <br><button class="btn btn-primary" onclick="convertStatement()">Convert &amp; Import</button>
+      </div>
     </div>
   </div>
 

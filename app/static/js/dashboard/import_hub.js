@@ -133,6 +133,41 @@ async function importOFX() {
   r.job_id ? (toast('OFX import started. Job #'+r.job_id,'success'),loadJobs()) : toast('Error: '+(r.error||'?'),'error');
 }
 
+// ── Statement convert (2026-09-06) ──────────────────────────────────────────
+// Bank/card statement (CSV/PDF) → ofxstatement plugin → OFX → normal import.
+// LLM-free + scraper-free. Plugin list is fetched lazily on dropdown focus so
+// there's no coupling to the tab loader.
+let _stPluginsLoaded = false;
+async function loadStatementPlugins(force) {
+  if (_stPluginsLoaded && !force) return;
+  const sel = document.getElementById('st-plugin');
+  const hint = document.getElementById('st-plugin-hint');
+  if (!sel) return;
+  const r = await fetch(P+'/api/import/statement/plugins').then(r=>r.json()).catch(()=>({}));
+  const plugins = r.plugins || [];
+  sel.innerHTML = '<option value="">— choose converter —</option>' +
+    plugins.map(p => `<option value="${esc(p.name)}">${esc(p.name)}${p.description ? ' — ' + esc(p.description) : ''}</option>`).join('');
+  if (hint) {
+    hint.innerHTML = r.available
+      ? `${plugins.length} converter(s) installed. Missing your bank? <code>${esc(r.install_hint||'')}</code>`
+      : `<span style="color:var(--expense)">ofxstatement not installed in this image</span> — only "ofx" pass-through works until the image is rebuilt.`;
+  }
+  _stPluginsLoaded = true;
+}
+
+async function convertStatement() {
+  const f = document.getElementById('stFile').files[0];
+  if(!f){toast('Select a statement file first.','error');return;}
+  const plugin = document.getElementById('st-plugin').value;
+  if(!plugin){toast('Choose a converter (bank plugin) first.','error');return;}
+  const fd = new FormData(); fd.append('file',f);
+  fd.append('plugin',plugin);
+  fd.append('entity_id',document.getElementById('st-entity').value);
+  fd.append('year',document.getElementById('st-year').value);
+  const r = await fetch(P+'/api/import/statement/convert',{method:'POST',body:fd}).then(r=>r.json()).catch(()=>({}));
+  r.job_id ? (toast('Statement conversion started. Job #'+r.job_id+' — watch the job log for the transaction count.','success'),loadJobs()) : toast('Error: '+(r.error||'?'),'error');
+}
+
 async function scanLocalFs() {
   const path = document.getElementById('lf-path').value.trim();
   if(!path){toast('Enter a directory path.','error');return;}

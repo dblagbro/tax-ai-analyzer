@@ -149,6 +149,85 @@ def api_import_bank_ofx():
     return jsonify({"status": "started", "job_id": job_id})
 
 
+# ── Statement convert (2026-09-06) ────────────────────────────────────────────
+# Manually-downloaded bank/card statement (CSV/PDF) → ofxstatement → OFX →
+# the existing OFX importer. LLM-free, scraper-free. Closes the Mar–Dec 2023
+# gap while the proxy key is being reissued and the Playwright scrapers are
+# down. See app/importers/statement_convert.py.
+
+@bp.route(URL_PREFIX + "/api/import/statement/plugins", methods=["GET"])
+@login_required
+def api_import_statement_plugins():
+    """List installed ofxstatement plugins so the UI can offer a dropdown."""
+    from app.importers.statement_convert import list_plugins, ofxstatement_available
+    return jsonify({
+        "available": ofxstatement_available(),
+        "plugins": list_plugins(),
+        "install_hint": "pip install ofxstatement-<bank>  (e.g. ofxstatement-chase, "
+                        "ofxstatement-bofa, ofxstatement-wellsfargo) then rebuild image",
+    })
+
+
+@bp.route(URL_PREFIX + "/api/import/statement/convert", methods=["POST"])
+@login_required
+def api_import_statement_convert():
+    """Multipart: file, plugin, entity_id (int), year (YYYY, optional).
+
+    Converts the upload to OFX with the named plugin, then imports every
+    transaction via the same parse_ofx → db.add_transaction path as
+    /api/import/bank-ofx. Runs as an import_job so the UI can poll the log.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    f = request.files["file"]
+    plugin = (request.form.get("plugin") or "").strip()
+    if not plugin:
+        return jsonify({"error": "plugin required — GET /api/import/statement/plugins"}), 400
+    entity_id = request.form.get("entity_id", type=int)
+    year = (request.form.get("year") or "").strip() or None
+    if year and not (len(year) == 4 and year.isdigit()):
+        return jsonify({"error": "year must be YYYY"}), 400
+    content = f.read()
+    filename = f.filename or "statement"
+
+    job_id = db.create_import_job(
+        "statement_convert", entity_id=entity_id,
+        config_json=json.dumps({"filename": filename, "plugin": plugin, "year": year}),
+    )
+
+    def _run(jid, data, fname, plug, eid, yr):
+        log = lambda m: append_job_log(jid, m)
+        db.update_import_job(jid, status="running",
+                             started_at=datetime.utcnow().isoformat())
+        try:
+            from app.importers.statement_convert import convert_to_ofx
+            from app.importers.ofx_importer import parse_ofx
+            ofx_bytes = convert_to_ofx(data, fname, plug, log=log)
+            txns = parse_ofx(ofx_bytes, entity_id=eid, default_year=yr)
+            log(f"parsed {len(txns)} transactions from OFX")
+            total = 0
+            for t in txns:
+                try:
+                    db.add_transaction(t)
+                    total += 1
+                except Exception:
+                    pass  # duplicate source_id — already imported
+            db.update_import_job(jid, status="completed", count_imported=total,
+                                 completed_at=datetime.utcnow().isoformat())
+            db.log_activity("import_complete",
+                            f"Statement ({plug}): {total} transactions from {fname}")
+            log(f"done — {total} imported ({len(txns) - total} skipped as duplicates)")
+        except Exception as e:
+            log(f"FAILED: {e}")
+            db.update_import_job(jid, status="error", error_msg=str(e)[:500],
+                                 completed_at=datetime.utcnow().isoformat())
+
+    threading.Thread(target=_run,
+                     args=(job_id, content, filename, plugin, entity_id, year),
+                     daemon=True).start()
+    return jsonify({"status": "started", "job_id": job_id})
+
+
 # ── Local filesystem ──────────────────────────────────────────────────────────
 
 @bp.route(URL_PREFIX + "/api/import/local/scan", methods=["POST"])

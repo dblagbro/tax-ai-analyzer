@@ -57,6 +57,25 @@ python-dotenv==1.0.1
 pyyaml==6.0.2
 aiofiles==23.2.1
 
+# ── LLM-free ingestion paths (2026-09-06, 2023 tax-prep push) ────────────────
+# Both work with ZERO LLM calls — they close data gaps even while the proxy
+# key is being reissued.
+#
+# invoice2data: structured field extraction from PDF invoices/receipts via
+# per-vendor YAML templates. Runs BEFORE the AI-review LLM call to short-
+# circuit obvious invoice-shaped docs. Needs pdftotext (poppler-utils, already
+# in the Dockerfile). https://github.com/invoice-x/invoice2data
+invoice2data>=0.4,<1
+
+# ofxstatement: parses bank/card statements the user downloaded manually as
+# CSV/PDF and emits OFX, which our existing ofx_importer already ingests.
+# Direct workaround for the Playwright scrapers that failed in April — the
+# user downloads 2023 statements from the bank portal, drops them in consume/,
+# and March–December fills in with no LLM and no scraper.
+# https://github.com/kedder/ofxstatement  (plugins per bank on PyPI)
+ofxstatement>=0.9,<1
+ofxparse>=0.21,<1
+
 # Test runner — kept in the image so `docker exec tax-ai-analyzer pytest`
 # works after a fresh rebuild without a separate manual `pip install`.
 pytest>=8,<10
