@@ -4,6 +4,6 @@ __pycache__/
 *.egg-info/
 .DS_Store
 data/
-export/
+/export/
 *.sqlite
 *.db

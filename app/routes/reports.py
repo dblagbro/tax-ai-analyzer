@@ -194,3 +194,158 @@ def api_yoy():
         "top_expense_vendors": top_expense_per_year,
         "top_income_vendors": top_income_per_year,
     })
+
+
+# ── Coverage-gap report (2026-09-06) ──────────────────────────────────────────
+#
+# Answers "what's MISSING for this tax year" — the question that decides
+# whether the accountant handoff is complete. Flags:
+#   - months with fewer than `min_txns` transactions (likely a statement not
+#     yet imported)
+#   - expected tax-form doc_types with zero docs (W-2/1099/1098 not uploaded)
+#   - transaction sources present in other years but absent this year
+#     (a bank you had last year but no feed this year)
+#   - entities with no activity at all
+
+_EXPECTED_TAX_FORMS = ("W-2", "1099-NEC", "1099-K", "1099-INT", "1099-DIV",
+                       "1099-MISC", "mortgage_statement", "property_tax")
+
+
+def _monthly_coverage(conn, year: str, entity_id=None) -> list[dict]:
+    """Transaction count + total per calendar month, zero-filled for all 12."""
+    params: list = [year]
+    entity_clause = ""
+    if entity_id is not None:
+        entity_clause = " AND entity_id = ?"
+        params.append(entity_id)
+    rows = conn.execute(
+        f"""SELECT substr(date,1,7) AS ym, COUNT(*) AS n,
+                   COALESCE(SUM(ABS(amount)),0) AS total,
+                   COUNT(DISTINCT source) AS sources
+            FROM transactions
+            WHERE tax_year = ?{entity_clause}
+              AND date IS NOT NULL AND date != ''
+            GROUP BY ym""",
+        tuple(params),
+    ).fetchall()
+    by_month = {r["ym"]: r for r in rows}
+    out = []
+    for m in range(1, 13):
+        ym = f"{year}-{m:02d}"
+        r = by_month.get(ym)
+        out.append({
+            "month": ym,
+            "transactions": r["n"] if r else 0,
+            "total": round(r["total"], 2) if r else 0.0,
+            "sources": r["sources"] if r else 0,
+        })
+    return out
+
+
+@bp.route(URL_PREFIX + "/api/reports/gaps")
+@login_required
+def api_gaps():
+    """Coverage-gap report for one tax year. Query params:
+      year=2023           required
+      entity_id=<int>     optional (omit for all entities combined)
+      min_txns=10         optional — months below this are flagged
+    """
+    year = (request.args.get("year") or "").strip()
+    if not (len(year) == 4 and year.isdigit()):
+        return jsonify({"error": "year=YYYY required"}), 400
+    entity_id = request.args.get("entity_id", type=int)
+    try:
+        min_txns = max(int(request.args.get("min_txns", 10)), 0)
+    except ValueError:
+        return jsonify({"error": "min_txns must be numeric"}), 400
+
+    conn = get_connection()
+    try:
+        months = _monthly_coverage(conn, year, entity_id=entity_id)
+        sparse_months = [m["month"] for m in months if m["transactions"] < min_txns]
+
+        # Tax forms present / missing
+        params: list = [year]
+        entity_clause = ""
+        if entity_id is not None:
+            entity_clause = " AND entity_id = ?"
+            params.append(entity_id)
+        present_forms = {
+            r["doc_type"] for r in conn.execute(
+                f"""SELECT DISTINCT doc_type FROM analyzed_documents
+                    WHERE tax_year = ?{entity_clause}
+                      AND (is_duplicate = 0 OR is_duplicate IS NULL)""",
+                tuple(params),
+            ).fetchall()
+        }
+        missing_forms = [f for f in _EXPECTED_TAX_FORMS if f not in present_forms]
+
+        # Sources seen in ANY year vs this year — a bank that went quiet
+        all_sources = {
+            r["source"] for r in conn.execute(
+                f"SELECT DISTINCT source FROM transactions WHERE source IS NOT NULL{entity_clause.replace('entity_id', 'entity_id') if entity_id is not None else ''}",
+                tuple(params[1:]) if entity_id is not None else (),
+            ).fetchall()
+        }
+        this_year_sources = {
+            r["source"] for r in conn.execute(
+                f"SELECT DISTINCT source FROM transactions WHERE tax_year = ?{entity_clause} AND source IS NOT NULL",
+                tuple(params),
+            ).fetchall()
+        }
+        silent_sources = sorted(all_sources - this_year_sources)
+
+        # Entities with zero activity this year (only when not filtering)
+        quiet_entities = []
+        if entity_id is None:
+            rows = conn.execute(
+                """SELECT e.slug, e.name,
+                          (SELECT COUNT(*) FROM transactions t
+                             WHERE t.entity_id = e.id AND t.tax_year = ?) AS txns,
+                          (SELECT COUNT(*) FROM analyzed_documents d
+                             WHERE d.entity_id = e.id AND d.tax_year = ?) AS docs
+                   FROM entities e WHERE COALESCE(e.archived, 0) = 0""",
+                (year, year),
+            ).fetchall()
+            quiet_entities = [
+                {"slug": r["slug"], "name": r["name"], "transactions": r["txns"], "documents": r["docs"]}
+                for r in rows if r["txns"] == 0 and r["docs"] == 0
+            ]
+
+        # Uncategorized backlog — docs tagged 'other' that a re-analysis might rescue
+        uncategorized = conn.execute(
+            f"""SELECT COUNT(*) FROM analyzed_documents
+                WHERE tax_year = ?{entity_clause}
+                  AND (category = 'other' OR category IS NULL OR category = '')""",
+            tuple(params),
+        ).fetchone()[0]
+        no_year = conn.execute(
+            f"""SELECT COUNT(*) FROM analyzed_documents
+                WHERE (tax_year IS NULL OR tax_year = ''){entity_clause}""",
+            tuple(params[1:]),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    total_txns = sum(m["transactions"] for m in months)
+    covered_months = sum(1 for m in months if m["transactions"] >= min_txns)
+
+    return jsonify({
+        "year": year,
+        "entity_id": entity_id,
+        "min_txns": min_txns,
+        "summary": {
+            "total_transactions": total_txns,
+            "months_covered": covered_months,
+            "months_sparse": 12 - covered_months,
+            "coverage_pct": round(covered_months / 12 * 100),
+        },
+        "months": months,
+        "sparse_months": sparse_months,
+        "missing_tax_forms": missing_forms,
+        "present_tax_forms": sorted(present_forms & set(_EXPECTED_TAX_FORMS)),
+        "silent_sources": silent_sources,
+        "quiet_entities": quiet_entities,
+        "uncategorized_docs": uncategorized,
+        "docs_missing_tax_year": no_year,
+    })
