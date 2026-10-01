@@ -122,7 +122,21 @@ _TITLE_RULES = [(dt, re.compile(p, re.IGNORECASE)) for dt, p in [
 ]]
 
 
+# What the document itself says it is beats what the file is called: in the
+# 2022 archive the files named "W2" and "1095c" are swapped.
+_STRONG_BODY = [(dt, re.compile(p, re.IGNORECASE)) for dt, p in [
+    ("W-2",                r"w-2 and earnings summary|wage and tax\s+(?:w-?2\s+)?statement"),
+    ("mortgage_statement", r"mortgage interest received from payer|form\s+1098\b|mortgage\s+interest\s+statement"),
+    ("1099-INT",           r"form\s+1099-int"),
+    ("insurance",          r"form\s+1095-c"),
+]]
+
+
 def detect_doc_type(text: str, title: str = "") -> str:
+    head = (text or "")[:8000]
+    for dt, rx in _STRONG_BODY:
+        if rx.search(head):
+            return dt
     norm_title = re.sub(r"[_]+", " ", title or "")
     for dt, rx in _TITLE_RULES:
         if rx.search(norm_title):

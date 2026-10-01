@@ -144,3 +144,8 @@ def test_w2_uses_box_parser_when_layout_matches():
     r = ra.analyze_rules_only(text, "DevinB_W2_Statement for 2023")
     assert r["doc_type"] == "W-2" and r["amount"] == 100000.00 and r["tax_year"] == "2023"
     assert r["extracted_fields"]["Box 2 — Federal income tax withheld"] == 20000.50
+
+
+def test_strong_body_signature_beats_misleading_filename():
+    assert ra.detect_doc_type("Form 1095-C (2022) Instructions for Recipient", "DevinB_W2_Statement for 2022") == "insurance"
+    assert ra.detect_doc_type("2022 W-2 and EARNINGS SUMMARY", "DevinB_1095c_Statement for 2022") == "W-2"

@@ -111,7 +111,7 @@ def parse_1098(text: str) -> dict:
 
 
 def parse_1099_int(text: str) -> dict:
-    g = _first(rf"1 Interest income[\s\S]{{0,400}}?\n\s*{_AMT}\s*\n", text)
+    g = _first(r"1 Interest income[\s\S]{0,400}?\$([\d,]+\.\d{2})", text)   # first $ figure after the box label
     out = {"Box 1 — Interest income": _f(g[0])} if g else {}
     g = _first(r"PAYER.S name[^\n]*\n[^\n]*\n\s*([A-Z][A-Z ,.&]+N\.? ?A\.?)", text, 0)
     if g:
@@ -119,19 +119,63 @@ def parse_1099_int(text: str) -> dict:
     return out
 
 
+_FORM_SIGNATURES = [
+    ("W-2", re.compile(r"w-2 and earnings summary|wage and tax\s+(?:w-?2\s+)?statement|wages, tips, other comp", re.I)),
+    ("1098", re.compile(r"mortgage interest received from payer|form\s+1098\b|mortgage\s+interest\s+statement", re.I)),
+    ("1099-INT", re.compile(r"form\s+1099-int", re.I)),
+    ("1095-C", re.compile(r"form\s+1095-c", re.I)),
+]
+_NAME_HINTS = [("W-2", r"w-?2"), ("1098", r"1098"), ("1099-INT", r"1099-?int"), ("1095-C", r"1095")]
+
+
+def form_kind(text: str, name: str = "") -> str:
+    """Which tax form a PDF is, judged by its CONTENT; the filename is only a
+    fallback. (In the 2022 folder the files named 'W2' and '1095c' are
+    swapped — trusting names would have reported the W-2 as missing.)"""
+    for kind, rx in _FORM_SIGNATURES:
+        if rx.search(text or ""):
+            return kind
+    if not (text or "").strip():
+        low = (name or "").lower()
+        for kind, pat in _NAME_HINTS:
+            if re.search(pat, low):
+                return kind
+    return ""
+
+
+def _form_entry(kind: str, text: str, source: str, name: str) -> dict:
+    note = ""
+    named = next((k for k, pat in _NAME_HINTS if re.search(pat, name.lower())), "")
+    if named and named != kind:
+        note = f"Note: the file is NAMED like a {named} but its content is a {kind}."
+    if kind == "W-2":
+        lines = parse_w2(text)
+        return {"form": "W-2", "source": source, "payer": lines.pop("_payer", ""), "lines": lines, "note": note}
+    if kind == "1098":
+        lines = parse_1098(text)
+        orig = lines.pop("_origination", "")
+        return {"form": "1098 (mortgage)", "source": source, "payer": "Wells Fargo Bank N.A.", "lines": lines,
+                "note": (f"Loan originated {orig}. " if orig else "") + note}
+    if kind == "1099-INT":
+        lines = parse_1099_int(text)
+        return {"form": "1099-INT", "source": source, "payer": lines.pop("_payer", "") or "", "lines": lines, "note": note}
+    return {"form": "1095-C", "source": source, "payer": "", "lines": {},
+            "note": ("Employer-offered health coverage statement (information only). " + note).strip()}
+
+
 def collect_tax_forms(year: str) -> list[dict]:
-    """[{form, source, payer, lines: {label: amount}}] from the archive folder."""
+    """[{form, source, payer, lines: {label: amount}, note}] for every tax form
+    PDF at the top level of the year's archive folder (loose or inside a zip)."""
     base = os.path.join(ARCHIVE_ROOT, year)
     forms: list[dict] = []
     for p in sorted(glob.glob(os.path.join(base, "*.pdf"))):
         name = os.path.basename(p)
-        low = name.lower()
-        if "w2" in low or "w-2" in low:
-            lines = parse_w2(_pdf_text(p))
-            forms.append({"form": "W-2", "source": name, "payer": lines.pop("_payer", ""), "lines": lines})
-        elif "1095" in low:
-            forms.append({"form": "1095-C", "source": name, "payer": "",
-                          "lines": {}, "note": "Employer-offered health coverage statement (information only)."})
+        if name.startswith("_"):            # our own generated cover sheet / summary
+            continue
+        text = _pdf_text(p)
+        kind = form_kind(text, name)
+        if kind:
+            forms.append(_form_entry(kind, text, name, name))
     for z in sorted(glob.glob(os.path.join(base, "*.zip"))):
         try:
             with zipfile.ZipFile(z) as zf:
@@ -139,18 +183,13 @@ def collect_tax_forms(year: str) -> list[dict]:
                     if not n.lower().endswith(".pdf"):
                         continue
                     text = _pdf_text(data=zf.read(n))
-                    src = f"{os.path.basename(z)} → {n}"
-                    if "1098" in n:
-                        lines = parse_1098(text)
-                        orig = lines.pop("_origination", "")
-                        forms.append({"form": "1098 (mortgage)", "source": src, "payer": "Wells Fargo Bank N.A.",
-                                      "lines": lines, "note": f"Loan originated {orig}." if orig else ""})
-                    elif "1099-INT" in n.upper():
-                        lines = parse_1099_int(text)
-                        forms.append({"form": "1099-INT", "source": src,
-                                      "payer": lines.pop("_payer", "") or "Wells Fargo Bank N.A.", "lines": lines})
+                    kind = form_kind(text, n)
+                    if kind:
+                        forms.append(_form_entry(kind, text, f"{os.path.basename(z)} → {n}", n))
         except Exception:
             continue
+    order = {"W-2": 0, "1098 (mortgage)": 1, "1099-INT": 2, "1095-C": 3}
+    forms.sort(key=lambda f: order.get(f["form"], 9))
     return forms
 
 
@@ -330,7 +369,7 @@ th {{ background: #f1f3f5; font-size: 8.5pt; }} .r {{ text-align: right; white-s
 
 <h2>2. Statements imported ({len(d['tx'])} transactions)</h2>
 <table><tr><th>Account</th><th class="r">Transactions</th><th class="r">Months</th><th class="r">Money out</th><th class="r">Money in</th></tr>{acct_rows}</table>
-<div class="note">Every statement with a printed total was reconciled against it (opening balance + activity = closing balance; purchases total; year-end total).</div>
+<div class="note">At import each statement is checked against the totals it prints (opening balance + activity = closing balance; purchases total; year-end total); exceptions are recorded in the import log.</div>
 
 <h2>3. Deposits that are not payroll — please review</h2>
 <table><tr><th>Date</th><th>Description on statement</th><th class="r">Amount</th><th style="width:34%">What it was (to fill in)</th></tr>{dep_rows}

@@ -76,3 +76,19 @@ def test_issuer_labels():
     assert cs._issuer("EXT WD AMEX EPAYMENT ER AM - ACH PMT") == "American Express"
     assert cs._issuer("EXT WD LendingClub Y - 8885963157") == "LendingClub loan"
     assert cs._issuer("EXT WD PAYMENT FOR AMZ - STORECARD") == "Amazon Store Card (Synchrony)"
+
+
+def test_form_kind_is_judged_by_content_not_filename():
+    # 2022 archive: the file named "W2" holds the 1095-C and vice versa
+    assert cs.form_kind("Form 1095-C (2022)  Instructions for Recipient", "DevinB_W2_Statement for 2022.pdf") == "1095-C"
+    assert cs.form_kind(W2 + "\nW-2 and EARNINGS SUMMARY", "DevinB_1095c_Statement for 2022.pdf") == "W-2"
+    assert cs.form_kind(F1098, "anything.pdf") == "1098"
+    assert cs.form_kind("", "DevinB_W2_Statement.pdf") == "W-2"          # no text layer → name is all we have
+    assert cs.form_kind("Spectrum bill for internet service", "bill.pdf") == ""
+    e = cs._form_entry("W-2", W2, "x.pdf", "DevinB_1095c_Statement for 2022.pdf")
+    assert "NAMED like a 1095-C" in e["note"] and e["lines"]["Box 1 — Wages, tips, other compensation"] == 100000.00
+
+
+def test_1099_int_amount_with_trailing_text_on_the_line():
+    t = "   1 Interest income\n 1-800-222-0238\n      $99.40      Copy B\n PAYER'S TIN\n   2 Early withdrawal penalty\n   $0.00\n"
+    assert cs.parse_1099_int(t)["Box 1 — Interest income"] == 99.40
