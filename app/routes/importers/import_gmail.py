@@ -159,15 +159,35 @@ def gmail_oauth_callback():
             json.dump(token_data, f, indent=2)
         db.set_setting("gmail_oauth_token", json.dumps(token_data))
         db.log_activity("gmail_oauth_complete", "Token saved", user_id=current_user.id)
+        try:  # the Import tab must stop showing "token expired" immediately
+            from app.importers.gmail import auth as _gauth
+            _gauth._TOKEN_HEALTH_CACHE.update(ts=0.0, result=None)
+        except Exception:
+            pass
+        # 2026-10-01: Google "testing"-mode refresh tokens die after 7 days, so
+        # a reconnect is needed before nearly every run. If an import is queued
+        # in the gmail_autostart_years setting (JSON list of years), start it
+        # right here so reconnecting is the ONLY manual step.
+        auto_msg = ""
+        try:
+            queued = json.loads(db.get_setting("gmail_autostart_years") or "[]")
+            if queued:
+                jid = _start_gmail_job(None, [str(y) for y in queued])
+                db.set_setting("gmail_autostart_years", "[]")
+                auto_msg = f"<p><strong>Import of {', '.join(str(y) for y in queued)} started automatically (job #{jid}).</strong></p>"
+                db.log_activity("import_autostart", f"Gmail {queued} auto-started after reconnect (job #{jid})")
+        except Exception as ae:
+            logger.error("Gmail auto-start after OAuth failed: %s", ae)
         return """<!doctype html><html><head><title>Gmail Connected</title>
 <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f0fdf4}
 .box{text-align:center;padding:40px;background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.1)}
 h2{color:#16a34a;margin:0 0 8px}p{color:#555;margin:0 0 20px}button{padding:8px 20px;background:#16a34a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:1rem}</style>
 </head><body><div class="box"><h2>&#10003; Gmail Connected!</h2>
 <p>Authorization complete. You can close this tab and return to the Tax Organizer.</p>
+__AUTO__
 <button onclick="window.close()">Close Tab</button></div>
-<script>setTimeout(function(){window.close();},3000);</script>
-</body></html>"""
+<script>setTimeout(function(){window.close();},8000);</script>
+</body></html>""".replace("__AUTO__", auto_msg)
     except ImportError:
         flash("google-auth-oauthlib not installed.", "danger")
     except Exception as e:
@@ -253,14 +273,10 @@ def api_import_gmail_credentials():
         return jsonify({"error": str(e)}), 400
 
 
-@bp.route(URL_PREFIX + "/api/import/gmail/start", methods=["POST"])
-@login_required
-def api_import_gmail_start():
-    data = request.get_json() or {}
-    entity_id = data.get("entity_id")
-    years = data.get("years", GMAIL_YEARS)
-    if not os.path.exists(GMAIL_CREDENTIALS_FILE) and not db.get_setting("gmail_oauth_token"):
-        return jsonify({"error": "Gmail not configured. Use Setup / Credentials first."}), 400
+def _start_gmail_job(entity_id, years) -> int:
+    """Create a gmail import_job and run it in a background thread. Shared by
+    the Start button and by the OAuth callback's auto-start (see
+    gmail_oauth_callback)."""
     job_id = db.create_import_job("gmail", entity_id=entity_id,
                                   config_json=json.dumps({"years": years}))
     _job_logs[job_id] = []
@@ -306,6 +322,18 @@ def api_import_gmail_start():
 
     threading.Thread(target=_run, args=(job_id, entity_id, years, stop_ev),
                      daemon=True, name=f"gmail-{job_id}").start()
+    return job_id
+
+
+@bp.route(URL_PREFIX + "/api/import/gmail/start", methods=["POST"])
+@login_required
+def api_import_gmail_start():
+    data = request.get_json() or {}
+    entity_id = data.get("entity_id")
+    years = data.get("years", GMAIL_YEARS)
+    if not os.path.exists(GMAIL_CREDENTIALS_FILE) and not db.get_setting("gmail_oauth_token"):
+        return jsonify({"error": "Gmail not configured. Use Setup / Credentials first."}), 400
+    job_id = _start_gmail_job(entity_id, years)
     return jsonify({"status": "started", "job_id": job_id})
 
 
