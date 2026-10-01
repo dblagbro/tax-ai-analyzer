@@ -24,6 +24,12 @@ def export_all(year: str, entity_slug: str, media_path: str = "/paperless/media"
         ("beancount", lambda: beancount_exporter.export_beancount(year, entity_slug)),
         ("pdf", lambda: pdf_report.export_pdf(year, entity_slug)),
     ]
+    # 2026-10-01: accountant cover sheet (tax-form figures, statement coverage,
+    # deposits to explain, missing statements). Built from the personal tax
+    # archive, so it rides along with the personal bundle only.
+    if entity_slug == "personal":
+        from app.export import cover_sheet
+        generators.append(("cover_sheet", lambda: cover_sheet.export_cover_sheet(year, entity_slug)))
 
     for fmt, fn in generators:
         try:
