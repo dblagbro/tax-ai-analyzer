@@ -116,10 +116,46 @@ def gmail_upload_credentials():
     return redirect(_url("/import/gmail/setup"))
 
 
+def _registered_redirect_uris() -> list:
+    """redirect_uris from the stored OAuth client (credentials.json), or []."""
+    try:
+        with open(GMAIL_CREDENTIALS_FILE) as f:
+            cfg = json.load(f)
+        block = cfg.get("web") or cfg.get("installed") or {}
+        return [u for u in (block.get("redirect_uris") or []) if isinstance(u, str)]
+    except Exception:
+        return []
+
+
+def _registered_host_redirect(callback_url: str):
+    """If `callback_url` is not registered but a registered callback exists on a
+    DIFFERENT host, return the URL of the OAuth start route on that host;
+    otherwise None (already fine, nothing registered, or same host — never loop)."""
+    from urllib.parse import urlparse
+    registered = _registered_redirect_uris()
+    if not registered or callback_url in registered:
+        return None
+    here = urlparse(callback_url)
+    for uri in registered:
+        u = urlparse(uri)
+        if u.path == here.path and u.netloc and u.netloc != here.netloc:
+            return f"{u.scheme}://{u.netloc}{URL_PREFIX}/import/gmail/auth"
+    return None
+
+
 @bp.route(URL_PREFIX + "/import/gmail/auth")
 @login_required
 def gmail_oauth_start():
     try:
+        # 2026-10-01: Google rejects the flow ("redirect_uri_mismatch") unless the
+        # callback URL is one registered on the OAuth client. The callback is
+        # derived from the host the user is browsing (www.voipguru.org vs
+        # voipguru.org), so starting on the "wrong" hostname always failed.
+        # Bounce the browser to the registered host first; the login session and
+        # OAuth state then live on the host Google will call back.
+        bounce = _registered_host_redirect(_gmail_callback_url())
+        if bounce:
+            return redirect(bounce)
         flow = _make_flow(redirect_uri=_gmail_callback_url())
         auth_url, state = flow.authorization_url(
             access_type="offline", prompt="consent", include_granted_scopes="true")

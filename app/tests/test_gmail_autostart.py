@@ -51,3 +51,20 @@ def test_callback_without_queue_starts_nothing(tmp_path):
     assert r.status_code == 200
     assert started == []
     assert "started automatically" not in r.get_data(as_text=True)
+
+
+def test_registered_host_redirect():
+    from app.routes.importers import import_gmail as ig
+    reg = ["https://voipguru.org/tax-ai-analyzer/import/gmail/auth/callback"]
+    with patch.object(ig, "_registered_redirect_uris", return_value=reg):
+        # wrong hostname → bounce to the OAuth start route on the registered host
+        assert ig._registered_host_redirect(
+            "https://www.voipguru.org/tax-ai-analyzer/import/gmail/auth/callback"
+        ) == "https://voipguru.org/tax-ai-analyzer/import/gmail/auth"
+        # already the registered callback → no redirect
+        assert ig._registered_host_redirect(reg[0]) is None
+        # same host, different scheme → never loop
+        assert ig._registered_host_redirect(
+            "http://voipguru.org/tax-ai-analyzer/import/gmail/auth/callback") is None
+    with patch.object(ig, "_registered_redirect_uris", return_value=[]):
+        assert ig._registered_host_redirect("https://x/y") is None
