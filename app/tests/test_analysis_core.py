@@ -129,3 +129,24 @@ def test_no_llm_is_rules_only():
         assert json.loads(row["extracted_json"])["method"].startswith("rules")
     finally:
         _cleanup()
+
+
+def test_hints_from_bare_folder_tags_and_precedence():
+    assert ac.hints_from_tags(["personal", "2023"]) == ("personal", "2023")
+    assert ac.hints_from_tags(["voipguru", "2022", "receipt"]) == ("voipguru", "2022")
+    # explicit app tags win over bare folder tags
+    assert ac.hints_from_tags(["personal", "2023", "tax-voipguru", "year-2022"]) == ("voipguru", "2022")
+    assert ac.hints_from_tags([260, 1]) == ("personal", None)      # unresolved ids are ignored
+
+
+def test_numeric_tag_ids_are_resolved_through_the_client():
+    class C2(FakeClient):
+        def tag_names(self, ids):
+            return [{260: "2022", 1: "personal"}[i] for i in ids]
+    _cleanup()
+    try:
+        out = ac.process_document(BASE + 5, {"content": W2, "title": "scan", "tags": [260, 1]},
+                                  llm=None, llm_ok=False, client=C2(), embed=False)
+        assert _row(BASE + 5)["tax_year"] == "2022"   # folder tag (via id→name) beats the body text
+    finally:
+        _cleanup()

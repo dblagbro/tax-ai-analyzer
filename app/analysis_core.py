@@ -34,15 +34,28 @@ def llm_analysis_failed(result: dict) -> bool:
 
 
 def hints_from_tags(tags) -> tuple[str, Optional[str]]:
-    """Paperless tags 'tax-<entity>' / 'year-<yyyy>' → (entity_hint, year_hint)."""
-    entity_hint, year_hint = "personal", None
+    """Paperless tag NAMES → (entity_hint, year_hint).
+
+    Recognised: 'tax-<entity>' / 'year-<yyyy>' (applied by this app) and the
+    bare folder tags Paperless adds from consume/<entity>/<year>/
+    ('personal', '2023'). Explicit 'tax-'/'year-' tags win over bare ones.
+    """
+    from app.llm_client.vocab import VALID_ENTITIES
+    entity_hint, year_hint = None, None
+    bare_entity, bare_year = None, None
     for tag_name in tags or []:
-        if isinstance(tag_name, str):
-            if tag_name.startswith("tax-"):
-                entity_hint = tag_name[4:]
-            elif tag_name.startswith("year-"):
-                year_hint = tag_name[5:]
-    return entity_hint, year_hint
+        if not isinstance(tag_name, str):
+            continue
+        t = tag_name.strip()
+        if t.startswith("tax-"):
+            entity_hint = t[4:]
+        elif t.startswith("year-"):
+            year_hint = t[5:]
+        elif t.isdigit() and len(t) == 4 and 2000 <= int(t) <= 2035:
+            bare_year = t
+        elif t.lower() in VALID_ENTITIES:
+            bare_entity = t.lower()
+    return entity_hint or bare_entity or "personal", year_hint or bare_year
 
 
 def derive_tax_year(result: dict, year_hint: Optional[str]) -> Optional[str]:
@@ -80,7 +93,15 @@ def process_document(
     log = log or logger.info
     content = doc.get("content", "") or ""
     title = doc.get("title") or f"Document {doc_id}"
-    entity_hint, year_hint = hints_from_tags(doc.get("tags", []))
+    # 2026-10-01: Paperless returns tags as numeric ids, so the old
+    # isinstance(str) check never matched and the entity/year hints from
+    # consume/<entity>/<year>/ were silently ignored for every document.
+    raw_tags = doc.get("tags", []) or []
+    try:
+        tag_names = client.tag_names(raw_tags) if hasattr(client, "tag_names") else raw_tags
+    except Exception:
+        tag_names = raw_tags
+    entity_hint, year_hint = hints_from_tags(tag_names)
 
     if len(content.strip()) < 10:
         # Mark as analyzed with minimal data so we don't retry forever

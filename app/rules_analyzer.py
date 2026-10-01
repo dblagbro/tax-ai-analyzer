@@ -43,15 +43,18 @@ _DOC_TYPE_RULES: list[tuple[str, str]] = [
     ("1099-K",            r"1099-?\s?k\b|payment card and third[- ]party network"),
     ("1099-DIV",          r"1099-?\s?div\b|dividends and distributions"),
     ("1099-MISC",         r"1099-?\s?misc\b|miscellaneous (?:income|information)"),
-    ("mortgage_statement", r"\bform 1098\b|mortgage interest statement|\bescrow\b|mortgage statement|principal balance|mortgage payment"),
+    ("mortgage_statement", r"\bform 1098\b|mortgage interest statement"),
     ("1099-INT",          r"1099-?\s?int\b|\binterest income\b"),
     ("property_tax",      r"property tax|real estate tax|tax collector|\bassessor\b|\bparcel\b.{0,60}\btax\b"),
-    ("credit_card_statement", r"minimum payment(?: due)?|credit limit|statement closing date|payment due date|\bnew balance\b"),
-    ("bank_statement",    r"beginning balance|ending balance|checks paid|deposits and (?:other )?credits|withdrawals and|account statement"),
+    # Statements BEFORE the generic mortgage words: a checking statement that
+    # lists "WELLS FARGO HOME MORTGAGE … PMT" is not a mortgage statement.
+    ("bank_statement",    r"deposit summary|deposit detail|beginning balance|starting balance|ending balance|checks paid|deposits and (?:other )?credits|withdrawals and|account statement"),
+    ("credit_card_statement", r"minimum payment(?: due)?|credit limit|statement closing date|payment due date|\bnew balance\b|year-end summary|card ending in"),
+    ("mortgage_statement", r"\bescrow\b|mortgage statement|principal balance|mortgage payment"),
     ("medical",           r"\bpatient\b|\bco-?pay\b|explanation of benefits|\beob\b|\bpharmacy\b|\bclinic\b|\bhospital\b|\bdental\b|\boncolog"),
     ("charitable_donation", r"\bdonation\b|tax-deductible|501\(c\)|\bcharitable\b|thank you for your (?:gift|generous)"),
     ("insurance",         r"\bpolicy (?:number|no\.?|#)|\bpremium\b|\binsurance\b"),
-    ("utility_bill",      r"\bkwh\b|electric(?:ity)? (?:bill|service)|water (?:bill|service)|natural gas|\bverizon\b|\bxfinity\b|\bcomcast\b|\bspectrum\b|internet service|wireless bill|usage charges"),
+    ("utility_bill",      r"\bkwh\b|electric(?:ity)? (?:bill|service)|water (?:bill|service)|natural gas|\bverizon\b|\bxfinity\b|\bcomcast\b|\bspectrum\b|internet service|wireless bill|usage charges|\bwireless\b|mobile phone|\bnet10\b|central hudson"),
     ("paypal_transaction", r"\bpaypal\b"),
     ("venmo_transaction", r"\bvenmo\b"),
     ("vehicle",           r"\bvin\b|\bdmv\b|registration renewal|vehicle registration|\bauto loan\b|\bodometer\b"),
@@ -102,7 +105,28 @@ _TAX_YEAR = re.compile(r"(?:tax year|for tax year|calendar year|for the year)\s*
 
 # ── field detectors ──────────────────────────────────────────────────────────
 
+# Filenames people give their own downloads are the strongest signal there is
+# ("DevinB_W2_Statement for 2023", "March 2023 Regular Statement",
+# "DevinB_CapOne_Smry_2023_5933", "Discover-Statement-20230324-6338").
+_TITLE_RULES = [(dt, re.compile(p, re.IGNORECASE)) for dt, p in [
+    ("W-2",                   r"(?<![a-z0-9])w-?2(?![a-z0-9])"),
+    ("mortgage_statement",    r"(?<!\d)1098(?!\d)"),
+    ("1099-INT",              r"1099-?\s?int"),
+    ("1099-NEC",              r"1099-?\s?nec"),
+    ("1099-K",                r"1099-?\s?k(?![a-z])"),
+    ("1099-DIV",              r"1099-?\s?div"),
+    ("1099-MISC",             r"1099-?\s?misc"),
+    ("credit_card_statement", r"capone|capital ?one|discover-statement|credit ?cards?|amex|citi ?card|year-end summary|(?<![a-z])smry(?![a-z])"),
+    ("bank_statement",        r"regular statement|bank statement|usalliance|checking statement|savings statement"),
+    ("property_tax",          r"property tax|school tax|tax bill"),
+]]
+
+
 def detect_doc_type(text: str, title: str = "") -> str:
+    norm_title = re.sub(r"[_]+", " ", title or "")
+    for dt, rx in _TITLE_RULES:
+        if rx.search(norm_title):
+            return dt
     hay = f"{title}\n{text[:8000]}"
     for dt, rx in _DOC_TYPE_RULES_C:
         if rx.search(hay):
@@ -150,7 +174,14 @@ def detect_date(text: str, title: str = "") -> Optional[str]:
 def detect_tax_year(text: str, title: str, date_str: Optional[str], year_hint: Optional[str]) -> Optional[str]:
     if year_hint and str(year_hint).strip()[:4].isdigit():
         return str(year_hint).strip()[:4]
-    m = _TAX_YEAR.search(text[:8000])
+    # A year stated next to the form name wins over any date in the document:
+    # a 2023 Form 1098 is dated January 2024.
+    for hay in (re.sub(r"[_]+", " ", title or ""), text[:8000]):
+        m = _TAX_YEAR.search(hay)
+        if m:
+            return m.group(1) or m.group(2)
+    m = re.search(r"\b(?:for|statement for|summary)\s+(20[12]\d)\b|\b(20[12]\d)\s+(?:regular statement|year-end)",
+                  re.sub(r"[_]+", " ", title or ""), re.IGNORECASE)
     if m:
         return m.group(1) or m.group(2)
     if date_str:
@@ -183,7 +214,11 @@ def detect_amount(text: str, doc_type: str) -> Optional[float]:
     amt = _labelled_amount(body, _GENERIC_LABELS)
     if amt is not None:
         return amt
-    amounts = [a for a in extract_amounts(body) if 0 < a < 1_000_000]
+    # Last resort: the largest dollar figure — but only figures printed WITH
+    # cents. OCR drops decimal points ("$ 4065" for $40.65) and a guess built
+    # on that is worse than no amount.
+    amounts = [float(x.replace(",", "")) for x in re.findall(r"\$\s?([\d,]+\.\d{2})\b", body)]
+    amounts = [a for a in amounts if 0 < a < 1_000_000]
     if 0 < len(amounts) <= 40:
         return max(amounts)
     return None
@@ -270,10 +305,26 @@ def analyze_rules_only(content: str, title: str = "", entity_hint: str = "person
     date_str = detect_date(text, title)
     tax_year = detect_tax_year(text, title, date_str, year_hint)
     amount = detect_amount(text, doc_type)
+    form_fields: dict = {}
+    if doc_type in ("W-2", "mortgage_statement", "1099-INT"):
+        # Same box parsers the accountant cover sheet uses.
+        try:
+            from app.export import cover_sheet as _cs
+            if doc_type == "W-2":
+                form_fields = _cs.parse_w2(text)
+                amount = form_fields.get("Box 1 — Wages, tips, other compensation", amount)
+            elif doc_type == "1099-INT":
+                form_fields = _cs.parse_1099_int(text)
+                amount = form_fields.get("Box 1 — Interest income", amount)
+            else:
+                form_fields = _cs.parse_1098(text)
+                amount = form_fields.get("Box 1 — Mortgage interest received", amount)
+        except Exception as fe:
+            logger.debug(f"form parser failed: {fe!r}")
     vendor = detect_vendor(title, text)
     entity = detect_entity(title, text, entity_hint)
     method = "rules"
-    extracted: dict = {}
+    extracted: dict = {k: v for k, v in form_fields.items() if not k.startswith("_")}
 
     conf = 0.15
     if doc_type != "other":

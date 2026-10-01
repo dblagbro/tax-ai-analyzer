@@ -488,6 +488,21 @@ class PaperlessClient:
             return _get_document_direct(doc_id, self._base_url, self._token)
         return get_document(doc_id)
 
+    def tag_names(self, tag_ids: list) -> list:
+        """Paperless returns a document's tags as numeric ids. Map them to
+        names (cached; one refresh on a miss). Unknown ids are dropped; values
+        that are already strings pass through."""
+        base_url, token = _resolve_base_token(self._base_url, self._token)
+        ids = [t for t in (tag_ids or []) if isinstance(t, int)]
+        out = [t for t in (tag_ids or []) if isinstance(t, str)]
+        if ids:
+            cache = _get_tag_cache_for(base_url)
+            if not set(ids) <= set(cache.values()):
+                _refresh_tag_cache(base_url, token)
+            by_id = {v: k for k, v in cache.items()}
+            out += [by_id[i] for i in ids if i in by_id]
+        return out
+
     def apply_tags(self, doc_id: int, tag_names: list):
         if self._base_url or self._token:
             _apply_tags_direct(doc_id, tag_names, self._base_url, self._token)
