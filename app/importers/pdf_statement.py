@@ -69,6 +69,7 @@ _LINE_RELAXED_RE = re.compile(
     rf"(?P<desc>\S.*?\S)\s{{2,}}(?P<amts>{_AMT_TOKEN})(?=\s)\s+(?P<tail>\S.*)$",
     re.IGNORECASE,
 )
+_EMBEDDED_AMT = re.compile(rf"\s{{2,}}{_AMT_TOKEN}\s+[A-Za-z]", re.IGNORECASE)
 # "Date  Check #  Amount   Date  Check #  Amount …" — a recap table of checks that
 # are ALREADY listed in the detail section; parsing it double-counts them.
 _CHECK_RECAP_HEADER = re.compile(r"Date\s+Check\s*#\s+Amount", re.IGNORECASE)
@@ -125,6 +126,8 @@ _CARD_ISSUERS = (r"capital one|citi ?card|citibank|amex|american express|discove
                  r"barclay|lowes|walmart|cabela|comenity|bhg|paypal credit|apple card|usbank|u\.?s\.? bank")
 _BANK_TRANSFER_RULES: list[tuple[str, "re.Pattern[str]"]] = [
     ("balance_transfer", re.compile(r"\bbt deposit\b|balance transfer", re.I)),
+    # A lender wiring the loan amount in is debt, not income.
+    ("loan_proceeds", re.compile(r"bankers healthcare group|loan proceeds|loan disbursement|\bwire\b.*\b(?:lendingclub|upgrade|sofi|upstart|prosper)\b", re.I)),
     ("internal_transfer", re.compile(r"transfer (?:to|from)\b|internet transfer|xfer (?:to|from)|internal transfer|"
                                      r"overdraft protection", re.I)),
     # Net pay. The W-2 is the tax document for wages; counting deposits as
@@ -440,6 +443,11 @@ def parse_statement_text(
         if lab and not re.search(r"\d", raw_line):
             last_label = lab.group(1).strip()
         m = _LINE_RE.match(raw_line)
+        if m and kind == "card" and _EMBEDDED_AMT.search(m.group("desc")):
+            # "VISTAPRINT …  Services   $5.00 CASHBACK BONUS BALANCE   $7.50":
+            # the strict pattern swallowed the real amount into the description
+            # and took the right-hand column's figure. Prefer the first amount.
+            m = _LINE_RELAXED_RE.match(raw_line) or m
         if in_check_recap:
             if m:
                 continue          # recap row — the check is already in the detail section

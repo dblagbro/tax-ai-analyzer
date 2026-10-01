@@ -246,6 +246,15 @@ def build_cover_data(year: str) -> dict:
 
 # ── rendering ────────────────────────────────────────────────────────────────
 
+def _now_local() -> str:
+    """Eastern time when tz data is available (the container clock is UTC)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).strftime("%B %d, %Y %I:%M %p %Z")
+    except Exception:
+        return datetime.utcnow().strftime("%B %d, %Y %H:%M UTC")
+
+
 def _money(v: float) -> str:
     return f"${v:,.2f}"
 
@@ -285,11 +294,18 @@ def export_cover_sheet(year: str, entity_slug: str = "personal") -> str:
                 "card_payment": "Credit-card payments", "loan_payment": "Loan payments",
                 "p2p_transfer": "PayPal / Venmo / Zelle (net)", "cash": "ATM cash withdrawals",
                 "internal_transfer": "Transfers between own accounts (net)",
-                "balance_transfer": "Balance-transfer deposits (loan proceeds, not income)"}
+                "balance_transfer": "Balance-transfer deposits (loan proceeds, not income)",
+                "loan_proceeds": "Loan proceeds wired in (debt, not income)"}
     tr_rows = "".join(f"<tr><td>{e(tk_label.get(k, k))}</td><td class='r'>{v[0]}</td><td class='r'>{_money(v[1])}</td></tr>"
                       for k, v in sorted(d["transfers"].items(), key=lambda x: x[1][1]))
-    have_stmt = {"Capital One (all cards)": "Year-end summaries for 5 cards + Dec statements for 2 more",
-                 "Discover": "All 12 monthly statements"}
+    card_files = {a: f for (k, a), f in d["files"].items() if k == "card"}
+    have_stmt = {}
+    disc = [f for a, f in card_files.items() if a == "6338"]
+    if disc:
+        have_stmt["Discover"] = f"Monthly statements on file ({len(disc[0]['months'])} months of activity)"
+    capone = [a for a in card_files if a != "6338"]
+    if capone:
+        have_stmt["Capital One (all cards)"] = "On file for cards …" + ", …".join(sorted(capone))
     paid_rows = "".join(
         f"<tr><td>{e(name)}</td><td>{'card' if k == 'card_payment' else 'loan'}</td><td class='r'>{v[0]}</td>"
         f"<td class='r'>{_money(v[1])}</td><td class='{'ok' if name in have_stmt else 'warn'}'>"
@@ -307,7 +323,7 @@ th {{ background: #f1f3f5; font-size: 8.5pt; }} .r {{ text-align: right; white-s
 .box {{ border: 1px solid #ccc; background: #fafafa; padding: 6px 10px; margin: 6px 0; font-size: 8.5pt; }}
 </style></head><body>
 <h1>{e(year)} Tax Preparation — Cover Sheet</h1>
-<div class="sub">Devin P. Blagbrough · generated {datetime.now().strftime('%B %d, %Y %I:%M %p')} · figures are extracted from the source documents listed; originals are in the accompanying folders.</div>
+<div class="sub">Devin P. Blagbrough · generated {_now_local()} · figures are extracted from the source documents listed; originals are in the accompanying folders.</div>
 
 <h2>1. Tax forms on file</h2>
 {forms_html}

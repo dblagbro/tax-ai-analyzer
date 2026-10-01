@@ -283,3 +283,16 @@ def test_classify_bank_row():
     assert c("Overdraft Protection Deposit") == "internal_transfer"
     assert c("EXT WD TRAVELERS - PER INSUR") is None
     assert c("EXT WD CENTRALHUDSON") is None
+
+
+def test_amount_embedded_before_right_column_figure():
+    text = (" Account Summary     10/25/2022 - 11/24/2022\nCredit Line  $12,700\n"
+            "DATE         PURCHASES                 MERCHANT CATEGORY        AMOUNT\n"
+            "10/27        VISTAPRINT 866-207-4955 MA   Services             $5.00 CASHBACK BONUS BALANCE                   $7.50\n")
+    txns = ps.parse_statement_text(text, filename="Discover-Statement-20221124-6338.pdf")
+    assert len(txns) == 1 and txns[0]["amount"] == -5.00
+    assert txns[0]["description"] == "VISTAPRINT 866-207-4955 MA Services"
+
+
+def test_loan_wire_is_not_income():
+    assert ps.classify_bank_row("Descriptive Deposit INC WIRE BANKERS HEALTHCARE GROUP") == "loan_proceeds"
