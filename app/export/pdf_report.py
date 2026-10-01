@@ -56,15 +56,17 @@ def export_pdf(year: str, entity_slug: str, documents: list = None) -> str:
     deduction_docs = [d for d in documents if d.get("category") in ("deduction", "expense")]
     other_docs = [d for d in documents if d.get("category") not in ("income", "deduction", "expense")]
 
-    total_income = sum(float(d.get("amount") or 0) for d in income_docs)
-    total_deductions = sum(float(d.get("amount") or 0) for d in deduction_docs)
+    # abs(): statement/OFX transactions store money-out as NEGATIVE amounts;
+    # summing them raw made total deductions shrink (or go negative).
+    total_income = sum(abs(float(d.get("amount") or 0)) for d in income_docs)
+    total_deductions = sum(abs(float(d.get("amount") or 0)) for d in deduction_docs)
     net = total_income - total_deductions
 
     # Group expenses by category for summary table
     expense_by_cat: dict[str, float] = {}
     for d in deduction_docs:
         cat = d.get("doc_type") or d.get("category") or "other"
-        expense_by_cat[cat] = expense_by_cat.get(cat, 0) + float(d.get("amount") or 0)
+        expense_by_cat[cat] = expense_by_cat.get(cat, 0) + abs(float(d.get("amount") or 0))
 
     # W-2 and 1099 income lines
     w2_docs = [d for d in income_docs if str(d.get("doc_type", "")).upper() in ("W-2", "W2")]

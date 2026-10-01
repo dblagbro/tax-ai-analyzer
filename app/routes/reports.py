@@ -26,13 +26,13 @@ def _year_totals(conn, year: str, entity_id=None) -> dict:
         f"""SELECT
                COALESCE(SUM(CASE
                    WHEN category = 'income' THEN ABS(amount)
-                   WHEN (category IS NULL OR category NOT IN ('income','expense','deduction','fee'))
+                   WHEN (category IS NULL OR category NOT IN ('income','expense','deduction','fee','transfer','payment'))
                        AND amount > 0 THEN amount
                    ELSE 0
                END), 0) as income,
                COALESCE(SUM(CASE
                    WHEN category IN ('expense','deduction') THEN ABS(amount)
-                   WHEN (category IS NULL OR category NOT IN ('income','expense','deduction','fee'))
+                   WHEN (category IS NULL OR category NOT IN ('income','expense','deduction','fee','transfer','payment'))
                        AND amount < 0 THEN -amount
                    ELSE 0
                END), 0) as expense,
@@ -86,9 +86,9 @@ def _top_vendors(conn, year: str, limit: int = 10, entity_id=None,
 
     # Prefer explicit category. If category is generic ('imported') or NULL, use sign.
     if flow == "income":
-        flow_clause = " AND (category = 'income' OR ((category IS NULL OR category NOT IN ('income','expense','deduction','fee')) AND amount > 0))"
+        flow_clause = " AND (category = 'income' OR ((category IS NULL OR category NOT IN ('income','expense','deduction','fee','transfer','payment')) AND amount > 0))"
     elif flow == "expense":
-        flow_clause = " AND (category IN ('expense','deduction') OR ((category IS NULL OR category NOT IN ('income','expense','deduction','fee')) AND amount < 0))"
+        flow_clause = " AND (category IN ('expense','deduction') OR ((category IS NULL OR category NOT IN ('income','expense','deduction','fee','transfer','payment')) AND amount < 0))"
     else:
         flow_clause = ""
 
