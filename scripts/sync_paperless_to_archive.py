@@ -170,6 +170,11 @@ def main() -> int:
             "entity": d["entity"] or "", "file": rel, "paperless_id": d["id"],
             "verified": "no (keyword rules — check original)" if d["provisional"] else "AI-classified",
             "paperless_link": f"https://www.voipguru.org/tax-paperless/documents/{d['id']}/",
+            # A document can legitimately be dated outside its tax year (a
+            # January notice about last year's form) — but that is also how a
+            # mis-tagged document looks, so make it visible.
+            "check": "" if (d["date"] or "")[:4] in (a.year, "") else
+                     f"dated {(d['date'] or '')[:4]}, filed under {a.year} — confirm it is about {a.year}",
         })
 
     if not a.dry_run:
