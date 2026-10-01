@@ -130,6 +130,13 @@ def main() -> int:
             except OSError:
                 pass
 
+    # Same document, different bytes: a PDF that had to be re-saved before
+    # Paperless would accept it no longer matches by checksum. Fall back to the
+    # filename (minus the "<Folder> - " prefix added when it was queued).
+    names: dict[str, str] = {}
+    for rel in have.values():
+        names.setdefault(os.path.basename(rel), rel)
+
     manifest_path = os.path.join(year_dir, ".paperless_sync.json")
     manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {}
 
@@ -145,8 +152,13 @@ def main() -> int:
             missing += 1
             continue
         folder = FOLDER_FOR.get(d["doc_type"] or "other", "Receipts")
+        orig = info["original"] or ""
+        by_name = names.get(orig) or (names.get(orig.split(" - ", 1)[1]) if " - " in orig else None)
         if info["md5"] in have:
             rel = have[info["md5"]]
+            already += 1
+        elif by_name:
+            rel = by_name
             already += 1
         else:
             dest_dir = os.path.join(year_dir, folder)
