@@ -239,6 +239,24 @@ def is_gmail_message_processed(message_id: str) -> bool:
         conn.close()
 
 
+def get_processed_gmail_ids() -> set:
+    """Gmail API ids (not RFC Message-IDs) of every message already handled.
+
+    The importer used to download each message in full just to read its
+    Message-ID header and then discover it had been processed — on a resumed
+    run that spent Gmail's per-minute quota re-reading thousands of finished
+    emails. With this set a resumed run skips them without any API call.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT gmail_id FROM gmail_processed_messages WHERE gmail_id IS NOT NULL AND gmail_id != ''"
+        ).fetchall()
+        return {r[0] for r in rows}
+    finally:
+        conn.close()
+
+
 def record_gmail_message(
     message_id: str,
     gmail_id: str,

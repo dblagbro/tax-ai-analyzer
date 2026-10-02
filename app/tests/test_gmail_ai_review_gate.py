@@ -165,3 +165,17 @@ def test_html_to_pdf_renders_in_worker_and_survives_a_crashed_renderer():
     assert parse._render_pool is None                      # reset for the next call
     assert parse._text_to_pdf("plain body", "Subject")[:4] == b"%PDF"   # a fresh worker is started
     parse._reset_render_pool()
+
+
+def test_processed_gmail_ids_roundtrip():
+    from app import db
+    from app.db.core import get_connection
+    mid, gid = "<quota-test@example>", "quotatest123abc"
+    try:
+        assert gid not in db.get_processed_gmail_ids()
+        db.record_gmail_message(mid, gid, "ai_filtered", "personal", "2099", "subj", "x@y")
+        assert gid in db.get_processed_gmail_ids()
+    finally:
+        conn = get_connection()
+        conn.execute("DELETE FROM gmail_processed_messages WHERE message_id = ?", (mid,))
+        conn.commit(); conn.close()

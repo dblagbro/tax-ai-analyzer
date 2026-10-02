@@ -102,6 +102,7 @@ from app.db.import_jobs import (
     get_import_job_logs,
     get_import_jobs,
     gmail_processed_stats,
+    get_processed_gmail_ids,
     is_gmail_message_processed,
     list_credentials,
     list_import_jobs,

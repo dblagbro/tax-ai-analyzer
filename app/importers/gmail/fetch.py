@@ -106,7 +106,7 @@ def _build_service(creds):
 # pacer keeps the whole process near half the quota, and quota errors back off
 # and retry instead of failing the message.
 _PACE_LOCK = threading.Lock()
-_PACE_MIN_INTERVAL = 0.05          # ≤ 20 calls/s ≈ 6,000 units/min
+_PACE_MIN_INTERVAL = 0.12          # ≤ ~8 calls/s ≈ 2,500 units/min (20/s still tripped the quota)
 _pace_last = [0.0]
 
 

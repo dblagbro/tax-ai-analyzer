@@ -123,6 +123,19 @@ def _process_month(
         log(f"[{month_label}] Service build error: {e}")
         return
 
+    # Skip finished messages BEFORE spending quota on them (see
+    # db.get_processed_gmail_ids).
+    try:
+        done_ids = db.get_processed_gmail_ids()
+    except Exception:
+        done_ids = set()
+    todo = [m for m in msgs if m["id"] not in done_ids]
+    if len(todo) != len(msgs):
+        log(f"[{month_label}] {len(msgs) - len(todo)} already processed — {len(todo)} to do")
+        with stats_lock:
+            stats["skipped"] += len(msgs) - len(todo)
+    msgs = todo
+
     ai_calls_this_month = 0
     for msg_stub in msgs:
         if stop_event.is_set():
