@@ -114,3 +114,29 @@ def test_mirror_copy_writes_pdf_and_manifest(tmp_path):
     rows = (base / "_manifest.csv").read_text(encoding="utf-8").strip().splitlines()
     assert rows[0].startswith("email_date,entity,doc_type") and len(rows) == 3
     assert "Acme,12.5,a.pdf" in rows[1]
+
+
+def test_gmail_execute_backs_off_on_quota_and_raises_other_errors():
+    from app.importers.gmail import fetch
+    calls = {"n": 0}
+
+    class Req:
+        def execute(self, num_retries=0):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("HttpError 403 ... Quota exceeded for quota metric 'Total Query Cost' ... rateLimitExceeded")
+            return {"ok": True}
+
+    with patch.object(fetch.time, "sleep") as sl:
+        assert fetch._gmail_execute(Req()) == {"ok": True}
+    assert calls["n"] == 3 and sl.call_count >= 2
+
+    class Bad:
+        def execute(self, num_retries=0):
+            raise RuntimeError("HttpError 404 not found")
+    try:
+        fetch._gmail_execute(Bad())
+    except RuntimeError as e:
+        assert "404" in str(e)
+    else:
+        raise AssertionError("non-quota errors must propagate")

@@ -32,6 +32,7 @@ from app.importers.gmail.fetch import (
     _build_service,
     _fast_prefilter,
     _fetch_month_message_ids,
+    _gmail_execute,
     _google_imports,
     get_message_detail,
     parse_headers,
@@ -193,9 +194,9 @@ def _process_month(
                 # get_pdf_attachments returns bytes for inline data, str for attachment IDs
                 if isinstance(data_or_id, str):
                     try:
-                        att = service.users().messages().attachments().get(
+                        att = _gmail_execute(service.users().messages().attachments().get(
                             userId="me", messageId=msg_id, id=data_or_id
-                        ).execute()
+                        ))
                         raw = base64.urlsafe_b64decode(att.get("data", "") + "==")
                     except Exception as e:
                         log(f"    [attachment fetch error: {e}]")
@@ -304,7 +305,7 @@ def run_import(
     entity_slug: str,
     log_fn: Callable = None,
     stop_event: threading.Event = None,
-    max_workers: int = 12,
+    max_workers: int = 4,   # 12 exhausted Gmail's per-minute quota; calls are paced in fetch._gmail_execute
     progress_fn: Callable = None,
 ) -> dict:
     """

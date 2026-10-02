@@ -11,6 +11,9 @@ during Phase 11H refactor. The public API (``run_import``, ``get_auth_url``,
 from __future__ import annotations
 
 import base64
+import random
+import threading
+import time
 
 import logging
 import re
@@ -95,6 +98,41 @@ def _build_service(creds):
     return build("gmail", "v1", http=authorized_http)
 
 
+# ── quota-aware execution ─────────────────────────────────────────────────────
+# Gmail allows 15,000 quota units per user per minute; messages.get and
+# messages.list cost 5 each. Twelve month-workers with no pacing blew through
+# that in under a minute (2026-10-01) and then every remaining message failed
+# with 403 rateLimitExceeded. All API calls go through _gmail_execute: a shared
+# pacer keeps the whole process near half the quota, and quota errors back off
+# and retry instead of failing the message.
+_PACE_LOCK = threading.Lock()
+_PACE_MIN_INTERVAL = 0.05          # ≤ 20 calls/s ≈ 6,000 units/min
+_pace_last = [0.0]
+
+
+def _is_quota_error(e: Exception) -> bool:
+    s = str(e)
+    return ("rateLimitExceeded" in s or "userRateLimitExceeded" in s or "Quota exceeded" in s
+            or "HttpError 429" in s or "Too Many Requests" in s)
+
+
+def _gmail_execute(request, max_attempts: int = 7):
+    """Execute a googleapiclient request with pacing and quota back-off."""
+    for attempt in range(max_attempts):
+        with _PACE_LOCK:
+            wait = _PACE_MIN_INTERVAL - (time.monotonic() - _pace_last[0])
+            if wait > 0:
+                time.sleep(wait)
+            _pace_last[0] = time.monotonic()
+        try:
+            return request.execute(num_retries=2)
+        except Exception as e:
+            if _is_quota_error(e) and attempt < max_attempts - 1:
+                time.sleep(min(64, 4 * 2 ** attempt) + random.random() * 2)
+                continue
+            raise
+
+
 def _fetch_month_message_ids(creds, year: int, month: int,
                               search_terms: list[str]) -> list[dict]:
     """Return [{id, threadId}] for one month. Thread-safe (builds own service)."""
@@ -106,7 +144,7 @@ def _fetch_month_message_ids(creds, year: int, month: int,
         kwargs = {"userId": "me", "q": query, "maxResults": 500}
         if page_token:
             kwargs["pageToken"] = page_token
-        result = service.users().messages().list(**kwargs).execute(num_retries=2)
+        result = _gmail_execute(service.users().messages().list(**kwargs))
         messages.extend(result.get("messages", []))
         page_token = result.get("nextPageToken")
         if not page_token:
@@ -116,7 +154,7 @@ def _fetch_month_message_ids(creds, year: int, month: int,
 
 def get_message_detail(service, msg_id: str) -> dict:
     """Fetch full message using an already-built service object."""
-    return service.users().messages().get(userId="me", id=msg_id, format="full").execute(num_retries=2)
+    return _gmail_execute(service.users().messages().get(userId="me", id=msg_id, format="full"))
 
 
 def parse_headers(msg: dict) -> dict:
