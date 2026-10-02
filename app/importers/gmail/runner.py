@@ -10,9 +10,12 @@ during Phase 11H refactor. The public API (``run_import``, ``get_auth_url``,
 
 from __future__ import annotations
 
+import base64
+import csv
 import logging
 import re
 import os
+import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,9 +25,14 @@ from typing import Callable, Optional
 
 from app.importers.gmail.auth import get_credentials
 from app.importers.gmail.fetch import (
+    # 2026-10-01: _google_imports and _MAX_AI_CALLS_PER_MONTH (plus base64 and
+    # secrets above) were used below but never imported after the Phase 11H
+    # split — every month worker died with NameError before reading one email.
+    _MAX_AI_CALLS_PER_MONTH,
     _build_service,
     _fast_prefilter,
     _fetch_month_message_ids,
+    _google_imports,
     get_message_detail,
     parse_headers,
     get_pdf_attachments,
@@ -42,6 +50,38 @@ from app.importers.gmail.ai_review import _ai_review_email
 from app.importers.gmail.transactions import upsert_transaction
 
 logger = logging.getLogger(__name__)
+
+
+def _mirror_copy(year: str, slug: str, fname: str, data: bytes, meta: dict) -> None:
+    """Keep a second copy of every saved PDF, plus a manifest row, under
+    EXPORT_PATH/gmail_pdfs/<year>/.
+
+    Paperless deletes files from the consume folder as it ingests them and
+    files them in its own store; the tax archive folder is what the user and
+    the accountant actually work from, and this container mounts it
+    read-only. The mirror is the hand-off point: a host-side step files these
+    copies into tax/<year>/ without waiting hours for OCR. Never raises.
+    """
+    try:
+        from app.config import EXPORT_PATH
+        base = os.path.join(EXPORT_PATH, "gmail_pdfs", str(year))
+        d = os.path.join(base, slug or "personal")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, fname), "wb") as f:
+            f.write(data)
+        man = os.path.join(base, "_manifest.csv")
+        new = not os.path.exists(man)
+        with open(man, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["email_date", "entity", "doc_type", "vendor", "amount", "file",
+                            "subject", "sender", "triage", "message_id"])
+            w.writerow([meta.get("date", ""), slug, meta.get("doc_type", ""), meta.get("vendor", ""),
+                        "" if meta.get("amount") is None else meta.get("amount"), fname,
+                        meta.get("subject", ""), meta.get("sender", ""), meta.get("triage", ""),
+                        meta.get("message_id", "")])
+    except Exception as e:  # the import itself must not depend on the mirror
+        logger.warning(f"gmail mirror copy failed for {fname}: {e}")
 
 
 def _process_month(
@@ -226,6 +266,11 @@ def _process_month(
                         f.write(pdf_bytes)
                     log(f"    ✓ {os.path.basename(dest_path)}")
                     saved = True
+                    _mirror_copy(msg_year, slug, os.path.basename(dest_path), pdf_bytes, {
+                        "date": date_str, "doc_type": review.get("doc_type", ""), "vendor": ai_vendor,
+                        "amount": ai_amount, "subject": subject, "sender": sender,
+                        "triage": review.get("reason", ""), "message_id": message_id_header,
+                    })
 
             if saved:
                 upsert_transaction({

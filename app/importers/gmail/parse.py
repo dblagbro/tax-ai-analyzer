@@ -10,6 +10,8 @@ during Phase 11H refactor. The public API (``run_import``, ``get_auth_url``,
 
 from __future__ import annotations
 
+from email.utils import parsedate_to_datetime
+
 import hashlib
 import io
 import logging

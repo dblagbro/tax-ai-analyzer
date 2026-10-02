@@ -10,6 +10,8 @@ during Phase 11H refactor. The public API (``run_import``, ``get_auth_url``,
 
 from __future__ import annotations
 
+import base64
+
 import logging
 import re
 from typing import Optional

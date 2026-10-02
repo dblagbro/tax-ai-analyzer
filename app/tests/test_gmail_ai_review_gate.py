@@ -91,3 +91,26 @@ def test_extract_amount_forms():
     assert extract_amount("$1,234.56 charged") == 1234.56
     assert extract_amount("no money here") is None
     assert extract_amount("", "Total $9.99") == 9.99
+
+
+def test_gmail_package_has_every_name_it_uses():
+    """The Phase 11H split left seven names un-imported across four modules
+    (found one failed import at a time, in production). Assert them all."""
+    from app.importers.gmail import runner, fetch, parse, auth
+    for mod, names in ((runner, ("_google_imports", "_MAX_AI_CALLS_PER_MONTH", "base64", "secrets", "csv")),
+                       (fetch, ("base64",)), (parse, ("parsedate_to_datetime",)), (auth, ("secrets", "GMAIL_SCOPES"))):
+        for n in names:
+            assert hasattr(mod, n), f"{mod.__name__} is missing {n}"
+
+
+def test_mirror_copy_writes_pdf_and_manifest(tmp_path):
+    from app.importers.gmail import runner
+    with patch("app.config.EXPORT_PATH", str(tmp_path)):
+        runner._mirror_copy("2023", "personal", "a.pdf", b"%PDF-1", {"date": "Mon, 6 Mar 2023", "doc_type": "receipt",
+                            "vendor": "Acme", "amount": 12.5, "subject": "Your receipt", "sender": "x@y", "message_id": "<1@y>"})
+        runner._mirror_copy("2023", "personal", "b.pdf", b"%PDF-2", {"amount": None})
+    base = tmp_path / "gmail_pdfs" / "2023"
+    assert (base / "personal" / "a.pdf").read_bytes() == b"%PDF-1"
+    rows = (base / "_manifest.csv").read_text(encoding="utf-8").strip().splitlines()
+    assert rows[0].startswith("email_date,entity,doc_type") and len(rows) == 3
+    assert "Acme,12.5,a.pdf" in rows[1]
