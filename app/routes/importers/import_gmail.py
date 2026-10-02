@@ -127,39 +127,43 @@ def _registered_redirect_uris() -> list:
         return []
 
 
-def _registered_host_redirect(callback_url: str):
-    """If `callback_url` is not registered but a registered callback exists on a
-    DIFFERENT host, return the URL of the OAuth start route on that host;
-    otherwise None (already fine, nothing registered, or same host — never loop)."""
+def _effective_redirect_uri(callback_url: str) -> str:
+    """The redirect URI to give Google for BOTH the consent request and the
+    token exchange.
+
+    Google only accepts a URI registered on the OAuth client. This client has
+    https://voipguru.org/… registered, but inside the LAN only
+    https://www.voipguru.org/… is reachable, so the URL derived from the
+    browsing host is not registered. Use the registered URI with the same
+    path instead. After consent Google sends the browser to the registered
+    host; if that host is unreachable from where the user sits, changing the
+    host in the address bar to the one they started on completes the flow —
+    the callback route below accepts it on any host because it presents the
+    same registered URI when exchanging the code.
+    """
     from urllib.parse import urlparse
     registered = _registered_redirect_uris()
     if not registered or callback_url in registered:
-        return None
-    here = urlparse(callback_url)
+        return callback_url
+    path = urlparse(callback_url).path
     for uri in registered:
-        u = urlparse(uri)
-        if u.path == here.path and u.netloc and u.netloc != here.netloc:
-            return f"{u.scheme}://{u.netloc}{URL_PREFIX}/import/gmail/auth"
-    return None
+        if urlparse(uri).path == path:
+            return uri
+    return callback_url
 
 
 @bp.route(URL_PREFIX + "/import/gmail/auth")
 @login_required
 def gmail_oauth_start():
     try:
-        # 2026-10-01: Google rejects the flow ("redirect_uri_mismatch") unless the
-        # callback URL is one registered on the OAuth client. The callback is
-        # derived from the host the user is browsing (www.voipguru.org vs
-        # voipguru.org), so starting on the "wrong" hostname always failed.
-        # Bounce the browser to the registered host first; the login session and
-        # OAuth state then live on the host Google will call back.
-        bounce = _registered_host_redirect(_gmail_callback_url())
-        if bounce:
-            return redirect(bounce)
-        flow = _make_flow(redirect_uri=_gmail_callback_url())
+        flow = _make_flow(redirect_uri=_effective_redirect_uri(_gmail_callback_url()))
         auth_url, state = flow.authorization_url(
             access_type="offline", prompt="consent", include_granted_scopes="true")
         flask_session["gmail_oauth_state"] = state
+        # Newer google-auth-oauthlib adds PKCE automatically; the verifier must
+        # be presented again at token exchange, which happens on a NEW Flow
+        # object in the callback — carry it in the session.
+        flask_session["gmail_oauth_verifier"] = getattr(flow, "code_verifier", None)
         return redirect(auth_url)
     except FileNotFoundError:
         flash("credentials.json not found.", "danger")
@@ -177,8 +181,11 @@ def gmail_oauth_start():
 @login_required
 def gmail_oauth_callback():
     try:
-        flow = _make_flow(redirect_uri=_gmail_callback_url())
-        cb = _gmail_callback_url()
+        cb = _effective_redirect_uri(_gmail_callback_url())
+        flow = _make_flow(redirect_uri=cb)
+        verifier = flask_session.pop("gmail_oauth_verifier", None)
+        if verifier:
+            flow.code_verifier = verifier
         auth_response = cb + "?" + request.query_string.decode()
         flow.fetch_token(authorization_response=auth_response)
         creds = flow.credentials
