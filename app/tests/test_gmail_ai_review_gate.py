@@ -140,3 +140,28 @@ def test_gmail_execute_backs_off_on_quota_and_raises_other_errors():
         assert "404" in str(e)
     else:
         raise AssertionError("non-quota errors must propagate")
+
+
+def test_html_to_pdf_renders_in_worker_and_survives_a_crashed_renderer():
+    from app.importers.gmail import parse
+    pdf = parse._html_to_pdf("<p>Receipt total $12.34</p>")
+    assert pdf[:4] == b"%PDF"
+
+    class DeadPool:
+        _processes = {}
+        def submit(self, *a, **k):
+            raise RuntimeError("A process in the process pool was terminated abruptly")
+        def shutdown(self, **k):
+            pass
+
+    parse._reset_render_pool()
+    parse._render_pool = DeadPool()
+    try:
+        parse._html_to_pdf("<p>x</p>")
+    except RuntimeError as e:
+        assert "PDF renderer failed" in str(e)
+    else:
+        raise AssertionError("a dead renderer must surface as an ordinary exception")
+    assert parse._render_pool is None                      # reset for the next call
+    assert parse._text_to_pdf("plain body", "Subject")[:4] == b"%PDF"   # a fresh worker is started
+    parse._reset_render_pool()

@@ -10,6 +10,9 @@ during Phase 11H refactor. The public API (``run_import``, ``get_auth_url``,
 
 from __future__ import annotations
 
+import multiprocessing
+import threading
+from concurrent.futures import ProcessPoolExecutor
 from email.utils import parsedate_to_datetime
 
 import hashlib
@@ -30,9 +33,52 @@ def _sanitize_html_for_pdf(html: str) -> str:
     return html
 
 
-def _html_to_pdf(html: str) -> bytes:
+# ── PDF rendering in an isolated worker process ───────────────────────────────
+# 2026-10-02: WeasyPrint's native stack (pango/cairo) is not safe to call from
+# several threads, and some emails crash it outright. With four month-workers
+# rendering concurrently the whole import died with "free(): invalid pointer"
+# sixteen minutes in. Rendering now happens in ONE child process:
+#   * calls are serialised (one render at a time, whatever the thread count)
+#   * a native crash or a hang kills only the child — the caller gets an
+#     ordinary exception, falls back to the text rendering, and the import
+#     carries on
+_RENDER_TIMEOUT_S = 90
+_render_lock = threading.Lock()
+_render_pool = None
+
+
+def _render_worker(doc: str) -> bytes:
     from weasyprint import HTML
-    return HTML(string=_sanitize_html_for_pdf(html)).write_pdf()
+    return HTML(string=doc).write_pdf()
+
+
+def _reset_render_pool() -> None:
+    global _render_pool
+    pool, _render_pool = _render_pool, None
+    if pool is None:
+        return
+    try:
+        for proc in list(getattr(pool, "_processes", {}).values()):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        pool.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
+
+
+def _html_to_pdf(html: str) -> bytes:
+    global _render_pool
+    doc = _sanitize_html_for_pdf(html)
+    with _render_lock:
+        if _render_pool is None:
+            _render_pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+        try:
+            return _render_pool.submit(_render_worker, doc).result(timeout=_RENDER_TIMEOUT_S)
+        except Exception as e:
+            _reset_render_pool()          # crashed or hung renderer: start a fresh one next time
+            raise RuntimeError(f"PDF renderer failed ({type(e).__name__}: {str(e)[:120]})") from e
 
 
 def _text_to_pdf(text: str, subject: str = "") -> bytes:
