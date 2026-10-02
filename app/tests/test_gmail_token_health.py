@@ -86,3 +86,13 @@ def test_status_route_uses_token_health():
         body = c.get("/tax-ai-analyzer/api/import/gmail/status").get_json()
     assert body["authenticated"] is False and body["token_valid"] is False
     assert "reconnect" in body["token_error"]
+
+
+def test_quota_error_is_not_a_dead_token():
+    _reset_cache()
+    err = RuntimeError("HttpError 403 ... Quota exceeded for quota metric 'Total Query Cost' ... rateLimitExceeded")
+    with patch.object(auth, "_load_token_from_db", return_value={"refresh_token": "x"}), \
+         patch.object(auth, "get_credentials", return_value=object()), \
+         patch.object(auth, "_google_imports", return_value=(None, None, _fake_build(error=err))):
+        th = auth.token_health(force=True)
+    assert th["valid"] is True and "rate-limiting" in th["note"]

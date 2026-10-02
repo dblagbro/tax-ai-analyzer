@@ -175,7 +175,14 @@ def token_health(max_age_s: int = 60, force: bool = False) -> dict:
                     result = {"has_token": True, "valid": True, "error": "",
                               "email": str(prof.get("emailAddress", ""))}
                 except Exception as e:
-                    why = str(e)[:200]
+                    from app.importers.gmail.fetch import _is_quota_error
+                    if _is_quota_error(e):
+                        # Being rate-limited proves the token is accepted.
+                        why = ""
+                        result = {"has_token": True, "valid": True,
+                                  "error": "", "note": "Gmail is rate-limiting requests right now (temporary)"}
+                    else:
+                        why = str(e)[:200]
             if why:
                 hint = " — Google expired the refresh token; reconnect Gmail" if "invalid_grant" in why else ""
                 result = {"has_token": True, "valid": False, "error": f"{why}{hint}"}
