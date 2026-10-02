@@ -53,23 +53,20 @@ def test_callback_without_queue_starts_nothing(tmp_path):
     assert "started automatically" not in r.get_data(as_text=True)
 
 
-def test_effective_redirect_uri_prefers_registered():
+def test_effective_redirect_uri_is_browsing_host_unless_overridden():
     from app.routes.importers import import_gmail as ig
-    reg = ["https://voipguru.org/tax-ai-analyzer/import/gmail/auth/callback"]
-    with patch.object(ig, "_registered_redirect_uris", return_value=reg):
-        # browsing on www (the only host reachable inside the LAN) → still tell Google the registered URI
-        assert ig._effective_redirect_uri(
-            "https://www.voipguru.org/tax-ai-analyzer/import/gmail/auth/callback") == reg[0]
-        assert ig._effective_redirect_uri(reg[0]) == reg[0]
-        # a registered URI for a different path is not substituted
-        assert ig._effective_redirect_uri("https://www.voipguru.org/other") == "https://www.voipguru.org/other"
-    with patch.object(ig, "_registered_redirect_uris", return_value=[]):
-        assert ig._effective_redirect_uri("https://x/y") == "https://x/y"
+    www = "https://www.voipguru.org/tax-ai-analyzer/import/gmail/auth/callback"
+    # credentials.json may list a stale URI — it must NOT be substituted
+    with patch.object(ig, "_registered_redirect_uris", return_value=["https://voipguru.org/tax-ai-analyzer/import/gmail/auth/callback"]), \
+         patch.object(ig.db, "get_setting", return_value=""):
+        assert ig._effective_redirect_uri(www) == www
+    with patch.object(ig.db, "get_setting", return_value="https://example.org/cb"):
+        assert ig._effective_redirect_uri(www) == "https://example.org/cb"
 
 
-def test_callback_restores_pkce_verifier_and_uses_registered_uri(tmp_path):
+def test_callback_restores_pkce_verifier_and_uses_browsing_host_uri(tmp_path):
     from app.routes.importers import import_gmail as ig
-    reg = "https://voipguru.org/tax-ai-analyzer/import/gmail/auth/callback"
+    reg = "http://localhost/tax-ai-analyzer/import/gmail/auth/callback"   # test client's host
     creds = MagicMock(token="t", refresh_token="r", token_uri="u", client_id="c", client_secret="s", scopes=["x"])
     flow = MagicMock(credentials=creds)
     seen = {}
@@ -81,7 +78,6 @@ def test_callback_restores_pkce_verifier_and_uses_registered_uri(tmp_path):
     with c.session_transaction() as s:
         s["gmail_oauth_verifier"] = "VERIFIER123"
     with patch.object(ig, "_make_flow", side_effect=make_flow), \
-         patch.object(ig, "_registered_redirect_uris", return_value=[reg]), \
          patch.object(ig, "GMAIL_TOKEN_FILE", str(tmp_path / "t.json")), \
          patch.object(ig.db, "set_setting", side_effect=lambda k, v: store.__setitem__(k, v)), \
          patch.object(ig.db, "get_setting", side_effect=lambda k, *a: store.get(k, "")), \
@@ -89,6 +85,7 @@ def test_callback_restores_pkce_verifier_and_uses_registered_uri(tmp_path):
          patch.object(ig, "_start_gmail_job", return_value=1):
         r = c.get("/tax-ai-analyzer/import/gmail/auth/callback?code=abc&state=xyz")
     assert r.status_code == 200
-    assert seen["redirect_uri"] == reg
+    assert seen["redirect_uri"].endswith("/tax-ai-analyzer/import/gmail/auth/callback")
+    assert "localhost" in seen["redirect_uri"]                 # the host being browsed
     assert flow.code_verifier == "VERIFIER123"
-    assert flow.fetch_token.call_args.kwargs["authorization_response"] == reg + "?code=abc&state=xyz"
+    assert flow.fetch_token.call_args.kwargs["authorization_response"] == seen["redirect_uri"] + "?code=abc&state=xyz"

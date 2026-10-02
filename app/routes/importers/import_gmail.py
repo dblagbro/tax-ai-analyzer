@@ -128,28 +128,22 @@ def _registered_redirect_uris() -> list:
 
 
 def _effective_redirect_uri(callback_url: str) -> str:
-    """The redirect URI to give Google for BOTH the consent request and the
-    token exchange.
+    """The redirect URI given to Google for the consent request AND the token
+    exchange: the callback on the host the user is browsing.
 
-    Google only accepts a URI registered on the OAuth client. This client has
-    https://voipguru.org/… registered, but inside the LAN only
-    https://www.voipguru.org/… is reachable, so the URL derived from the
-    browsing host is not registered. Use the registered URI with the same
-    path instead. After consent Google sends the browser to the registered
-    host; if that host is unreachable from where the user sits, changing the
-    host in the address bar to the one they started on completes the flow —
-    the callback route below accepts it on any host because it presents the
-    same registered URI when exchanging the code.
+    2026-10-01 lesson: do NOT substitute the redirect_uris listed in
+    credentials.json. That file is a snapshot from the day it was downloaded;
+    the URIs actually registered in the Google Cloud console were edited
+    afterwards (www added, apex removed), so trusting the file produced
+    "Error 400: redirect_uri_mismatch". The browsing-host callback is what
+    worked in March. An explicit override is available through the
+    gmail_redirect_uri setting for deployments that need one.
     """
-    from urllib.parse import urlparse
-    registered = _registered_redirect_uris()
-    if not registered or callback_url in registered:
-        return callback_url
-    path = urlparse(callback_url).path
-    for uri in registered:
-        if urlparse(uri).path == path:
-            return uri
-    return callback_url
+    try:
+        override = (db.get_setting("gmail_redirect_uri") or "").strip()
+    except Exception:
+        override = ""
+    return override or callback_url
 
 
 @bp.route(URL_PREFIX + "/import/gmail/auth")
