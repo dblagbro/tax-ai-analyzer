@@ -92,6 +92,13 @@ def main() -> int:
     with open(man, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
 
+    # names a person has already filed, renamed or set aside by hand — never re-copy them
+    skip_path = os.path.join(year_dir, ".filed_skip")
+    skip = set()
+    if os.path.isfile(skip_path):
+        with open(skip_path, encoding="utf-8") as f:
+            skip = {l.strip() for l in f if l.strip()}
+
     copied = present = wrong_year = missing = 0
     counts: dict[str, int] = {}
     index = []
@@ -101,6 +108,8 @@ def main() -> int:
         if fname in seen_files:
             continue
         seen_files.add(fname)
+        if fname in skip:
+            continue
         d = email_date(r["email_date"]) or email_date(fname)
         if d[:4] != a.year:
             wrong_year += 1
