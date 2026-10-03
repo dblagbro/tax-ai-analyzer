@@ -110,6 +110,11 @@ def main() -> int:
         seen_files.add(fname)
         if fname in skip:
             continue
+        # never file other people's affairs that pass through Devin's mailbox:
+        # David Raven / RobinHood Properties (incl. bookkeeper Merisa/Marissa) and Philwold (family)
+        if re.search(r"raven|robin ?hood|merisa|marissa|philwold|plwd|leisure.?lake",
+                     " ".join([fname, r.get("sender", ""), r.get("subject", "")]), re.I):
+            continue
         d = email_date(r["email_date"]) or email_date(fname)
         if d[:4] != a.year:
             wrong_year += 1
